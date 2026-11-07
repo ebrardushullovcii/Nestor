@@ -49,7 +49,8 @@ export async function collectRenderedInventory(input: {
     pagesRead++;
     visited.add(url);
     pending.delete(url);
-    for (const next of inventory.next)
+    // Directory sections are indexes read for their own postings, like pages.
+    for (const next of [...inventory.next, ...inventory.directories])
       if (!visited.has(next) && input.allowUrl(next)) pending.add(next);
     const fresh = inventory.cards.filter((card) => !cards.has(card.url));
     for (const card of inventory.cards) cards.set(card.url, card);

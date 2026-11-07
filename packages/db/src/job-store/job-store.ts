@@ -54,6 +54,10 @@ import {
   migrateHideOwners,
 } from "./fit";
 import { importLegacyWorkspace } from "./legacy-workspace";
+import {
+  mergeSamePostings,
+  type SamePostingMergeReport,
+} from "./same-postings";
 
 export { createProfileStore, type ProfileStore } from "./profile-store";
 export {
@@ -66,6 +70,7 @@ export { createSearchSourcesStore } from "./search-sources";
 export { createTrackerStore, type TrackerStore } from "./tracker";
 export { createHomeStore, type HomeStore } from "./home";
 export { createActivityStore, type ActivityStore } from "./activity";
+export type { SamePostingMergeReport } from "./same-postings";
 export {
   createResumeStore,
   ResumeChangedError,
@@ -89,6 +94,12 @@ export interface JobStore {
     searchId: string | null;
     jobs: readonly FoundJob[];
   }): SaveFoundJobsResult;
+  /**
+   * Joins saved jobs that are one posting seen on several boards, moving
+   * their applications, tracker entries, resumes and sightings to one job.
+   * Run once at startup; safe to run again.
+   */
+  mergeSamePostings(): SamePostingMergeReport;
   setFit(updates: readonly JobFitUpdate[]): void;
   syncFitContext(fingerprint: string): boolean;
   fitCounts(): { checking: number; rechecking: number };
@@ -374,6 +385,20 @@ export function openJobStore(
           alreadySaved: alreadySaved ?? [],
           ids: byInput,
         };
+      });
+    },
+
+    mergeSamePostings() {
+      return transaction(() => {
+        const report = mergeSamePostings(sql);
+        if (report.merged.length)
+          notify({
+            cause: "found",
+            stages: ["found", "hidden", "shortlisted", "resume", "applied"],
+            ids: null,
+            searchId: null,
+          });
+        return report;
       });
     },
 

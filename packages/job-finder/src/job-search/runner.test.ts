@@ -2074,3 +2074,77 @@ test("queued browser collection starts when the only browser lane frees", async 
       .rows.every((row) => !row.message?.includes("HTTP did not finish")),
   ).toBe(true);
 });
+
+test("an index the listing reader finds is collected for its postings, in the browser when HTTP cannot, not read as a vacancy", async () => {
+  const { runner, engine, store, context } = setup();
+  context.sources = [context.sources[0]!];
+  const index = "https://one.example/categories/backend";
+  const posting = (slug: string): ListingCard => ({
+    url: `https://one.example/jobs/${slug}`,
+    title: `Backend Engineer ${slug}`,
+    text: `Backend Engineer ${slug} at Real Employer`,
+    cardFingerprint: `one:${slug}`,
+    sourceId: "one",
+    sourceLabel: "one",
+  });
+  engine.collectSource.mockImplementation(({ target, lane }) => {
+    if (target.startingUrl === index)
+      return Promise.resolve(
+        lane === "http"
+          ? {
+              cards: [],
+              complete: false,
+              requiresBrowser: true,
+              pagesRead: 1,
+              notes: ["The index needs the browser."],
+            }
+          : {
+              cards: [posting("a"), posting("b")],
+              complete: true,
+              pagesRead: 1,
+              notes: ["Saved from the page's data."],
+            },
+      );
+    return Promise.resolve({
+      cards: [{ ...posting("index"), url: index, title: "Backend Jobs" }],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    });
+  });
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards
+        .filter((card) => card.url !== index)
+        .map((card) => ({ ...found(card), sourceJobId: card.url })),
+      failures: [],
+      ...(cards.some((card) => card.url === index) ? { indexes: [index] } : {}),
+    }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(
+    engine.collectSource.mock.calls
+      .filter(([input]) => input.target.startingUrl === index)
+      .map(([input]) => input.lane),
+  ).toEqual(["http", "browser"]);
+  expect(
+    engine.readListings.mock.calls.flatMap(([input]) =>
+      input.cards.map((card) => card.url),
+    ),
+  ).toEqual(
+    expect.arrayContaining([
+      index,
+      "https://one.example/jobs/a",
+      "https://one.example/jobs/b",
+    ]),
+  );
+  expect(
+    store
+      .listJobs({ stage: "found" })
+      .rows.map((row) => row.title)
+      .sort(),
+  ).toEqual(["Backend Engineer a", "Backend Engineer b"]);
+  const [row] = createSearchSourcesStore(store).list({}).rows;
+  expect(row).toMatchObject({ state: "done", failedReads: 0, cards: 3 });
+});

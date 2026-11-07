@@ -624,6 +624,29 @@ test("collects all observed pages without AI, ignoring editorial links and prese
   expect(readPage).toHaveBeenCalledTimes(2);
 });
 
+test("reads a category section's own page for its postings and never keeps the category as a vacancy", async () => {
+  const job = (slug: string, title: string, employer: string) =>
+    `<li class="job"><a href="/remote-jobs/${slug}"><h3>${title}</h3><p class="company">${employer}</p><span>Remote</span></a></li>`;
+  const pages: Record<string, string> = {
+    "https://board.example/": `<ul><li class="category"><h2><a href="/categories/design">Design Jobs</a> Latest post 1 day ago</h2><ul>${job("acme-designer", "Product Designer", "Acme")}${job("beta-ux", "UX Designer", "Beta")}</ul><a href="/categories/design">View all 3 jobs</a></li></ul>`,
+    "https://board.example/categories/design": `<ul>${job("acme-designer", "Product Designer", "Acme")}${job("beta-ux", "UX Designer", "Beta")}${job("gamma-ui", "UI Designer", "Gamma")}</ul>`,
+  };
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({ finalUrl: url, html: pages[url] ?? "" }),
+  );
+  const inventory = await collectSource({ source, readPage });
+  expect(inventory.cards.map((card) => card.url).sort()).toEqual([
+    "https://board.example/remote-jobs/acme-designer",
+    "https://board.example/remote-jobs/beta-ux",
+    "https://board.example/remote-jobs/gamma-ui",
+  ]);
+  expect(readPage.mock.calls.map(([url]) => url)).toEqual([
+    "https://board.example/",
+    "https://board.example/categories/design",
+  ]);
+  expect(inventory.complete).toBe(true);
+});
+
 test("screens titles once, refreshes only named saved postings and skips unchanged saved cards", async () => {
   const cards = [
     card("Data Analyst"),
@@ -1774,4 +1797,42 @@ test("missing title/company parses and a different heading still reach the model
   expect(result.jobs[0]?.description).toContain(middle);
   expect(result.jobs[0]?.description).toContain("The last requirement");
   expect(chatWithTools).toHaveBeenCalledOnce();
+});
+
+test("a page the reader calls an index of vacancies is returned for collection, not saved or failed", async () => {
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve({
+      content: JSON.stringify({
+        jobs: [
+          {
+            id: 0,
+            title: "",
+            company: "",
+            location: "",
+            workModes: [],
+            sourceJobId: null,
+            employmentType: null,
+            seniority: null,
+            salaryText: null,
+            isListing: false,
+            index: true,
+          },
+        ],
+      }),
+    }),
+  );
+  const index = card("DevOps and Sysadmin Jobs");
+  const result = await readListings({
+    cards: [index],
+    client: { chatWithTools },
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: "<main><h1>DevOps and Sysadmin Jobs</h1><p>Latest remote DevOps postings from many employers, each with its own page.</p></main>",
+      }),
+  });
+  expect(result).toEqual({ jobs: [], failures: [], indexes: [index.url] });
+  expect(chatWithTools.mock.calls[0]?.[0][0]?.content).toContain(
+    "When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true",
+  );
 });

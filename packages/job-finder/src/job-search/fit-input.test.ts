@@ -125,3 +125,24 @@ test("changed resume or certificate rejudges fit even when skills were parsed; c
     }),
   ).not.toBe(before);
 });
+
+test("saved eligibility answers are fit facts: changing one judges saved jobs again", () => {
+  const authorized = {
+    ...context,
+    savedAnswers: [
+      {
+        question: "Are you legally authorized to work in the United States?",
+        answer: "Yes",
+      },
+    ],
+  };
+  expect(fitContextFingerprint(authorized)).not.toBe(
+    fitContextFingerprint(context),
+  );
+  expect(fitContextFingerprint(authorized)).not.toBe(
+    fitContextFingerprint({
+      ...authorized,
+      savedAnswers: [{ ...authorized.savedAnswers[0]!, answer: "No" }],
+    }),
+  );
+});

@@ -69,11 +69,134 @@ function isSpecificApplyUrl(url: string): boolean {
   }
 }
 
+/** Our own stand-ins for an unknown employer or title; they name nobody. */
+const UNSTATED = new Set([
+  "company not stated",
+  "company not stated on card",
+  "title not stated",
+]);
+
+/**
+ * The prefix every role key of one employer and title shares. A role key is
+ * this prefix plus the job id, so one role can name several saved jobs and a
+ * key range finds them all.
+ */
+export function rolePrefix(company: string, title: string): string | null {
+  const employer = normalizeText(company);
+  const role = normalizeText(title);
+  if (!employer || !role || UNSTATED.has(employer) || UNSTATED.has(role))
+    return null;
+  return `role:${employer}|${role}|`;
+}
+
+/** The end of a role prefix's key range: "|" is followed by "}". */
+export const roleRangeEnd = (prefix: string) => `${prefix.slice(0, -1)}}`;
+
+/** One host within the other: "al.linkedin.com" and "www.linkedin.com" are one site. */
+function sameHostSite(left: string, right: string): boolean {
+  try {
+    const [a, b] = [left, right].map((url) =>
+      new URL(url).hostname.toLowerCase().replace(/^www\./u, ""),
+    ) as [string, string];
+    return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Where a board sends the person to apply when that is somewhere else: the
+ * employer's or its applicant system's own form. A board's own sign-in or
+ * apply page is not an employer target.
+ */
+export function employerApplyTarget(
+  listingUrl: string,
+  applyUrl: string | null | undefined,
+): string | null {
+  if (!applyUrl || !isSpecificApplyUrl(applyUrl)) return null;
+  return sameHostSite(listingUrl, applyUrl) ? null : normalizeUrl(applyUrl);
+}
+
+/** Two postings with different employer targets are different postings. */
+export function targetsConflict(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  if (!left.size || !right.size) return false;
+  for (const target of left) if (right.has(target)) return false;
+  return true;
+}
+
+/**
+ * The board a listing URL belongs to, across its country and "www" hosts:
+ * "al.linkedin.com" and "nl.linkedin.com" are one board, where two listings
+ * with one title are two openings.
+ */
+export function boardOf(url: string): string {
+  try {
+    const labels = new URL(url).hostname
+      .toLowerCase()
+      .replace(/^www\./u, "")
+      .split(".");
+    return (labels.length >= 3 ? labels.slice(1) : labels).join(".");
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+/** A saved job's boards and employer apply targets, from every sighting. */
+export function savedPostingFacts(
+  sql: Statements,
+  id: number,
+): { boards: Set<string>; targets: Set<string> } {
+  const rows = sql(
+    `SELECT url, apply_url FROM job_sightings WHERE job_id = ?
+     UNION ALL SELECT url, apply_url FROM jobs WHERE id = ?`,
+  ).all(id, id) as { url: string; apply_url: string | null }[];
+  const boards = new Set<string>();
+  const targets = new Set<string>();
+  for (const row of rows) {
+    boards.add(boardOf(row.url));
+    const target = employerApplyTarget(row.url, row.apply_url);
+    if (target) targets.add(target);
+  }
+  return { boards, targets };
+}
+
+/**
+ * Saved jobs with this employer and title that may be the same posting seen
+ * on another board: none of them is on `boards` and none applies somewhere
+ * other than `targets`. Exactly one candidate is that posting; several are
+ * separate openings that share a title, and stay apart.
+ */
+export function samePostingCandidates(
+  sql: Statements,
+  prefix: string,
+  boards: ReadonlySet<string>,
+  targets: ReadonlySet<string>,
+  except?: number,
+): number[] {
+  const ids = (
+    sql(
+      "SELECT DISTINCT job_id FROM job_keys WHERE key >= ? AND key < ? ORDER BY job_id",
+    ).all(prefix, roleRangeEnd(prefix)) as { job_id: number }[]
+  ).map((row) => row.job_id);
+  return ids.filter((id) => {
+    if (id === except) return false;
+    const saved = savedPostingFacts(sql, id);
+    for (const board of boards) if (saved.boards.has(board)) return false;
+    return !targetsConflict(saved.targets, targets);
+  });
+}
+
 interface JobKeys {
   /** Each one alone proves the same job, strongest first. */
   strong: string[];
   /** Same title, employer and place: the same job only across sites. */
   facts: string | null;
+  /** Same employer and title on another board, decided with its apply target. */
+  role: string | null;
+  target: string | null;
   site: string;
 }
 
@@ -97,6 +220,8 @@ function keysOf(job: FoundJob): JobKeys {
       title && company && location
         ? `facts:${title}|${company}|${location}`
         : null,
+    role: rolePrefix(job.company, job.title),
+    target: employerApplyTarget(job.url, job.applyUrl),
     site: siteOf(job.url),
   };
 }
@@ -131,6 +256,9 @@ export function writeFoundJobs(
   );
   const sameSite = sql(
     "SELECT 1 FROM job_sightings WHERE job_id = ? AND site = ? LIMIT 1",
+  );
+  const jobMatch = sql(
+    "SELECT id AS job_id, stage, found_by FROM jobs WHERE id = ?",
   );
   const addKey = sql(
     "INSERT OR IGNORE INTO job_keys (key, job_id) VALUES (?, ?)",
@@ -187,10 +315,26 @@ export function writeFoundJobs(
       match = findKey.get(key) as KeyMatch | undefined;
       if (match) break;
     }
+    // Facts and role matches join another board's sighting of the posting.
+    // That board's page never rewrites the saved listing's own facts.
+    let otherBoard = false;
     if (!match && keys.facts) {
       const candidate = findKey.get(keys.facts) as KeyMatch | undefined;
       if (candidate && !sameSite.get(candidate.job_id, keys.site)) {
         match = candidate;
+        otherBoard = true;
+      }
+    }
+    if (!match && keys.role) {
+      const candidates = samePostingCandidates(
+        sql,
+        keys.role,
+        new Set([boardOf(job.url)]),
+        new Set(keys.target ? [keys.target] : []),
+      );
+      if (candidates.length === 1) {
+        match = jobMatch.get(candidates[0]!) as KeyMatch;
+        otherBoard = true;
       }
     }
 
@@ -249,8 +393,17 @@ export function writeFoundJobs(
     );
     for (const key of keys.strong) addKey.run(key, id);
     if (keys.facts) addKey.run(keys.facts, id);
+    if (keys.role && (!match || !otherBoard)) {
+      // Its own page names the role now; another board's wording joins it
+      // only through that board's sighting.
+      if (match && fullRead)
+        sql(
+          "DELETE FROM job_keys WHERE job_id=? AND key >= 'role:' AND key < 'role;'",
+        ).run(id);
+      addKey.run(`${keys.role}${id}`, id);
+    }
     if (match) {
-      if (fullRead) {
+      if (fullRead && !otherBoard) {
         const previous = oldListing.get(id) as {
           url: string;
           apply_url: string | null;

@@ -31,7 +31,7 @@ Each line names the symbol or file to check before changing the behavior. If the
 
 ### Discovery
 
-- Repeated discovery merges jobs by normalized URL or source identity and preserves their stage; title, company and location may merge sightings across sites (`job-store/found-jobs.ts`).
+- Repeated discovery merges jobs by normalized URL or source identity and preserves their stage; title, company and location may merge sightings across sites, and so may employer and title alone when the listing is on a board none of the saved job's sightings is on, no two employer apply targets differ, and exactly one saved job qualifies (`job-store/found-jobs.ts`). Another board's sighting never rewrites the saved listing's facts. `JobStore.mergeSamePostings()` joins duplicates saved before that rule, moving applications, tracker entries, resumes and sightings to one job; it runs at desktop startup and leaves a pair apart when both jobs have their own one-per-job record (`job-store/same-postings.ts`).
 - Page actions use the current observed refs and reject a changed page signature; raw selectors are not a substitute (`page-tools.ts`).
 - Apply and source-debug prefer the site's referenced draft instruction, then its referenced validated instruction (`resolveActiveSourceInstructionArtifact`); search prefers the referenced validated instruction, then the draft (`job-search/engine.ts`).
 - A source check that fails verification keeps the referenced validated instruction and saves its new guidance as a draft (`preserveExistingValidatedInstruction` in `workspace-source-debug-workflow.ts`).

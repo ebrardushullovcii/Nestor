@@ -10,6 +10,7 @@ import {
 import {
   readSavedApplicationAnswers,
   readSavedCountryOptionFallbacks,
+  readSavedFitAnswers,
 } from "@nestor/db/applications";
 import { jobSiteTarget } from "@nestor/contracts";
 import type { BrowserSessionState } from "@nestor/contracts";
@@ -468,6 +469,7 @@ async function createJobFinderRuntime(
               store,
               profile.currentCountry,
             ),
+            savedAnswers: readSavedFitAnswers(store),
             browserPermissions: browserAgentPermissionsOf(settings),
             readIntendedAccountEmail: async () =>
               intendedAccountEmail(await repository.getProfile()),
