@@ -17,3 +17,19 @@ export function sendObserverSource(
     bound: boundToken,
   });
 }
+
+/** The observer carries the complete pre-press text, including long forms. */
+export function parseSendObserverNotice(
+  json: string,
+): { confirmationBefore: string[] } | null {
+  const value: unknown = JSON.parse(json);
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("confirmationBefore" in value) ||
+    !Array.isArray(value.confirmationBefore) ||
+    !value.confirmationBefore.every((item: unknown) => typeof item === "string")
+  )
+    return null;
+  return { confirmationBefore: value.confirmationBefore };
+}

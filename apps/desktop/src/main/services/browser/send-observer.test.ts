@@ -1,7 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
-import { sendObserverSource } from "./send-observer";
+import { parseSendObserverNotice, sendObserverSource } from "./send-observer";
 
 let browser: Browser;
 beforeAll(async () => {
@@ -39,6 +39,20 @@ test("on a prepared form, the person's own press of its send is reported", async
   await page.click("button");
   expect(logged.some((entry) => entry.startsWith("bound{"))).toBe(true);
   expect(logged).not.toContain("unbound");
+  await page.close();
+});
+
+test("a real application page longer than 160 characters reaches the native send recorder", async () => {
+  const copy = "Job description and application instructions. ".repeat(60);
+  const { page, logged } = await observed(
+    `<main>${copy}${roleForm}</main>`,
+    true,
+  );
+  await page.click("button");
+  const notice = logged.find((entry) => entry.startsWith("bound{"));
+  const parsed = parseSendObserverNotice(notice!.slice("bound".length));
+  expect(parsed?.confirmationBefore[0]).toContain(copy.trim());
+  expect(parsed!.confirmationBefore[0]!.length).toBeGreaterThan(160);
   await page.close();
 });
 

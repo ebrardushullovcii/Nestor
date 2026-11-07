@@ -76,6 +76,18 @@ export const ApplicationTargetSchema = z
   .strict();
 export type ApplicationTarget = z.infer<typeof ApplicationTargetSchema>;
 export const ApplicationCommandResultSchema = z.boolean();
+export const OpenApplicationResultSchema = z.object({
+  opened: z.boolean(),
+  retained: z.boolean(),
+});
+export type OpenApplicationResult = z.infer<typeof OpenApplicationResultSchema>;
+/** The person's report only; this command never sends an application. */
+export const ReportApplicationSendInputSchema = z
+  .object({ id: ApplicationIdSchema, sent: z.boolean() })
+  .strict();
+export type ReportApplicationSendInput = z.infer<
+  typeof ReportApplicationSendInputSchema
+>;
 /** The person checked the site after a send the app could not confirm. */
 export const ResolveUncertainSendInputSchema = z
   .object({ id: ApplicationIdSchema, sent: z.boolean() })

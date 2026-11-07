@@ -807,8 +807,17 @@ test("the person's own send in their window is kept by the app, so the page movi
     (await browser.readApplicationPageWithPerson("result"))?.sendPressedAt,
   ).toBeUndefined();
   native.personInputAt.set("prepared", Date.now());
+  const observed =
+    vi.fn<Parameters<EmbeddedBrowser["onApplicationSendPressed"]>[0]>();
+  const unsubscribe = browser.onApplicationSendPressed(observed);
   const before = Date.now();
   native.noteBoundSend("prepared");
+  expect(observed.mock.calls[0]?.[0]).toMatchObject({
+    resultId: "result",
+    pageUrl: "https://jobs.example/prepared",
+  });
+  expect(typeof observed.mock.calls[0]?.[0].pressedAt).toBe("string");
+  unsubscribe();
   const pressed = (await browser.readApplicationPageWithPerson("result"))
     ?.sendPressedAt;
   expect(pressed).toBeDefined();

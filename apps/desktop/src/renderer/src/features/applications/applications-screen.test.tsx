@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import type { ApplicationDetails, FoundJob } from "@nestor/contracts";
+import {
+  SubmissionOutcomeRecordSchema,
+  type ApplicationDetails,
+  type FoundJob,
+} from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   createTrackerStore,
@@ -79,7 +83,9 @@ beforeEach(() => {
   const applications = createApplicationStore(store);
   const onChange = (listener: Parameters<JobStore["onChange"]>[0]) =>
     store.onChange(listener);
-  openApplication = vi.fn(() => Promise.resolve(true));
+  openApplication = vi.fn(() =>
+    Promise.resolve({ opened: true, retained: true }),
+  );
   receipt = null;
   Object.assign(window, {
     nestor: {
@@ -136,6 +142,15 @@ beforeEach(() => {
           );
         },
         openApplication,
+        retryApplication: ({ id }: { id: number }) =>
+          Promise.resolve(
+            applications.retryPreparation(
+              id,
+              applications.getApplication(id)!.attempt,
+            ),
+          ),
+        reportApplicationSend: vi.fn(() => Promise.resolve(true)),
+        sendApplication: vi.fn(() => Promise.resolve(false)),
         applyJobs: (input: Parameters<typeof applications.applyJobs>[0]) =>
           Promise.resolve(applications.applyJobs(input)),
         stopApplication: ({ id }: { id: number }) =>
@@ -173,6 +188,208 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
+  it.each([
+    {
+      recorded: "submitted state",
+      state: "submitted",
+      timestamp: false,
+      confirmedReceipt: false,
+    },
+    {
+      recorded: "submitted timestamp",
+      state: "ready",
+      timestamp: true,
+      confirmedReceipt: false,
+    },
+    {
+      recorded: "confirmed receipt on a Ready row",
+      state: "ready",
+      timestamp: false,
+      confirmedReceipt: true,
+    },
+    {
+      recorded: "confirmed receipt on an uncertain row",
+      state: "uncertain",
+      timestamp: false,
+      confirmedReceipt: true,
+    },
+  ])(
+    "never offers Send or outcome reports for $recorded",
+    async ({ state, timestamp, confirmedReceipt }) => {
+      applyWrites(
+        ids[1]!,
+        `state='${state}',submitted_at=${timestamp ? "updated_at" : "NULL"}`,
+      );
+      const row = createApplicationStore(store).forJobs([ids[1]!])[0]!;
+      if (confirmedReceipt)
+        receipt = SubmissionOutcomeRecordSchema.parse({
+          id: "confirmed",
+          preflightId: "confirmed",
+          idempotencyKey: "confirmed",
+          authorityEnvelopeId: "confirmed",
+          authorityRevision: 1,
+          runId: `application_run_${row.id}`,
+          jobId: String(row.jobId),
+          resultId: `application_${row.id}_attempt_${row.attempt}`,
+          applicationRecordId: `application_${row.id}`,
+          outcome: "submitted",
+          attemptedAt: row.updatedAt,
+          verifiedAt: row.updatedAt,
+          evidence: [
+            {
+              id: "confirmation",
+              kind: "operator_confirmation",
+              observedAt: row.updatedAt,
+              destination: {
+                origin: "https://board.example.test",
+                safePath: `/jobs/${row.jobId}`,
+              },
+              artifactRefId: null,
+              summary: "The person confirmed that this application was sent.",
+            },
+          ],
+          retry: { eligible: false, blockReason: "submission_confirmed" },
+        });
+      const list = renderScreen();
+      const selected = await within(list).findByRole("button", {
+        name: /^Northfield 2,/,
+      });
+      fireEvent.click(selected);
+      const detail = await screen.findByRole("region", {
+        name: "Application to Northfield 2",
+      });
+      await within(detail).findByText(
+        confirmedReceipt ? "What was sent" : "What Apply filled in",
+      );
+      expect(selected.getAttribute("data-selected")).toBe("true");
+      expect(
+        within(detail).queryByRole("button", { name: /^Send$/ }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", {
+          name: "It went through",
+          hidden: true,
+        }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", {
+          name: "It didn’t go through",
+          hidden: true,
+        }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", { name: "Stop", hidden: true }),
+      ).toBeNull();
+    },
+  );
+
+  it("keeps Send on an unsent Ready record when its separate tracker stage was manually set to Applied", async () => {
+    applyWrites(ids[1]!, "state='ready'");
+    store
+      .sql(
+        "UPDATE tracker SET status='applied',applied_at=status_at WHERE job_id=?",
+      )
+      .run(ids[1]!);
+    const list = renderScreen();
+    const selected = await within(list).findByRole("button", {
+      name: /^Northfield 2,/,
+    });
+    fireEvent.click(selected);
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    await within(detail).findByRole("button", { name: /^Send$/ });
+    expect(selected.getAttribute("data-selected")).toBe("true");
+    expect(
+      within(detail).getByRole("combobox", { name: "Status" }),
+    ).toBeTruthy();
+    expect(createApplicationStore(store).forJobs([ids[1]!])[0]).toMatchObject({
+      state: "ready",
+      submittedAt: null,
+    });
+    expect(receipt).toBeNull();
+  });
+
+  it.each(["confirm_before_submit", "autonomous_submit"])(
+    "Ready Send in %s uses the send bridge once while busy",
+    async (mode) => {
+      applyWrites(ids[1]!, `state='ready', mode='${mode}'`);
+      let finish!: (sent: boolean) => void;
+      const send = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      Object.assign(window.nestor.jobFinder, { sendApplication: send });
+      const list = renderScreen();
+      fireEvent.click(
+        await within(list).findByRole("button", { name: /^Northfield 2,/ }),
+      );
+      const detail = await screen.findByRole("region", {
+        name: "Application to Northfield 2",
+      });
+      const button = await within(detail).findByRole("button", {
+        name: /^Send$/,
+      });
+      fireEvent.click(button);
+      fireEvent.click(button);
+      expect(send).toHaveBeenCalledOnce();
+      expect(openApplication).not.toHaveBeenCalled();
+      applyWrites(ids[1]!, "state='submitted',submitted_at=updated_at");
+      finish(true);
+      await screen.findByText("Application sent");
+      expect(
+        within(detail).queryByRole("button", { name: /^Send$/ }),
+      ).toBeNull();
+    },
+  );
+
+  it.each(["ready", "stopped", "failed"])(
+    "a person can record %s sent or not sent without opening or sending",
+    async (state) => {
+      applyWrites(ids[1]!, `state='${state}'`);
+      const report = vi.fn(() => Promise.resolve(true));
+      const send = vi.fn();
+      Object.assign(window.nestor.jobFinder, {
+        reportApplicationSend: report,
+        sendApplication: send,
+      });
+      const list = renderScreen();
+      fireEvent.click(
+        await within(list).findByRole("button", { name: /^Northfield 2,/ }),
+      );
+      const detail = await screen.findByRole("region", {
+        name: "Application to Northfield 2",
+      });
+      fireEvent.click(await within(detail).findByText("More actions…"));
+      fireEvent.click(
+        within(detail).getByRole("button", { name: "It went through" }),
+      );
+      await screen.findByText("Moved to Applied");
+      fireEvent.click(
+        within(detail).getByRole("button", { name: "It didn’t go through" }),
+      );
+      await screen.findByText("Marked as not sent");
+      expect(report.mock.calls).toEqual([
+        [
+          {
+            id: createApplicationStore(store).forJobs([ids[1]!])[0]!.id,
+            sent: true,
+          },
+        ],
+        [
+          {
+            id: createApplicationStore(store).forJobs([ids[1]!])[0]!.id,
+            sent: false,
+          },
+        ],
+      ]);
+      expect(send).not.toHaveBeenCalled();
+      expect(openApplication).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps an unfinished note with its application when another row opens", async () => {
     const list = renderScreen();
     fireEvent.click(
@@ -578,10 +795,12 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
 
   it("the person says what the site shows after a send the app could not confirm", async () => {
     applyWrites(ids[1]!, "state = 'uncertain'");
-    const resolveUncertainSend = vi.fn(() => Promise.resolve(true));
-    const openApplication = vi.fn(() => Promise.resolve(true));
+    const reportApplicationSend = vi.fn(() => Promise.resolve(true));
+    const openApplication = vi.fn(() =>
+      Promise.resolve({ opened: true, retained: true }),
+    );
     Object.assign(window.nestor.jobFinder, {
-      resolveUncertainSend,
+      reportApplicationSend,
       openApplication,
     });
     receipt = {
@@ -622,7 +841,7 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     );
     await screen.findByText("Moved to Applied");
     const applications = createApplicationStore(store);
-    expect(resolveUncertainSend).toHaveBeenCalledExactlyOnceWith({
+    expect(reportApplicationSend).toHaveBeenCalledExactlyOnceWith({
       id: applications.forJobs([ids[1]!])[0]!.id,
       sent: true,
     });

@@ -451,6 +451,14 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     options?: ObserveApplicationFormOptions,
   ): Promise<ApplicationFormObservation>;
+  /** A native person-input event on a bound page; records a press, never a receipt. */
+  onApplicationSendPressed?(
+    listener: (press: {
+      resultId: string;
+      pressedAt: string;
+      pageUrl: string;
+    }) => void,
+  ): () => void;
   /**
    * Main-process-only reading and writing hands for the application page this
    * source has open. The runtime keeps the page; the caller gets bounded

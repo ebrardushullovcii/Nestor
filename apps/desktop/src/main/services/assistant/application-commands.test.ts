@@ -59,7 +59,9 @@ const send = vi.fn((id: number, callId?: string) => {
   void callId;
   return Promise.resolve(id < 0);
 });
-const open = vi.fn((id: number) => Promise.resolve(id > 0));
+const open = vi.fn((id: number) =>
+  Promise.resolve({ opened: id > 0, retained: id > 0 }),
+);
 const browser = vi.fn(() => Promise.resolve());
 beforeEach(() => {
   jobs = openJobStore(":memory:");
@@ -306,7 +308,7 @@ it("a model Send reaches the common executor in every mode; Open and Stop use th
   expect(send).toHaveBeenCalledWith(target.id, "provider-sidebar-send-1");
   await tools.find((t) => t.name === "open_application")!.execute(target, ctx);
   expect(open).toHaveBeenCalledWith(target.id);
-  expect(browser).not.toHaveBeenCalled(); // The service owns the exact page (or queues its refill).
+  expect(browser).not.toHaveBeenCalled(); // The service shows the retained page or opens its URL.
   await record(ctx, { ids }, "prepare_and_send");
   await sendTool.execute(target, ctx);
   expect(send).toHaveBeenCalledTimes(3);

@@ -68,7 +68,7 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
     const service = await applicationService();
     for (const application of getApplicationStore().needsYou.details(id)
       ?.applications ?? []) {
-      if (await service.open(application.id)) {
+      if ((await service.open(application.id)).opened) {
         return true;
       }
     }

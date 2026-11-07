@@ -10,6 +10,7 @@ import {
   CircleStop,
   ExternalLink,
   RotateCcw,
+  Send,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -112,8 +113,20 @@ export function ApplicationWork(props: {
 }
 
 function canStopApply(details: ApplicationDetails) {
-  return ["queued", "running", "needs_you", "ready"].includes(
-    details.application.state,
+  return (
+    !isConfirmedSent(details) &&
+    ["queued", "running", "needs_you", "ready"].includes(
+      details.application.state,
+    )
+  );
+}
+
+/** The application record, timestamp and receipt each retain a confirmed send. */
+function isConfirmedSent({ application, receipt }: ApplicationDetails) {
+  return (
+    application.state === "submitted" ||
+    application.submittedAt !== null ||
+    receipt?.outcome === "submitted"
   );
 }
 
@@ -243,12 +256,15 @@ function ApplyActions(props: {
   const { showToast } = useToast();
   const navigate = useNavigate();
   const [busy, setBusy] = useState<
-    "open" | "stop" | "retry" | "sent" | "not_sent" | null
+    "open" | "stop" | "retry" | "send" | "sent" | "not_sent" | null
   >(null);
   const { application, receipt } = props.details;
+  const confirmedSent = isConfirmedSent(props.details);
   const waitingOn = useWaitingTask(application);
   const waiting = waitingOn?.task ?? null;
-  const line = applicationActionLine(props.details, waitingOn);
+  const line = confirmedSent
+    ? null
+    : applicationActionLine(props.details, waitingOn);
   const canOpen = ["ready", "needs_you", "uncertain"].includes(
     application.state,
   );
@@ -257,11 +273,12 @@ function ApplyActions(props: {
   // the person said it was not sent: anything else the guarded send tried
   // keeps its receipt, and trying again could send it twice.
   const canRetry =
-    ["failed", "stopped"].includes(application.state) &&
-    application.submittedAt === null &&
+    ["ready", "needs_you", "failed", "stopped"].includes(application.state) &&
+    !confirmedSent &&
     (receipt === null ||
       (application.state === "stopped" && receipt.outcome === "not_submitted"));
-  const canSettle = application.state === "uncertain";
+  const canSettle = !confirmedSent;
+  const canSend = !confirmedSent && application.state === "ready";
   // A failed run offers both ways on, as its row says ("Try again or apply
   // by hand") and as Shortlisted does.
   const byHand =
@@ -273,7 +290,7 @@ function ApplyActions(props: {
   const settle = async (sent: boolean) => {
     setBusy(sent ? "sent" : "not_sent");
     try {
-      const done = await window.nestor.jobFinder.resolveUncertainSend({
+      const done = await window.nestor.jobFinder.reportApplicationSend({
         id: application.id,
         sent,
       });
@@ -298,14 +315,14 @@ function ApplyActions(props: {
   const retry = async () => {
     setBusy("retry");
     try {
-      const result = await window.nestor.jobFinder.applyJobs({
-        selection: { ids: [application.jobId] },
+      const queued = await window.nestor.jobFinder.retryApplication({
+        id: application.id,
       });
       showToast(
-        result.queued > 0
+        queued
           ? {
               title:
-                application.state === "stopped"
+                application.state !== "failed"
                   ? "Applying again"
                   : "Trying again",
               description:
@@ -314,9 +331,7 @@ function ApplyActions(props: {
           : {
               title: "It couldn't start again",
               description:
-                result.notReady > 0
-                  ? "This job has no ready resume in Shortlisted right now. Once it is written, apply again."
-                  : "It has already moved on.",
+                "Check that this job has a ready resume and has not already been sent.",
               tone: "warning",
             },
       );
@@ -331,24 +346,20 @@ function ApplyActions(props: {
     setBusy(kind);
     try {
       const target = { id: application.id };
-      const done =
+      const opened =
         kind === "open"
           ? await window.nestor.jobFinder.openApplication(target)
-          : await window.nestor.jobFinder.stopApplication(target);
-      const restoring =
-        kind === "open" &&
-        done &&
-        ["queued", "running"].includes(
-          (await window.nestor.jobFinder.getApplicationDetails(target))
-            ?.application.state ?? "",
-        );
+          : null;
+      const done = opened
+        ? opened.opened
+        : await window.nestor.jobFinder.stopApplication(target);
       showToast(
         done
           ? {
               title:
                 kind === "open"
-                  ? restoring
-                    ? "Restoring the form for your review. Restoring it won't send it."
+                  ? !opened?.retained
+                    ? "The earlier page is gone. Opened the application URL."
                     : "Opened the application page"
                   : "Stopped. Apply won't send it.",
             }
@@ -373,18 +384,54 @@ function ApplyActions(props: {
     }
   };
 
+  const send = async () => {
+    setBusy("send");
+    try {
+      await window.nestor.jobFinder.sendApplication({ id: application.id });
+      const next = await window.nestor.jobFinder.getApplicationDetails({
+        id: application.id,
+      });
+      showToast(
+        next?.application.state === "submitted"
+          ? { title: "Application sent", tone: "success" }
+          : {
+              title:
+                next?.application.state === "uncertain"
+                  ? "Send recorded; receipt is unconfirmed"
+                  : "The application has not been confirmed sent",
+              tone: "warning",
+            },
+      );
+    } catch (error) {
+      showToast({ title: describeError(error), tone: "warning" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <>
       {line ? <ActionNeededLine line={line} /> : null}
       <div className="flex flex-wrap gap-2">
-        {canRetry ? (
+        {canSend ? (
+          <Button
+            disabled={busy !== null}
+            onClick={() => void send()}
+            pending={busy === "send"}
+            size="toolbar"
+          >
+            <Send aria-hidden />
+            Send
+          </Button>
+        ) : null}
+        {canRetry && ["failed", "stopped"].includes(application.state) ? (
           <Button
             onClick={() => void retry()}
             pending={busy === "retry"}
             size="toolbar"
           >
             <RotateCcw aria-hidden />
-            {application.state === "stopped" ? "Apply again" : "Try again"}
+            {application.state === "failed" ? "Try again" : "Apply again"}
           </Button>
         ) : null}
         {byHand ? (
@@ -398,7 +445,7 @@ function ApplyActions(props: {
             Apply by hand
           </Button>
         ) : null}
-        {canSettle ? (
+        {canSettle && application.state === "uncertain" ? (
           <>
             <Button
               disabled={busy !== null}
@@ -437,10 +484,12 @@ function ApplyActions(props: {
             onClick={() => void act("open")}
             pending={busy === "open"}
             size="toolbar"
-            variant={waiting ? "outline" : "primary"}
+            variant={waiting || canSend ? "outline" : "primary"}
           >
             <ExternalLink aria-hidden />
-            {canSettle ? "Check site" : "Open application"}
+            {application.state === "uncertain"
+              ? "Check site"
+              : "Open application"}
           </Button>
         ) : null}
         {canStop ? (
@@ -455,6 +504,46 @@ function ApplyActions(props: {
           </Button>
         ) : null}
       </div>
+      {canSettle && application.state !== "uncertain" ? (
+        <Disclosure
+          className="text-sm"
+          contentClassName="flex flex-wrap gap-2 pl-7.5"
+          summary="More actions…"
+        >
+          <Button
+            disabled={busy !== null}
+            onClick={() => void settle(true)}
+            pending={busy === "sent"}
+            size="toolbar"
+            variant="outline"
+          >
+            <Check aria-hidden />
+            It went through
+          </Button>
+          <Button
+            disabled={busy !== null}
+            onClick={() => void settle(false)}
+            pending={busy === "not_sent"}
+            size="toolbar"
+            variant="outline"
+          >
+            <X aria-hidden />
+            It didn’t go through
+          </Button>
+          {canRetry && ["ready", "needs_you"].includes(application.state) ? (
+            <Button
+              disabled={busy !== null}
+              onClick={() => void retry()}
+              pending={busy === "retry"}
+              size="toolbar"
+              variant="ghost"
+            >
+              <RotateCcw aria-hidden />
+              Apply again
+            </Button>
+          ) : null}
+        </Disclosure>
+      ) : null}
     </>
   );
 }

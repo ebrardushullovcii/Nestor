@@ -1364,7 +1364,9 @@ it("says why a Send for me form waits for the person's Send", async () => {
           nextCursor: null,
         }),
       ),
-      openApplication: vi.fn(() => Promise.resolve(true)),
+      openApplication: vi.fn(() =>
+        Promise.resolve({ opened: true, retained: true }),
+      ),
     },
   });
   show();

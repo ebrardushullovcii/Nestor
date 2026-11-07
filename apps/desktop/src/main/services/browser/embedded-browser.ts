@@ -57,7 +57,7 @@ import {
   resolvePageViewBounds,
   type ViewRect,
 } from "./embedded-browser-layout";
-import { sendObserverSource } from "./send-observer";
+import { parseSendObserverNotice, sendObserverSource } from "./send-observer";
 import { alignClientHintHeaders } from "./browser-identity";
 import { BrowserPasswords } from "./browser-passwords";
 import {
@@ -188,6 +188,22 @@ export class EmbeddedBrowser {
    * application" step, a new document without the guard) cannot erase it.
    */
   private readonly personSendPressedAt = new Map<string, number>();
+  private readonly applicationSendListeners = new Set<
+    (press: { resultId: string; pressedAt: string; pageUrl: string }) => void
+  >();
+
+  onApplicationSendPressed(
+    listener: (press: {
+      resultId: string;
+      pressedAt: string;
+      pageUrl: string;
+    }) => void,
+  ): () => void {
+    this.applicationSendListeners.add(listener);
+    return () => {
+      this.applicationSendListeners.delete(listener);
+    };
+  }
   private readonly personSendContext = new Map<
     string,
     {
@@ -249,6 +265,18 @@ export class EmbeddedBrowser {
     if (Date.now() - (this.personInputAt.get(tabId) ?? 0) > 2_000) return;
     this.personSendPressedAt.set(tabId, Date.now());
     this.personSendContext.set(tabId, context);
+    const pageUrl = this.pageMap.get(tabId)?.contents.getURL();
+    if (pageUrl)
+      for (const [resultId, tabs] of this.ownedTabs)
+        if (tabs.has(tabId))
+          for (const listener of this.applicationSendListeners)
+            listener({
+              resultId,
+              pressedAt: new Date(
+                this.personSendPressedAt.get(tabId)!,
+              ).toISOString(),
+              pageUrl,
+            });
   }
 
   private noteUnboundSend(tabId: string): void {
@@ -1721,20 +1749,12 @@ export class EmbeddedBrowser {
             details.message.slice(0, payloadAt),
           );
           if (!frame) return;
-          const payload: unknown = JSON.parse(details.message.slice(payloadAt));
-          if (
-            !payload ||
-            typeof payload !== "object" ||
-            !("confirmationBefore" in payload) ||
-            !Array.isArray(payload.confirmationBefore) ||
-            payload.confirmationBefore.length > 20 ||
-            !payload.confirmationBefore.every(
-              (item: unknown) => typeof item === "string" && item.length <= 160,
-            )
-          )
-            return;
+          const payload = parseSendObserverNotice(
+            details.message.slice(payloadAt),
+          );
+          if (!payload) return;
           this.noteBoundSend(page.id, {
-            confirmationBefore: payload.confirmationBefore as string[],
+            confirmationBefore: payload.confirmationBefore,
             ...frame,
           });
         } catch {

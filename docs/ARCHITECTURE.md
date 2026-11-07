@@ -85,6 +85,14 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 ### Application tracking
 
+- Open shows the retained application page, or opens its URL and explains that
+  the earlier page is gone. It never queues preparation or changes the saved
+  mode. Apply again and Try again explicitly queue preparation in that mode.
+- Ready applications offer Send through the same durable send ledger as the
+  Assistant. A person's own press on a bound prepared page is recorded
+  immediately as uncertain. The person can report sent or not sent from any
+  application that is not confirmed sent; this records their word and time
+  without executing a send, including when no earlier ledger row exists.
 - Manual tracker stages never change apply-run authority, browser outcomes,
   external-write evidence, or submission receipts. Final submission is
   governed only by the typed authority envelope from ADR 0012, which the saved

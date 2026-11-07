@@ -17,6 +17,8 @@ import {
   AnswerNeedsYouInputSchema,
   AnswerNeedsYouResultSchema,
   ResolveUncertainSendInputSchema,
+  ReportApplicationSendInputSchema,
+  OpenApplicationResultSchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import {
@@ -116,8 +118,28 @@ export async function executeApplicationStoreCommand(
         ApplicationTargetSchema.parse(input).id,
         instruction?.callId,
       );
+    case "retry-application":
+      await startJobFinderRuntime();
+      noteExplicitUserStart();
+      return ApplicationCommandResultSchema.parse(
+        (await getApplicationService()).retryPreparation(
+          ApplicationTargetSchema.parse(input).id,
+        ),
+      );
+    case "report-application-send":
     case "resolve-uncertain-send": {
-      const { id, sent } = ResolveUncertainSendInputSchema.parse(input);
+      const { id, sent } = (
+        actionId === "report-application-send"
+          ? ReportApplicationSendInputSchema
+          : ResolveUncertainSendInputSchema
+      ).parse(input);
+      const row = store.getApplication(id);
+      if (
+        !row ||
+        row.state === "submitted" ||
+        (actionId === "resolve-uncertain-send" && row.state !== "uncertain")
+      )
+        return false;
       // A send the app made keeps an authority record, settled with the row.
       // The person's own press, or a send the app closed during, has none.
       const receipt = store.getSubmissionReceipt(id);
@@ -137,9 +159,7 @@ export async function executeApplicationStoreCommand(
       }
       await startJobFinderRuntime();
       return ApplicationCommandResultSchema.parse(
-        await (
-          await getApplicationService()
-        ).resolveUncertainByPerson(id, sent),
+        await (await getApplicationService()).reportSendByPerson(id, sent),
       );
     }
     case "open-application": {
@@ -148,10 +168,7 @@ export async function executeApplicationStoreCommand(
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);
-      // open() focuses the exact retained binding. A true result can also
-      // mean a lost page was queued for refill: never expose the active tab
-      // of some other application while that work runs in the background.
-      return ApplicationCommandResultSchema.parse(opened);
+      return OpenApplicationResultSchema.parse(opened);
     }
     case "list-needs-you":
       return NeedsYouPageSchema.parse(
@@ -173,7 +190,10 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
     "applications-for-jobs",
     "get-application-details",
     "stop-application",
+    "send-application",
+    "retry-application",
     "open-application",
+    "report-application-send",
     "resolve-uncertain-send",
     "list-needs-you",
     "answer-needs-you",
