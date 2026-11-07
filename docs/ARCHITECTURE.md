@@ -83,6 +83,9 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   snapshots each selected target before work starts; source results, queue
   acknowledgement and completion counts commit together. Quit or crash leaves
   the running search resumable at startup; explicit Stop remains stopped.
+  Accepted listing cards also persist before a browser checkpoint returns.
+  Only active screening waves load into memory; leased cards survive a crash
+  and stay stored until the source's complete result is acknowledged.
 - Resume-affecting profile and settings writes invalidate affected approvals
   in the same transaction (`packages/db/src/job-store/profile-effects.ts`).
 

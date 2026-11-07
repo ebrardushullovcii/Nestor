@@ -270,15 +270,18 @@ export async function runConversationTurn(
       stop?: { reason: string; data?: unknown };
       error?: unknown;
     } = {},
-  ): ConversationTurnResult => ({
-    ending,
-    reply: extra.reply ?? null,
-    turnMessages,
-    usage,
-    modelCalls,
-    stop: extra.stop ?? null,
-    error: extra.error ?? null,
-  });
+  ): ConversationTurnResult => {
+    if (!options.contextParts) contextParts.dispose();
+    return {
+      ending,
+      reply: extra.reply ?? null,
+      turnMessages,
+      usage,
+      modelCalls,
+      stop: extra.stop ?? null,
+      error: extra.error ?? null,
+    };
+  };
   const readSteering = async (): Promise<number> => {
     const steering = (await options.takeSteering?.()) ?? [];
     for (const text of steering) {

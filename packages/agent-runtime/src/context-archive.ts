@@ -19,11 +19,11 @@ export const contextTextKey = (text: string): string =>
 export function createContextArchive() {
   const prefixLength = (node: Prefix | null): number => node?.length ?? 0;
   const prefixes = new Map<string, Prefix>();
-  const chunks = new WeakMap<
+  let chunks = new WeakMap<
     AgentLoopMessage,
     { text: string; json: string; key: string }
   >();
-  return (
+  const build = (
     messages: readonly AgentLoopMessage[],
   ): ExactContextText & { key: string } => {
     let prefix: Prefix | null = null;
@@ -80,4 +80,10 @@ export function createContextArchive() {
       },
     };
   };
+  return Object.assign(build, {
+    clear: () => {
+      prefixes.clear();
+      chunks = new WeakMap();
+    },
+  });
 }

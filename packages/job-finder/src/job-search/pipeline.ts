@@ -8,12 +8,9 @@ import { settledState, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 import { concurrency } from "./async";
+import { createSearchSourcesStore } from "@nestor/db/job-store";
 
-/**
- * Quick reads a site while it keeps finding related jobs, and stops early
- * after this many unrelated listings in a row. There is no listing cap: a
- * board that keeps paying off is read on (until Quick's time runs out).
- */
+/** Quick gathers smaller screening waves; acceptance never waits on screening. */
 const QUICK_REVIEW_INTERVAL = 100;
 
 /** Each source keeps ordered waves while other sources and fit advance independently. */
@@ -42,6 +39,7 @@ export function createSearchPipeline(input: {
   ): void;
 }) {
   const { deps, signal, context, settings, sources } = input;
+  const durable = createSearchSourcesStore(deps.store);
   const previouslySaved = new Set<number>();
   const countPreviouslySaved = (ids: readonly number[]) => {
     const before = previouslySaved.size;
@@ -301,8 +299,14 @@ export function createSearchPipeline(input: {
       for (const id of touched) input.settled(sources.get(id)!);
     },
     concurrency(deps.concurrency?.sources, 12),
+    durable.cardQueue(input.searchId),
   );
   return {
+    restore(source: SourceWork) {
+      for (const url of durable.cardUrls(input.searchId, source.target.id))
+        source.urls.add(url);
+      source.row.cards = source.urls.size;
+    },
     async accept(source: SourceWork, cards: readonly ListingCard[]) {
       const quick = settings.depth === "quick" && !source.full;
       const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
@@ -326,11 +330,8 @@ export function createSearchPipeline(input: {
         source.row.cards += fresh.length;
         input.write(source);
         await waves.push(fresh);
-        if (
-          quick &&
-          source.row.cards - source.screened >= QUICK_REVIEW_INTERVAL
-        )
-          await waves.checkpoint(source.target.id);
+        // Acceptance is durable. Screening is queue work, never a browser
+        // tool's silent connection, in either search depth.
       }
     },
     drain: () => waves.drain(),

@@ -1,6 +1,7 @@
 import {
   JobDiscoveryTargetSchema,
   type JobDiscoveryTarget,
+  type ListingCard,
   JobSearchSourceQuerySchema,
   type JobSearchSourceQuery,
   type JobSearchSourcePage,
@@ -41,6 +42,16 @@ CREATE TABLE IF NOT EXISTS search_source_queue (
   completed INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(search_id, source_id)
 );
+CREATE TABLE IF NOT EXISTS search_listing_queue (
+  id INTEGER PRIMARY KEY,
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  card_json TEXT NOT NULL,
+  leased INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(search_id, source_id, url)
+);
+CREATE INDEX IF NOT EXISTS search_listing_queue_source ON search_listing_queue(search_id, source_id, id);
 CREATE TRIGGER IF NOT EXISTS search_sources_finished AFTER UPDATE OF state ON searches
 WHEN NEW.state IN ('stopped', 'failed') BEGIN
   UPDATE search_sources SET state = 'stopped', phase = NULL WHERE search_id = NEW.id AND state IN ('waiting', 'searching');
@@ -69,6 +80,9 @@ export function createSearchSourcesStore(store: JobStore) {
       );
     },
     settle(searchId: string, sourceId: string): boolean {
+      sql(
+        "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=?",
+      ).run(searchId, sourceId);
       return (
         Number(
           sql(`UPDATE search_source_queue SET completed=1
@@ -94,6 +108,72 @@ export function createSearchSourcesStore(store: JobStore) {
         target: JobDiscoveryTargetSchema.parse(JSON.parse(row.target_json)),
         full: Boolean(row.full),
       }));
+    },
+    cardUrls(searchId: string, sourceId: string): string[] {
+      return (
+        sql(
+          "SELECT url FROM search_listing_queue WHERE search_id=? AND source_id=? ORDER BY id",
+        ).all(searchId, sourceId) as { url: string }[]
+      ).map((row) => row.url);
+    },
+    cardQueue(searchId: string) {
+      // A new process owns no old in-flight wave. Its exact cards remain on
+      // disk until the whole source result is acknowledged atomically.
+      sql("UPDATE search_listing_queue SET leased=0 WHERE search_id=?").run(
+        searchId,
+      );
+      const pending = new Map(
+        (
+          sql(
+            "SELECT source_id, count(*) AS n FROM search_listing_queue WHERE search_id=? GROUP BY source_id ORDER BY min(id)",
+          ).all(searchId) as { source_id: string; n: number }[]
+        ).map((row) => [row.source_id, row.n]),
+      );
+      return {
+        push(cards: readonly ListingCard[]): void {
+          store.transaction(() => {
+            for (const card of cards) {
+              const inserted =
+                sql(`INSERT INTO search_listing_queue(search_id,source_id,url,card_json)
+              VALUES (?,?,?,?) ON CONFLICT(search_id,source_id,url) DO NOTHING`).run(
+                  searchId,
+                  card.sourceId,
+                  card.url,
+                  JSON.stringify(card),
+                );
+              if (Number(inserted.changes) > 0)
+                pending.set(
+                  card.sourceId,
+                  (pending.get(card.sourceId) ?? 0) + 1,
+                );
+            }
+          });
+        },
+        counts(): [string, number][] {
+          return [...pending];
+        },
+        take(sourceId: string, size: number): ListingCard[] {
+          return store.transaction(() => {
+            const rows = sql(
+              "SELECT id, card_json FROM search_listing_queue WHERE search_id=? AND source_id=? AND leased=0 ORDER BY id LIMIT ?",
+            ).all(searchId, sourceId, size) as {
+              id: number;
+              card_json: string;
+            }[];
+            for (const row of rows)
+              sql("UPDATE search_listing_queue SET leased=1 WHERE id=?").run(
+                row.id,
+              );
+            const left = (pending.get(sourceId) ?? 0) - rows.length;
+            if (left > 0) pending.set(sourceId, left);
+            else pending.delete(sourceId);
+            return rows.map((row) => JSON.parse(row.card_json) as ListingCard);
+          });
+        },
+        complete(): void {
+          /* settle() acknowledges the complete source, including deferred browser reads. */
+        },
+      };
     },
     put(searchId: string, row: JobSearchSourceRow): void {
       store.transaction(() => {

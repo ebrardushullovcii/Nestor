@@ -42,7 +42,7 @@ export function createContextParts() {
   const contents = new Map<string, ExactContextText>();
   const ids = new Map<string, string>();
   const archive = createContextArchive();
-  const messageIds = new WeakMap<
+  let messageIds = new WeakMap<
     AgentLoopMessage,
     { text: string; id: string }
   >();
@@ -141,6 +141,12 @@ export function createContextParts() {
     messages.reduce((n, message) => n + contextMessageChars(message) + 32, 0);
   return {
     tool,
+    dispose(): void {
+      contents.clear();
+      ids.clear();
+      archive.clear();
+      messageIds = new WeakMap();
+    },
     /** Called only after an actual provider rejection. No actions are replayed. */
     recover(maxChars: number): void {
       recoveryChars = Math.max(

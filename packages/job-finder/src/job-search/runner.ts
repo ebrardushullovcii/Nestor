@@ -517,6 +517,7 @@ export function createJobSearchRunner(
       }
       resultRows.plan(run.record!.id, target, full);
       states.set(target.id, source);
+      pipeline.restore(source);
       write(source);
       void http
         .run(new URL(target.startingUrl).hostname, signal, async () => {
@@ -541,7 +542,6 @@ export function createJobSearchRunner(
         .catch((error: unknown) => {
           if (current(source)) {
             source.collected = true;
-            source.processed = source.row.cards;
             source.row.state = "failed";
             source.row.message = errorMessage(error);
             markDone(source);

@@ -447,6 +447,45 @@ test("a crash after durable planning and before any source starts loses no queue
   });
 });
 
+test("a crash recovers accepted card facts even when their source no longer returns them", async () => {
+  const { store, engine, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough", postedWithin: "any" }),
+    1,
+  );
+  const rows = createSearchSourcesStore(store);
+  rows.plan(search.id, context.sources[0]!, false);
+  const accepted = card("one");
+  rows.cardQueue(search.id).push([accepted]);
+  // The crashed process had already leased this card for screening.
+  rows.cardQueue(search.id).take("one", 400);
+  engine.collectSource.mockResolvedValue({
+    cards: [],
+    pagesRead: 1,
+    complete: true,
+    notes: [],
+  });
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await finished(restarted);
+  expect(
+    engine.readListings.mock.calls.flatMap(([input]) =>
+      input.cards.map((card) => card.url),
+    ),
+  ).toEqual([accepted.url]);
+  expect(store.stageCounts().found).toBe(1);
+  expect(rows.cardUrls(search.id, "one")).toEqual([]);
+  expect(store.searches.get(search.id)).toMatchObject({
+    state: "done",
+    sourcesDone: 1,
+  });
+});
+
 test("the person's explicit Stop is retained and never auto-resumed", async () => {
   const { store, runner, engine, context } = setup();
   engine.collectSource.mockImplementation(async ({ signal }) => {
@@ -1619,11 +1658,10 @@ test.each([false, true])(
     context.sources = sites.enabled().map(jobSiteTarget);
     access.request(1, "Sign in");
     const gate = deferred<void>();
-    let reads = 0;
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
       await onCards?.(numberedCards(target.id, 1, "Backend Engineer"));
-      // Related work in two screening waves (the second read waits on the
-      // gate), followed by a long unrelated run.
+      // Collection can pool these into one wave or several; all detail work
+      // remains held while access is checked below.
       await onCards?.([
         ...numberedCards(target.id, 1, "Backend Engineer", 1),
         ...numberedCards(target.id, 99, "Nurse", 2),
@@ -1633,9 +1671,8 @@ test.each([false, true])(
       return { cards: [], complete: true, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
-      const first = reads++ === 0;
-      if (!first) await gate.promise;
-      return blocked && !first
+      await gate.promise;
+      return blocked
         ? {
             jobs: [],
             failures: cards.map(({ url }) => ({
