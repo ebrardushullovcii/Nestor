@@ -126,15 +126,34 @@ test("active navigation can continue past 20 seconds with connection progress", 
   });
   expect(close).toHaveBeenCalledOnce();
 });
+function pickerLocator(
+  evaluate: () => Promise<unknown>,
+  selectOption = vi.fn(() => Promise.resolve()),
+): Locator {
+  return {
+    evaluate,
+    selectOption,
+    elementHandles: () =>
+      Promise.resolve([
+        {
+          evaluate: vi
+            .fn()
+            .mockResolvedValueOnce(true)
+            .mockImplementation(evaluate),
+          dispose: () => Promise.resolve(),
+        },
+      ]),
+  } as unknown as Locator;
+}
+
 test("a silent native picker reports idle instead of inventing an absent option", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const input = {
-    evaluate: vi
-      .fn()
-      .mockResolvedValueOnce(true)
-      .mockResolvedValue({ disabled: false, busy: true, options: [] }),
-  } as unknown as Locator;
+  const evaluate = vi
+    .fn()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValue({ disabled: false, busy: true, options: [] });
+  const input = pickerLocator(evaluate);
   const pending = choosePageOption(
     { on: () => {} } as unknown as Page,
     input,
@@ -188,7 +207,7 @@ test.each(["state", "connection"])(
           ],
         }),
       );
-    const input = { evaluate, selectOption: selected } as unknown as Locator;
+    const input = pickerLocator(evaluate, selected);
     selected.mockImplementation(() => {
       evaluate.mockResolvedValue("Wanted");
       return Promise.resolve();

@@ -13,6 +13,7 @@ const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 const pageApi = process.argv.includes("--page-api");
 const siteChecks = process.argv.includes("--site-checks");
 const verification = process.argv.includes("--verification");
+const fieldResults = process.argv.includes("--field-results");
 const buildOutput = verification ? join(output, "main") : output;
 if (verification)
   await cp(join(desktop, "out/preload"), join(output, "preload"), {
@@ -54,13 +55,15 @@ await build({
       desktop,
       verification
         ? "scripts/fixtures/embedded-browser-verification.ts"
-        : siteChecks
-          ? "scripts/fixtures/embedded-browser-site-checks.ts"
-          : discoveryCleanup
-            ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-            : pageApi
-              ? "scripts/fixtures/embedded-browser-page-api.ts"
-              : "scripts/fixtures/embedded-browser.ts",
+        : fieldResults
+          ? "scripts/fixtures/embedded-browser-field-results.ts"
+          : siteChecks
+            ? "scripts/fixtures/embedded-browser-site-checks.ts"
+            : discoveryCleanup
+              ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+              : pageApi
+                ? "scripts/fixtures/embedded-browser-page-api.ts"
+                : "scripts/fixtures/embedded-browser.ts",
     ),
     outDir: buildOutput,
     emptyOutDir: false,

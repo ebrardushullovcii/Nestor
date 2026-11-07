@@ -27,7 +27,7 @@ test("an async country list reads slotted names and ignores empty decoration aft
     const page = await browser.newPage();
     await page.goto(origin);
     const control = page.getByRole("combobox");
-    expect(await choosePageOption(page, control, "Kosovo")).toEqual({
+    expect(await choosePageOption(page, control, "Kosovo")).toMatchObject({
       ok: true,
       observedValue: "Kosovo",
     });

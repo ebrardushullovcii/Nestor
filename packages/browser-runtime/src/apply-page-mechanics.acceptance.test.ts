@@ -38,13 +38,37 @@ test("an accepted native toggle reports its checked value", async () => {
       nth: () => ({
         scrollIntoViewIfNeeded: () => Promise.resolve(),
         evaluate,
+        elementHandles: () =>
+          Promise.resolve([
+            {
+              evaluate: vi
+                .fn()
+                .mockResolvedValueOnce(true)
+                .mockResolvedValueOnce({
+                  present: true,
+                  checked: true,
+                  metadata: {
+                    autocomplete: "",
+                    name: "",
+                    id: "",
+                    label: "Terms",
+                    placeholder: "",
+                  },
+                }),
+              dispose: () => Promise.resolve(),
+            },
+          ]),
         setChecked,
       }),
     }),
   } as unknown as Page;
   await expect(
     createPlaywrightApplyPageMechanics(page).setToggle("c0", true),
-  ).resolves.toEqual({ ok: true, observedValue: "checked" });
+  ).resolves.toMatchObject({
+    ok: true,
+    observedValue: "checked",
+    controlState: { checked: true },
+  });
   expect(evaluate).toHaveBeenCalledOnce();
   expect(setChecked).not.toHaveBeenCalled();
 });

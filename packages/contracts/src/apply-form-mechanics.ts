@@ -355,7 +355,24 @@ export type ApplyWriteResult = (
       reason?: "option_not_offered" | "binding_changed";
       offeredOptions?: string[];
     }
-) & { clickFacts?: ApplyClickFacts };
+) & {
+  clickFacts?: ApplyClickFacts;
+  /** Observed after the action, including when the site did not retain it. */
+  controlState?: {
+    present: boolean;
+    value?: string;
+    checked?: boolean;
+    selected?: boolean;
+    selectedOptions?: string[];
+  };
+  /** An incomplete list is still useful page evidence, never proof of absence. */
+  optionList?: {
+    open: boolean;
+    busy: boolean;
+    options: string[];
+    complete: boolean;
+  };
+};
 
 /** Where following a link left the browser. */
 export type ApplyNavigationResult =

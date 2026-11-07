@@ -74,7 +74,7 @@ test("a native list whose choices load after a moment is waited for, not read as
       <script>setTimeout(() => { for (const text of ${JSON.stringify([...replay.offered, replay.missing])}) document.querySelector("select").add(new Option(text, text)); }, 900);</script>`,
     );
     const control = page.getByLabel("Country");
-    expect(await choosePageOption(page, control, replay.missing)).toEqual({
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject({
       ok: true,
       observedValue: replay.missing,
     });
@@ -94,7 +94,7 @@ test("native option text with stray spacing still matches the asked-for choice",
         control,
         ` ${replay.offered[0]!.toUpperCase()} `,
       ),
-    ).toEqual({ ok: true, observedValue: replay.offered[0] });
+    ).toMatchObject({ ok: true, observedValue: replay.offered[0] });
     expect(await control.inputValue()).toBe("a");
   });
 });
@@ -145,7 +145,7 @@ test("custom picker replay reports its own choices, then permits the saved fallb
       },
     );
     expect(await control.inputValue()).toBe("");
-    expect(await choosePageOption(page, control, replay.offered[0]!)).toEqual({
+    expect(await choosePageOption(page, control, replay.offered[0]!)).toMatchObject({
       ok: true,
       observedValue: replay.offered[0],
     });
@@ -158,7 +158,7 @@ test("a long list that draws only rows in view is scrolled before a choice is ca
     await page.setContent(virtualList(longList));
     const control = page.getByRole("combobox");
     const wanted = longList[replay.longListWantedIndex]!;
-    expect(await choosePageOption(page, control, wanted)).toEqual({
+    expect(await choosePageOption(page, control, wanted)).toMatchObject({
       ok: true,
       observedValue: wanted,
     });
@@ -338,7 +338,7 @@ test("a search that hides every row, with no message, is checked against the ful
       },
     );
     expect(await control.inputValue()).toBe("");
-    expect(await choosePageOption(page, control, replay.offered[1]!)).toEqual({
+    expect(await choosePageOption(page, control, replay.offered[1]!)).toMatchObject({
       ok: true,
       observedValue: replay.offered[1],
     });
@@ -352,7 +352,7 @@ test("rows left over from before a search are not read as its answer", async () 
       searchPicker([...replay.offered, replay.missing], 1_500, "region"),
     );
     const control = page.getByRole("combobox");
-    expect(await choosePageOption(page, control, replay.missing)).toEqual({
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject({
       ok: true,
       observedValue: replay.missing,
     });
@@ -372,7 +372,7 @@ test("a picker without a bound list still chooses from the page's options", asyn
         page.getByRole("combobox"),
         replay.offered[0]!,
       ),
-    ).toEqual({ ok: true, observedValue: replay.offered[0] });
+    ).toMatchObject({ ok: true, observedValue: replay.offered[0] });
     expect(await page.locator("body").getAttribute("data-chosen")).toBe(
       replay.offered[0],
     );
@@ -415,7 +415,7 @@ test("a picker in a frame reports only that frame's choices despite matching lis
     expect(
       await page.locator("body").getAttribute("data-wrong-choice"),
     ).toBeNull();
-    expect(await choosePageOption(page, control, replay.offered[0]!)).toEqual({
+    expect(await choosePageOption(page, control, replay.offered[0]!)).toMatchObject({
       ok: true,
       observedValue: replay.offered[0],
     });
@@ -548,7 +548,7 @@ test.each([
         await page.evaluate("window.queries.at(-1)"),
       );
       expect(await control.getAttribute("data-committed")).toBe("");
-      expect(await choosePageOption(page, control, offered[0]!)).toEqual({
+      expect(await choosePageOption(page, control, offered[0]!)).toMatchObject({
         ok: true,
         observedValue: offered[0],
       });
@@ -567,7 +567,7 @@ test("selection reports the current value without blurring or clearing the picke
       page.getByRole("combobox"),
       "Pristina",
     );
-    expect(result).toEqual({ ok: true, observedValue: "Pristina" });
+    expect(result).toMatchObject({ ok: true, observedValue: "Pristina" });
   });
 });
 
