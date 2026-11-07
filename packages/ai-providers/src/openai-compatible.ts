@@ -5,7 +5,6 @@ import {
   AgentProviderStatusSchema,
   ProfileCopilotReplySchema,
   ResumeDraftPatchSchema,
-  assessJobPostingDetailQuality,
   type ProfileCopilotReply,
 } from "@nestor/contracts";
 import {
@@ -150,6 +149,7 @@ export function buildResumeRewriteProposalPrompt(
     'Use this sparse shape: {"summary":{"text":"...","evidenceRefs":["..."]},"experienceEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."],"inferred":true,"sourceAchievementIds":["experience:record:achievement:0"],"priority":1}]},{"profileRecordId":"...","hidden":true}],"projectEntries":[{"profileRecordId":"...","summary":{"text":"...","evidenceRefs":["..."]},"outcome":{"text":"...","evidenceRefs":["..."]},"bullets":[{"text":"...","evidenceRefs":["..."]}]}],"additionalSkills":["..."]}. For a role you show, list exactly the bullets it should show. Omit every unchanged field.',
     "Every proposed text must cite exact IDs from groundingEvidence.items. Experience and project proposals may cite items with the same profileRecordId.",
     "Outside aggressive mode, use only claims, numbers, technologies, scope, and outcomes stated in the cited evidence. In every mode, never add dates, titles, employers, credentials, seniority, causality, or absolutes, and never add leadership the cited evidence does not support.",
+    "In every mode, use resumeHeadline as the title in the summary when supplied. It is the headline the assembled resume displays and already reflects the selected tailoring level's title alignment. Keep the summary's title and seniority consistent with it: a Staff posting does not make a Senior candidate Staff. Do not substitute the posting title for the supplied headline. Follow the mode instructions for technologies and other permitted stretches.",
     "Write for the exact target job. Make the candidate's supported match obvious in the opening lines, and prioritize the job's most important supported skills and accomplishments over generic career description.",
     "When you restate a fact, keep it whole: qualifications and their years, skill proficiency and learning limits, seasonal or partial dates and quantified results. Never replace a source achievement with generic wording that loses its number or outcome. A missing employer does not erase a freelance role or internship; retain the available facts without guessing the missing ones.",
     "Light edits preserve the original summary when rewriting would repeat terms or blur the meaning. Keep every stated skill level and limit, including basic or still learning, seasonal or partial dates, credential years and renewal dates, and quantified results with their exact numbers.",
@@ -938,82 +938,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
   };
 }
 
-const LISTING_TEXT_MISSING_DETAIL =
-  "The listing text was not captured, so there was nothing to tailor the resume toward; your original wording was kept.";
-
-const LISTING_TEXT_NOT_DISTINGUISHING_DETAIL =
-  "This listing says almost nothing about the job itself, so there was nothing to tailor the resume toward; your original wording was kept.";
-
-/**
- * Words too common to tell one job from another. Deliberately generic and
- * board-neutral: no site names, no role families (ADR 0007).
- */
-const LISTING_BOILERPLATE_TOKENS = new Set([
-  "about",
-  "apply",
-  "benefits",
-  "candidate",
-  "company",
-  "employer",
-  "equal",
-  "experience",
-  "job",
-  "must",
-  "opportunity",
-  "position",
-  "requirements",
-  "responsibilities",
-  "role",
-  "skills",
-  "team",
-  "the",
-  "this",
-  "will",
-  "with",
-  "work",
-  "you",
-  "your",
-]);
-
-/**
- * How many content words the listing brings that could make this draft
- * different from a draft for another job.
- *
- * Two unrelated postings were producing byte-identical "tailored" resumes
- * because their bodies carried nothing but boilerplate. A draft that the job
- * did not shape is not tailored, whatever the mode says.
- */
-export function countDistinguishingListingTerms(job: {
-  description?: string | null;
-  summary?: string | null;
-  keySkills?: readonly string[];
-}): number {
-  const text = [
-    job.description ?? "",
-    job.summary ?? "",
-    ...(job.keySkills ?? []),
-  ]
-    .join(" ")
-    .toLowerCase();
-  const terms = new Set(
-    text
-      .split(/[^\p{L}\p{N}+#.]+/u)
-      .map((token) => token.replace(/^[.]+|[.]+$/gu, ""))
-      .filter(
-        (token) => token.length >= 3 && !LISTING_BOILERPLATE_TOKENS.has(token),
-      ),
-  );
-
-  return terms.size;
-}
-
-/**
- * Below this, the body is a stub — a one-line "We are hiring" or a cookie
- * banner the extractor kept — and tailoring toward it cannot distinguish this
- * job from the next one.
- */
-export const MINIMUM_DISTINGUISHING_LISTING_TERMS = 12;
-
 /** The agent's opening placeholder before it has worked; never an answer. */
 /** What the Resume Assistant says when the AI could not answer at all. */
 const RESUME_ASSISTANT_UNAVAILABLE_REPLY =
@@ -1163,6 +1087,9 @@ export function createJobFinderAiClientFromEnvironment(
 
     return {
       ...deterministicClient,
+      createResumeDraft() {
+        return Promise.reject(new Error(NO_AI_PROVIDER_REASON));
+      },
       // The model ships with the product, so a missing one is an outage, not
       // a setup step. Without these markers an import finished "Ready" and
       // the Assistant answered "I could not turn it into a safe edit", and
@@ -1262,9 +1189,6 @@ export function createJobFinderAiClientFromEnvironment(
       ? aggressiveClient
       : primaryClient;
   }
-  const fallbackClient = createDeterministicJobFinderAiClient(
-    "The configured model is enabled, and deterministic fallbacks protect the app when a model call fails.",
-  );
   function createFallbackExecutionReceipt(
     capability: string,
     stopReason: "no_progress" | "permanent_failure",
@@ -1397,46 +1321,6 @@ export function createJobFinderAiClientFromEnvironment(
       }
     },
     async createResumeDraft(input) {
-      // A card-only posting has no listing body. Asking the model to tailor
-      // toward a bare title wastes the request and comes back as "no usable
-      // proposals", which the studio then reports as a model failure. State
-      // the real reason and keep the grounded wording instead.
-      if (assessJobPostingDetailQuality(input.job) === "card_only") {
-        const fallback = await fallbackClient.createResumeDraft(input);
-        return {
-          ...fallback,
-          generationProvenance: {
-            method: "deterministic" as const,
-            reason: "listing_text_missing" as const,
-            detail: LISTING_TEXT_MISSING_DETAIL,
-          },
-          notes: uniqueStrings([
-            ...fallback.notes,
-            LISTING_TEXT_MISSING_DETAIL,
-          ]),
-        };
-      }
-      // A body that says nothing specific is the same problem one step along:
-      // tailoring toward it produced the same draft for unrelated jobs, which
-      // the screen then called "tailored".
-      if (
-        countDistinguishingListingTerms(input.job) <
-        MINIMUM_DISTINGUISHING_LISTING_TERMS
-      ) {
-        const fallback = await fallbackClient.createResumeDraft(input);
-        return {
-          ...fallback,
-          generationProvenance: {
-            method: "deterministic" as const,
-            reason: "listing_text_not_distinguishing" as const,
-            detail: LISTING_TEXT_NOT_DISTINGUISHING_DETAIL,
-          },
-          notes: uniqueStrings([
-            ...fallback.notes,
-            LISTING_TEXT_NOT_DISTINGUISHING_DETAIL,
-          ]),
-        };
-      }
       const modelClient = selectResumeGenerationClient(input);
       const providerLabel =
         modelClient === aggressiveClient ? "Aggressive AI" : "Primary AI";

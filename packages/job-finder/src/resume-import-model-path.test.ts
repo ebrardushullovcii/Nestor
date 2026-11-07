@@ -314,3 +314,74 @@ describe("resume import with a model (ADR 0041)", () => {
     );
   });
 });
+
+test("refresh reimports each complete accomplishment once and keeps saved answers", async () => {
+  const seed = freshSeed();
+  const accomplishment =
+    "Lowered hosting costs by 18%. Moved idle workers to on-demand instances. Kept availability unchanged.";
+  const source = `${TEXT}\n- ${accomplishment}`;
+  const reader = modelClient({
+    identity_summary: IDENTITY,
+    experience: [
+      { ...ROLE, value: { ...ROLE.value, achievements: [accomplishment] } },
+    ],
+  });
+  const client = {
+    ...reader,
+    async extractResumeImportStage(
+      input: Parameters<typeof reader.extractResumeImportStage>[0],
+    ) {
+      const result = await reader.extractResumeImportStage(input);
+      return {
+        ...result,
+        candidates: result.candidates.map((candidate) => ({
+          ...candidate,
+          target: {
+            ...candidate.target,
+            recordId:
+              candidate.target.section === "experience"
+                ? (input.existingProfile.experiences[0]?.id ??
+                  candidate.target.recordId)
+                : candidate.target.recordId,
+          },
+        })),
+      };
+    },
+  };
+  const { profileWork, repository, savedAnswers, readSavedAnswerRows } =
+    createProfileServiceHarness({ seed, aiClient: client });
+  const first = await profileWork.runResumeImport(importInput(seed, source));
+  expect(first.profile.experiences[0]?.achievements).toEqual([accomplishment]);
+  const role = first.profile.experiences[0]!;
+  await repository.commitProfileUpdate((profile) => ({
+    ...profile,
+    experiences: [
+      {
+        ...role,
+        achievements: [
+          "Lowered hosting costs by 18%.",
+          "Moved idle workers to on-demand instances.",
+          "Kept availability unchanged.",
+        ],
+      },
+    ],
+  }));
+  savedAnswers.upsert({
+    key: "notice_period",
+    kind: "other",
+    prompt: "When can you start?",
+    answer: "In three weeks",
+  });
+  const beforeAnswers = readSavedAnswerRows();
+  const refreshed = await profileWork.analyzeProfileFromResume();
+  const review = refreshed.profileSetupState.reviewItems.find(
+    (item) => item.status === "pending" && item.target.domain === "experience",
+  );
+  expect(review).toBeDefined();
+  await profileWork.applyProfileSetupReviewAction(review!.id, "confirm");
+  const after = await repository.getProfile();
+  expect(after.experiences).toHaveLength(1);
+  expect(after.experiences[0]?.id).toBe(role.id);
+  expect(after.experiences[0]?.achievements).toEqual([accomplishment]);
+  expect(readSavedAnswerRows()).toEqual(beforeAnswers);
+});

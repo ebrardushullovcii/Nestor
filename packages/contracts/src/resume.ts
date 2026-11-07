@@ -709,6 +709,8 @@ export const ResumeDraftSchema = z.object({
   sections: z.array(ResumeDraftSectionSchema).default([]),
   targetPageCount: z.number().int().min(1).max(3).default(2),
   generationMethod: ResumeDraftGenerationMethodSchema.nullable().default(null),
+  /** Writer revision, absent on drafts made before revision tracking. */
+  writerVersion: z.number().int().positive().optional(),
   approvedAt: IsoDateTimeSchema.nullable().default(null),
   approvedExportId: NonEmptyStringSchema.nullable().default(null),
   staleReason: NonEmptyStringSchema.nullable().default(null),

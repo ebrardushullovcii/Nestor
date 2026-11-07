@@ -1,4 +1,7 @@
-import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  createDeterministicJobFinderAiClient,
+  runResumeGenerationAgentTask,
+} from "@nestor/ai-providers";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,6 +27,7 @@ import {
   countAssistantJobs,
 } from "./resume-commands";
 import { writeResume } from "./write-resume";
+import { createDocumentManager } from "../test-runtimes";
 
 function found(n: number): FoundJob {
   return {
@@ -109,6 +113,82 @@ const waitFor = (assertion: () => void) =>
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it.each(["light", "tailored", "aggressive"] as const)(
+    "%s writes a fresh replica draft without turning listing customers into skills",
+    async (level) => {
+      const seed = createSeed();
+      const manager = createDocumentManager();
+      const base = createDeterministicJobFinderAiClient();
+      const { store, id } = setup();
+      const summary =
+        "Product designer building accessible component libraries.";
+      const chatWithTools = vi.fn(() =>
+        Promise.resolve({
+          toolCalls: [
+            {
+              id: "write_replica",
+              type: "function" as const,
+              function: {
+                name: "compose_resume_proposal",
+                arguments: JSON.stringify({
+                  proposal: {
+                    summary: {
+                      text: summary,
+                      evidenceRefs: ["profile:summary"],
+                    },
+                    coreSkills: ["React", "TypeScript"],
+                    languagePresentation: {
+                      language: "English",
+                      translations: [],
+                    },
+                  },
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      const draft = await writeResume(
+        {
+          documentManager: manager,
+          aiClient: {
+            ...base,
+            createResumeDraft: (request) =>
+              runResumeGenerationAgentTask({
+                client: { ...base, chatWithTools },
+                request,
+                substantivePrompt: "Write the resume for the replica posting.",
+              }),
+          },
+        },
+        {
+          ...seed,
+          level,
+          job: {
+            ...store.getJob(id)!,
+            url: "http://127.0.0.1:47950/greenhouse/job/1",
+            description:
+              "Build accessible React and TypeScript components. Our customers include Beacon Media and Cedar Shipping.",
+            facts: {
+              ...store.getJob(id)!.facts,
+              fullListingRead: true,
+              keySkills: ["React", "TypeScript"],
+            },
+          },
+        },
+      );
+      expect(chatWithTools).toHaveBeenCalledOnce();
+      expect(
+        draft?.sections.find((section) => section.kind === "summary")?.text,
+      ).toBe(summary);
+      const skills = draft?.sections
+        .filter((section) => section.kind === "skills")
+        .flatMap((section) => section.bullets.map((bullet) => bullet.text));
+      expect(skills).toContain("React");
+      expect(skills).not.toContain("Beacon Media");
+      expect(skills).not.toContain("Cedar Shipping");
+    },
+  );
   it("reads a long card once before writing, then reuses the saved complete posting", async () => {
     const seed = createSeed();
     const body =

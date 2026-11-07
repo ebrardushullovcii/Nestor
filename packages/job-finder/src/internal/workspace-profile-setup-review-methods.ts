@@ -142,9 +142,7 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
     searchPreferences: JobSearchPreferences;
     profileSetupState: ProfileSetupState;
     latestResumeImportRun: Awaited<
-      ReturnType<
-        ProfileContext["repository"]["getLatestResumeImportRun"]
-      >
+      ReturnType<ProfileContext["repository"]["getLatestResumeImportRun"]>
     >;
     latestResumeImportAllCandidates: Awaited<
       ReturnType<
@@ -241,6 +239,8 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
             null,
           analysisWarnings: nextProfile.baseResume.analysisWarnings,
           confirmedCandidateId: linkedCandidate.id,
+          replaceExperienceAchievements:
+            currentSetupContext.latestResumeImportRun?.trigger === "refresh",
         },
       );
 
@@ -423,7 +423,6 @@ export function createWorkspaceProfileSetupReviewMethods(input: {
           candidate.resolution === "abstained",
       ),
     });
-
   }
 
   return {

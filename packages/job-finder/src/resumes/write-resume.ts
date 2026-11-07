@@ -52,6 +52,9 @@ export const TAILORING_MODE_BY_LEVEL: Record<
   TailoringMode
 > = { light: "conservative", tailored: "balanced", aggressive: "aggressive" };
 
+/** Retires drafts made by the old skill-injecting/fallback writer on Apply. */
+export const RESUME_WRITER_VERSION = 1;
+
 /** The profile's default level: Settings' resume mode and tailoring strength. */
 export function resolveProfileResumeLevel(
   inputs: Pick<ResumeWriterInputs, "searchPreferences" | "settings">,
@@ -616,6 +619,7 @@ export async function writeResume(
     settings,
     job,
     resumeText,
+    resumeHeadline: headline ?? ownHeadline(profile),
     evidence: collectResumeWorkspaceEvidence({ profile, job, research: [] }),
     availableTemplates: templates,
     selectedTemplateId: settings.resumeTemplateId,
@@ -684,5 +688,9 @@ export async function writeResume(
         ...(signal ? { signal } : {}),
       })
     : finalDraft;
-  return { ...localized, status: "draft" };
+  return {
+    ...localized,
+    status: "draft",
+    writerVersion: RESUME_WRITER_VERSION,
+  };
 }

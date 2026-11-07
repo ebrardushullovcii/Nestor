@@ -234,11 +234,12 @@ export function toNarrativeStringArray(value: unknown): string[] {
 
   return (
     entries
-      .flatMap((entry) => entry.split(/\r?\n+/))
+      .flatMap((entry) => entry.split(/\r?\n\s*(?=(?:[-*•·▪◦‣]|\d+[.)])\s+)/u))
       // Split only explicit bullet boundaries. Sentences within one source
       // accomplishment carry its context and result together.
       .flatMap((entry) => entry.split(/\s+[•·▪◦‣]\s+/u))
       .map((entry) => entry.trim().replace(/^(?:[-*•·▪◦‣]\s+|\d+[.)]\s+)/u, ""))
+      .map((entry) => entry.replace(/\s*\r?\n\s*/gu, " "))
       .filter(Boolean)
   );
 }

@@ -169,7 +169,15 @@ describe("OpenCode-compatible client requests", () => {
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({}) } }],
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    summary: "Builds reliable automation.",
+                  }),
+                },
+              },
+            ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),

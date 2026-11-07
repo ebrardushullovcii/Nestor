@@ -845,69 +845,64 @@ describe("ai provider config and fallback behavior", () => {
     }
   });
 
-  test("never asks the model to tailor toward a card-only posting", async () => {
-    const restoreFetch = mockRejectedFetch(
-      new Error("the model must not be called for a card-only posting"),
-    );
-    const errorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+  test.each(["conservative", "balanced", "aggressive"] as const)(
+    "%s lets the model write even from a short listing instead of substituting a file",
+    async (tailoringMode) => {
+      const capture = mockCapturingJsonFetch({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: {
+                  text: "Builds accessible dashboards for this product.",
+                  evidenceRefs: ["profile:summary"],
+                },
+              }),
+            },
+          },
+        ],
+      });
+      try {
+        const client =
+          createJobFinderAiClientFromEnvironment(createEnvironment());
+        const posting = createJobPosting();
+        const result = await client.createResumeDraft({
+          profile: createProfile(),
+          searchPreferences: { ...createPreferences(), tailoringMode },
+          settings: createSettings(),
+          job: {
+            ...posting,
+            description: posting.title,
+            keySkills: [],
+            responsibilities: [],
+            minimumQualifications: [],
+            preferredQualifications: [],
+            benefits: [],
+          },
+          resumeText: "Resume text",
+        });
+        expect(capture.getCapturedBody()).toContain("compose_resume_proposal");
+        expect(result.summary).toBe(
+          "Builds accessible dashboards for this product.",
+        );
+        expect(result.generationProvenance?.method).toBe("ai");
+      } finally {
+        capture.restore();
+      }
+    },
+  );
 
-    try {
-      const client =
-        createJobFinderAiClientFromEnvironment(createEnvironment());
-      const posting = createJobPosting();
-
-      const result = await client.createResumeDraft({
+  test("a missing provider reports our error instead of returning an untailored file", async () => {
+    const client = createJobFinderAiClientFromEnvironment({});
+    await expect(
+      client.createResumeDraft({
         profile: createProfile(),
         searchPreferences: createPreferences(),
         settings: createSettings(),
-        job: {
-          ...posting,
-          // A compact-scan capture: the title stands in for the body and
-          // nothing structured was read.
-          description: posting.title,
-          keySkills: [],
-          responsibilities: [],
-          minimumQualifications: [],
-          preferredQualifications: [],
-          benefits: [],
-        },
+        job: createJobPosting(),
         resumeText: "Resume text",
-      });
-
-      expect(result.generationProvenance).toEqual({
-        method: "deterministic",
-        reason: "listing_text_missing",
-        detail:
-          "The listing text was not captured, so there was nothing to tailor the resume toward; your original wording was kept.",
-      });
-      // No request went out, so nothing was logged as a fallback.
-      expect(errorSpy).not.toHaveBeenCalled();
-      expect(result.notes).not.toContain(
-        "Fell back to the deterministic resume draft creator after the model call failed.",
-      );
-    } finally {
-      restoreFetch();
-      errorSpy.mockRestore();
-    }
-  });
-
-  test("records no_provider_configured when no API key is present", async () => {
-    const client = createJobFinderAiClientFromEnvironment({});
-
-    const result = await client.createResumeDraft({
-      profile: createProfile(),
-      searchPreferences: createPreferences(),
-      settings: createSettings(),
-      job: createJobPosting(),
-      resumeText: "Resume text",
-    });
-
-    expect(result.generationProvenance).toMatchObject({
-      method: "deterministic",
-      reason: "no_provider_configured",
-    });
+      }),
+    ).rejects.toThrow(NO_AI_PROVIDER_REASON);
   });
 
   test("a failed tailoring call says so, logs why and writes nothing (ADR 0041)", async () => {

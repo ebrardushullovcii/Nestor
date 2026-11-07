@@ -313,6 +313,7 @@ export function parseLocationParts(location: string | null | undefined): {
 export function mergeExperienceRecords(
   existing: CandidateProfile["experiences"],
   extracted: ResumeProfileExtraction["experiences"],
+  options: { replaceAchievementsForRecordIds?: readonly string[] } = {},
 ): CandidateProfile["experiences"] {
   // Duplicate saved cards collapse into the more complete one, in the place
   // the first of them held: sorting by completeness first reordered the
@@ -364,10 +365,13 @@ export function mergeExperienceRecords(
         !(entry.companyName ?? match?.companyName) &&
         !(entry.title ?? match?.title),
       summary: preferLongerText(match?.summary, entry.summary),
-      achievements: uniqueStrings([
-        ...safeStringArray(match?.achievements),
-        ...safeStringArray(entry.achievements),
-      ]),
+      achievements:
+        match && options.replaceAchievementsForRecordIds?.includes(match.id)
+          ? uniqueStrings(safeStringArray(entry.achievements))
+          : uniqueStrings([
+              ...safeStringArray(match?.achievements),
+              ...safeStringArray(entry.achievements),
+            ]),
       skills: uniqueStrings([
         ...safeStringArray(match?.skills),
         ...safeStringArray(entry.skills),
