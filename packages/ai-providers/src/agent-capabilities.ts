@@ -60,6 +60,34 @@ import {
 } from "./resume-import";
 
 const EmptyInputSchema = z.object({});
+/** The same non-empty prose shapes that parseEvidenceLinkedText reads. */
+const resumeProseParameters = {
+  anyOf: [
+    { type: "string", minLength: 1, pattern: "\\S" },
+    {
+      type: "object",
+      additionalProperties: true,
+      required: ["text"],
+      properties: { text: { type: "string", minLength: 1, pattern: "\\S" } },
+    },
+  ],
+};
+const resumeEntryProseParameters = {
+  type: "object",
+  additionalProperties: true,
+  anyOf: [
+    ...["summary", "outcome"].map((field) => ({
+      required: [field],
+      properties: { [field]: resumeProseParameters },
+    })),
+    {
+      required: ["bullets"],
+      properties: {
+        bullets: { type: "array", items: {}, contains: resumeProseParameters },
+      },
+    },
+  ],
+};
 const ContentInputSchema = z.object({ content: z.string().trim().min(1) });
 const ResumePatchInputSchema = z.object({ patch: ResumeDraftPatchSchema });
 const ResumeSectionTextInputSchema = z.object({
@@ -989,6 +1017,29 @@ export async function runResumeGenerationAgentTask(input: {
             proposal: {
               type: "object",
               additionalProperties: true,
+              anyOf: [
+                {
+                  required: ["summary"],
+                  properties: { summary: resumeProseParameters },
+                },
+                ...[
+                  "experienceEntries",
+                  "projectEntries",
+                  "experienceHighlights",
+                ].map((field) => ({
+                  required: [field],
+                  properties: {
+                    [field]: {
+                      type: "array",
+                      items: {},
+                      contains:
+                        field === "experienceHighlights"
+                          ? resumeProseParameters
+                          : resumeEntryProseParameters,
+                    },
+                  },
+                })),
+              ],
               description:
                 "Sparse summary, experienceEntries, projectEntries, and optional coreSkills proposal from the task instructions. Include non-empty summary or accomplishment prose; return saved wording explicitly when it already fits.",
             },

@@ -150,6 +150,31 @@ describe("tool-using AI capabilities", () => {
     expect(renderPreview).not.toHaveBeenCalled();
   });
 
+  test("usable structured prose stays model-written with long text or incomplete reference metadata", async () => {
+    const summary = "Complete model-written accomplishment context. ".repeat(
+      30,
+    );
+    const client = createToolClient([
+      {
+        toolCalls: [
+          composeCall("long_prose", {
+            proposal: {
+              summary: { text: summary, evidenceRefs: [], inferred: true },
+            },
+          }),
+        ],
+      },
+    ]);
+    const renderPreview = vi.fn(() => cleanPreview());
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write the resume.",
+      request: { ...baseRequest(), renderPreview },
+    });
+    expect(renderPreview).toHaveBeenCalledOnce();
+    expect(result.summary).toBe(summary.trim());
+  });
+
   test("resume writing can repair more than three proposals without sharing a deadline with claim checks", async () => {
     let calls = 0;
     const renderPreview = vi.fn(
