@@ -1,4 +1,7 @@
 import {
+  JobDiscoveryTargetSchema,
+  type JobDiscoveryTarget,
+  type ListingCard,
   JobSearchSourceQuerySchema,
   type JobSearchSourceQuery,
   type JobSearchSourcePage,
@@ -31,6 +34,24 @@ CREATE TABLE IF NOT EXISTS search_sources (
 CREATE INDEX IF NOT EXISTS search_sources_page ON search_sources(search_id, id);
 CREATE INDEX IF NOT EXISTS search_sources_state ON search_sources(search_id, state, phase, id);
 CREATE INDEX IF NOT EXISTS search_sources_label ON search_sources(search_id, label, id);
+CREATE TABLE IF NOT EXISTS search_source_queue (
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  full INTEGER NOT NULL DEFAULT 0,
+  completed INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(search_id, source_id)
+);
+CREATE TABLE IF NOT EXISTS search_listing_queue (
+  id INTEGER PRIMARY KEY,
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  card_json TEXT NOT NULL,
+  leased INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(search_id, source_id, url)
+);
+CREATE INDEX IF NOT EXISTS search_listing_queue_source ON search_listing_queue(search_id, source_id, id);
 CREATE TRIGGER IF NOT EXISTS search_sources_finished AFTER UPDATE OF state ON searches
 WHEN NEW.state IN ('stopped', 'failed') BEGIN
   UPDATE search_sources SET state = 'stopped', phase = NULL WHERE search_id = NEW.id AND state IN ('waiting', 'searching');
@@ -41,6 +62,119 @@ const COLUMNS = `source_id AS sourceId, label, url, state, lane, phase, cards, r
 export function createSearchSourcesStore(store: JobStore) {
   const { sql } = store;
   return {
+    get(searchId: string, sourceId: string): JobSearchSourceRow | null {
+      return (
+        (sql(
+          `SELECT ${COLUMNS} FROM search_sources WHERE search_id=? AND source_id=?`,
+        ).get(searchId, sourceId) as JobSearchSourceRow | undefined) ?? null
+      );
+    },
+    plan(searchId: string, target: JobDiscoveryTarget, full: boolean): void {
+      sql(`INSERT INTO search_source_queue(search_id, source_id, target_json, full)
+        VALUES (?, ?, ?, ?) ON CONFLICT(search_id, source_id) DO UPDATE SET
+        target_json=excluded.target_json, full=excluded.full, completed=0`).run(
+        searchId,
+        target.id,
+        JSON.stringify(target),
+        Number(full),
+      );
+    },
+    settle(searchId: string, sourceId: string): boolean {
+      sql(
+        "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=?",
+      ).run(searchId, sourceId);
+      return (
+        Number(
+          sql(`UPDATE search_source_queue SET completed=1
+        WHERE search_id=? AND source_id=? AND completed=0`).run(
+            searchId,
+            sourceId,
+          ).changes,
+        ) > 0
+      );
+    },
+    planned(searchId: string): boolean {
+      return Boolean(
+        sql("SELECT 1 FROM search_source_queue WHERE search_id=? LIMIT 1").get(
+          searchId,
+        ),
+      );
+    },
+    pending(searchId: string): { target: JobDiscoveryTarget; full: boolean }[] {
+      const rows = sql(
+        "SELECT target_json, full FROM search_source_queue WHERE search_id=? AND completed=0 ORDER BY rowid",
+      ).all(searchId) as { target_json: string; full: number }[];
+      return rows.map((row) => ({
+        target: JobDiscoveryTargetSchema.parse(JSON.parse(row.target_json)),
+        full: Boolean(row.full),
+      }));
+    },
+    cardUrls(searchId: string, sourceId: string): string[] {
+      return (
+        sql(
+          "SELECT url FROM search_listing_queue WHERE search_id=? AND source_id=? ORDER BY id",
+        ).all(searchId, sourceId) as { url: string }[]
+      ).map((row) => row.url);
+    },
+    cardQueue(searchId: string) {
+      // A new process owns no old in-flight wave. Its exact cards remain on
+      // disk until the whole source result is acknowledged atomically.
+      sql("UPDATE search_listing_queue SET leased=0 WHERE search_id=?").run(
+        searchId,
+      );
+      const pending = new Map(
+        (
+          sql(
+            "SELECT source_id, count(*) AS n FROM search_listing_queue WHERE search_id=? GROUP BY source_id ORDER BY min(id)",
+          ).all(searchId) as { source_id: string; n: number }[]
+        ).map((row) => [row.source_id, row.n]),
+      );
+      return {
+        push(cards: readonly ListingCard[]): void {
+          store.transaction(() => {
+            for (const card of cards) {
+              const inserted =
+                sql(`INSERT INTO search_listing_queue(search_id,source_id,url,card_json)
+              VALUES (?,?,?,?) ON CONFLICT(search_id,source_id,url) DO NOTHING`).run(
+                  searchId,
+                  card.sourceId,
+                  card.url,
+                  JSON.stringify(card),
+                );
+              if (Number(inserted.changes) > 0)
+                pending.set(
+                  card.sourceId,
+                  (pending.get(card.sourceId) ?? 0) + 1,
+                );
+            }
+          });
+        },
+        counts(): [string, number][] {
+          return [...pending];
+        },
+        take(sourceId: string, size: number): ListingCard[] {
+          return store.transaction(() => {
+            const rows = sql(
+              "SELECT id, card_json FROM search_listing_queue WHERE search_id=? AND source_id=? AND leased=0 ORDER BY id LIMIT ?",
+            ).all(searchId, sourceId, size) as {
+              id: number;
+              card_json: string;
+            }[];
+            for (const row of rows)
+              sql("UPDATE search_listing_queue SET leased=1 WHERE id=?").run(
+                row.id,
+              );
+            const left = (pending.get(sourceId) ?? 0) - rows.length;
+            if (left > 0) pending.set(sourceId, left);
+            else pending.delete(sourceId);
+            return rows.map((row) => JSON.parse(row.card_json) as ListingCard);
+          });
+        },
+        complete(): void {
+          /* settle() acknowledges the complete source, including deferred browser reads. */
+        },
+      };
+    },
     put(searchId: string, row: JobSearchSourceRow): void {
       store.transaction(() => {
         sql(`INSERT INTO search_sources(search_id, source_id, label, url, state, lane, phase, cards, related, unrelated, seen, failed_reads, found, added, hidden, message)

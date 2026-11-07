@@ -24,6 +24,9 @@ import { screenCards as screenListingCards } from "@nestor/browser-agent";
 import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import type { JobSearchContext, JobSearchRunner } from "./types";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const stores: JobStore[] = [];
 const runners: JobSearchRunner[] = [];
@@ -151,8 +154,11 @@ function found(card: ListingCard): FoundJob {
       "Full published listing: build production APIs. Requirements: SQL and distributed systems.",
   };
 }
-function setup(readRemoteCountsAsAnyLocation?: () => boolean) {
-  const store = openJobStore(":memory:");
+function setup(
+  readRemoteCountsAsAnyLocation?: () => boolean,
+  file = ":memory:",
+) {
+  const store = openJobStore(file);
   stores.push(store);
   const context: JobSearchContext = {
     profile: CandidateProfileSchema.parse({
@@ -247,6 +253,292 @@ function finished(runner: JobSearchRunner): Promise<JobSearchStatus> {
     });
   });
 }
+
+test("quit/reopen resumes only the durable unfinished source once, without re-adding its saved jobs", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-search-resume-"));
+  const file = path.join(dir, "jobs.sqlite");
+  const { store, runner, engine, context } = setup(undefined, file);
+  let reopened: JobStore | undefined;
+  try {
+    engine.readListings.mockImplementation(({ cards }) =>
+      Promise.resolve({
+        jobs: cards.map((row) => ({
+          ...found(row),
+          company: `Employer ${row.sourceId}`,
+          sourceJobId: row.url,
+        })),
+        failures: [],
+      }),
+    );
+    engine.collectSource.mockImplementation(
+      async ({ target, onCards, signal }) => {
+        if (target.id === "two") {
+          await onCards?.([card(target.id)]);
+          await new Promise<void>((_resolve, reject) =>
+            signal.addEventListener(
+              "abort",
+              () => reject(new Error("Search interrupted")),
+              {
+                once: true,
+              },
+            ),
+          );
+        }
+        return {
+          cards: [card(target.id)],
+          pagesRead: 1,
+          complete: true,
+          notes: [],
+        };
+      },
+    );
+    const started = await runner.start({
+      depth: "thorough",
+      postedWithin: "any",
+    });
+    await vi.waitFor(() => {
+      expect(store.searches.get(started.id)?.sourcesDone).toBe(1);
+      expect(store.stageCounts().found).toBe(2);
+    });
+    runner.suspend();
+    await yieldTurn();
+    expect(store.searches.get(started.id)?.state).toBe("running");
+    store.close();
+    stores.splice(stores.indexOf(store), 1);
+    reopened = openJobStore(file);
+    const next = {
+      ...card("two"),
+      url: "https://two.example/jobs/new",
+      title: "Backend Engineer II",
+    };
+    engine.collectSource.mockResolvedValue({
+      cards: [card("two"), next],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    });
+    engine.collectSource.mockClear();
+    engine.readListings.mockClear();
+    // The selected target is in the queue even if the site's current config
+    // changes or it disappears while the app is closed.
+    context.sources = [];
+    const restarted = createJobSearchRunner({
+      store: reopened,
+      engine,
+      readContext: () => Promise.resolve(context),
+    });
+    runners.push(restarted);
+    await restarted.scoreUnscored(); // startup fit recovery shares the live queue
+    await finished(restarted);
+    expect(
+      engine.collectSource.mock.calls.map(([input]) => input.target.id),
+    ).toEqual(["two"]);
+    expect(
+      engine.readListings.mock.calls.flatMap(([input]) =>
+        input.cards.map((row) => row.url),
+      ),
+    ).toEqual([next.url]);
+    expect(reopened.stageCounts().found).toBe(3);
+    expect(reopened.searches.get(started.id)).toMatchObject({
+      state: "done",
+      sourcesDone: 2,
+      sourcesTotal: 2,
+      added: 3,
+    });
+    expect(createSearchSourcesStore(reopened).pending(started.id)).toEqual([]);
+    engine.collectSource.mockClear();
+    const again = createJobSearchRunner({
+      store: reopened,
+      engine,
+      readContext: () => Promise.resolve(context),
+    });
+    runners.push(again);
+    await yieldTurn();
+    expect(engine.collectSource).not.toHaveBeenCalled();
+  } finally {
+    runner.suspend();
+    reopened?.close();
+    if (stores.includes(store)) {
+      store.close();
+      stores.splice(stores.indexOf(store), 1);
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a pre-queue crash resumes waiting/searching rows and leaves settled sources alone", async () => {
+  const { store, runner, engine, context } = setup();
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough" }),
+    2,
+  );
+  const rows = createSearchSourcesStore(store);
+  for (const target of context.sources)
+    rows.put(search.id, {
+      sourceId: target.id,
+      label: target.label,
+      url: target.startingUrl,
+      state: target.id === "one" ? "done" : "searching",
+      lane: "http",
+      phase: null,
+      cards: 0,
+      related: 0,
+      unrelated: 0,
+      seen: 0,
+      failedReads: 0,
+      found: 0,
+      added: 0,
+      hidden: 0,
+      message: null,
+    });
+  store.searches.count(search.id, { sourcesDone: 1 });
+  context.sources = [
+    ...context.sources,
+    JobDiscoveryTargetSchema.parse({
+      id: "new-site",
+      label: "Added while closed",
+      startingUrl: "https://new.example/jobs",
+    }),
+  ];
+  runner.suspend();
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await finished(restarted);
+  expect(
+    engine.collectSource.mock.calls.map(([input]) => input.target.id),
+  ).toEqual(["two"]);
+  expect(store.searches.get(search.id)).toMatchObject({
+    state: "done",
+    sourcesTotal: 2,
+    sourcesDone: 2,
+  });
+});
+
+test("a crash after durable planning and before any source starts loses no queue items", async () => {
+  const { store, engine, context } = setup();
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough" }),
+    context.sources.length,
+  );
+  const rows = createSearchSourcesStore(store);
+  store.transaction(() => {
+    for (const target of context.sources) rows.plan(search.id, target, false);
+  });
+  // A new runner has no volatile state from the crashed process and must use
+  // the committed plan even though no progress row was ever written.
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve({ ...context, sources: [] }),
+  });
+  runners.push(restarted);
+  await finished(restarted);
+  expect(
+    engine.collectSource.mock.calls.map(([input]) => input.target.id).sort(),
+  ).toEqual(["one", "two"]);
+  expect(store.searches.get(search.id)).toMatchObject({
+    state: "done",
+    sourcesDone: 2,
+    sourcesTotal: 2,
+  });
+});
+
+test("a crash recovers accepted card facts even when their source no longer returns them", async () => {
+  const { store, engine, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough", postedWithin: "any" }),
+    1,
+  );
+  const rows = createSearchSourcesStore(store);
+  rows.plan(search.id, context.sources[0]!, false);
+  const accepted = card("one");
+  rows.cardQueue(search.id).push([accepted]);
+  // The crashed process had already leased this card for screening.
+  rows.cardQueue(search.id).take("one", 400);
+  engine.collectSource.mockResolvedValue({
+    cards: [],
+    pagesRead: 1,
+    complete: true,
+    notes: [],
+  });
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await finished(restarted);
+  expect(
+    engine.readListings.mock.calls.flatMap(([input]) =>
+      input.cards.map((card) => card.url),
+    ),
+  ).toEqual([accepted.url]);
+  expect(store.stageCounts().found).toBe(1);
+  expect(rows.cardUrls(search.id, "one")).toEqual([]);
+  expect(store.searches.get(search.id)).toMatchObject({
+    state: "done",
+    sourcesDone: 1,
+  });
+});
+
+test("recovered card processing starts while another source is still collecting", async () => {
+  const { store, engine, context } = setup();
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough", postedWithin: "any" }),
+    2,
+  );
+  const rows = createSearchSourcesStore(store);
+  for (const target of context.sources) rows.plan(search.id, target, false);
+  rows.cardQueue(search.id).push([card("one")]);
+  const gate = deferred<void>();
+  engine.collectSource.mockImplementation(async ({ target }) => {
+    if (target.id === "two") await gate.promise;
+    return { cards: [], pagesRead: 1, complete: true, notes: [] };
+  });
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  try {
+    await vi.waitFor(() => expect(store.stageCounts().found).toBe(1));
+    expect(restarted.status().search?.state).toBe("running");
+  } finally {
+    gate.resolve();
+    await finished(restarted);
+  }
+});
+
+test("the person's explicit Stop is retained and never auto-resumed", async () => {
+  const { store, runner, engine, context } = setup();
+  engine.collectSource.mockImplementation(async ({ signal }) => {
+    await new Promise<void>((_resolve, reject) =>
+      signal.addEventListener("abort", () => reject(new Error("Stopped")), {
+        once: true,
+      }),
+    );
+    return { cards: [], pagesRead: 0, complete: false, notes: [] };
+  });
+  await runner.start({ depth: "thorough" });
+  await yieldTurn();
+  runner.stop();
+  engine.collectSource.mockClear();
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await yieldTurn();
+  expect(engine.collectSource).not.toHaveBeenCalled();
+  expect(restarted.status().search?.state).toBe("stopped");
+});
 
 test("streamed matches persist before screening finishes and final results do not reread or recount them", async () => {
   const { runner, engine, store } = setup();
@@ -1395,11 +1687,10 @@ test.each([false, true])(
     context.sources = sites.enabled().map(jobSiteTarget);
     access.request(1, "Sign in");
     const gate = deferred<void>();
-    let reads = 0;
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
       await onCards?.(numberedCards(target.id, 1, "Backend Engineer"));
-      // Related work in two screening waves (the second read waits on the
-      // gate), followed by a long unrelated run.
+      // Collection can pool these into one wave or several; all detail work
+      // remains held while access is checked below.
       await onCards?.([
         ...numberedCards(target.id, 1, "Backend Engineer", 1),
         ...numberedCards(target.id, 99, "Nurse", 2),
@@ -1409,9 +1700,8 @@ test.each([false, true])(
       return { cards: [], complete: true, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
-      const first = reads++ === 0;
-      if (!first) await gate.promise;
-      return blocked && !first
+      await gate.promise;
+      return blocked
         ? {
             jobs: [],
             failures: cards.map(({ url }) => ({

@@ -666,7 +666,7 @@ describe("job store", () => {
     ]);
   });
 
-  it("keeps a search's counts and marks one cut off by a restart as stopped", () => {
+  it("keeps an interrupted search running with its counts for restart recovery", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "job-store-"));
     const file = path.join(dir, "jobs.sqlite");
     try {
@@ -693,7 +693,12 @@ describe("job store", () => {
       });
       store.close();
       const reopened = openJobStore(file);
-      expect(reopened.searches.get(search.id)?.state).toBe("stopped");
+      expect(reopened.searches.get(search.id)).toMatchObject({
+        state: "running",
+        finishedAt: null,
+        sourcesDone: 1,
+        added: 6,
+      });
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

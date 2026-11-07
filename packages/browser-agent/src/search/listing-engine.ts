@@ -128,96 +128,100 @@ async function ask<Output, Input>(
     },
     { role: "user", content: JSON.stringify(data) },
   ];
-  while (true) {
-    model.signal?.throwIfAborted();
-    const modelMessages = parts.prepare(
-      [...messages, ...recovery],
-      requestChars,
-    );
-    let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
-    try {
-      reply = await model.client.chatWithTools(modelMessages, tools, {
-        ...(model.signal ? { signal: model.signal } : {}),
-        reasoningTask,
-        includeUsage: true,
-        // The selected Chat gateway rejects response_format=json_object.
-        // The prompt requests JSON; parsing and per-row schemas still validate it.
-        ...(jsonSchema ? { jsonSchema } : {}),
-      });
-    } catch (error) {
+  try {
+    while (true) {
       model.signal?.throwIfAborted();
-      if (isModelInputLimit(error)) {
-        parts.recover(
-          Math.min(requestChars, JSON.stringify(modelMessages).length),
-        );
+      const modelMessages = parts.prepare(
+        [...messages, ...recovery],
+        requestChars,
+      );
+      let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
+      try {
+        reply = await model.client.chatWithTools(modelMessages, tools, {
+          ...(model.signal ? { signal: model.signal } : {}),
+          reasoningTask,
+          includeUsage: true,
+          // The selected Chat gateway rejects response_format=json_object.
+          // The prompt requests JSON; parsing and per-row schemas still validate it.
+          ...(jsonSchema ? { jsonSchema } : {}),
+        });
+      } catch (error) {
+        model.signal?.throwIfAborted();
+        if (isModelInputLimit(error)) {
+          parts.recover(
+            Math.min(requestChars, JSON.stringify(modelMessages).length),
+          );
+          if (
+            JSON.stringify(
+              parts.prepare([...messages, ...recovery], requestChars),
+            ) !== JSON.stringify(modelMessages)
+          )
+            continue;
+        }
+        // The provider transport rejects truncated responses before returning a
+        // finish reason. Content filters and other service errors are not limits.
         if (
-          JSON.stringify(
-            parts.prepare([...messages, ...recovery], requestChars),
-          ) !== JSON.stringify(modelMessages)
+          !(error instanceof Error) ||
+          !/incomplete response:\s*(?:max_output_tokens|length)\b/iu.test(
+            error.message,
+          )
         )
-          continue;
+          throw error;
+        if (reasoningTask === "fit_batch")
+          throw new ModelOutputLimitError("max_output_tokens");
+        recovery.push({
+          role: "user",
+          content:
+            "Your last reply reached the route's maximum output and was discarded. Return concise JSON for the requested ids; omit commentary and split work where possible. No result from that reply was saved.",
+        });
+        continue;
       }
-      // The provider transport rejects truncated responses before returning a
-      // finish reason. Content filters and other service errors are not limits.
-      if (
-        !(error instanceof Error) ||
-        !/incomplete response:\s*(?:max_output_tokens|length)\b/iu.test(
-          error.message,
-        )
-      )
-        throw error;
-      if (reasoningTask === "fit_batch")
-        throw new ModelOutputLimitError("max_output_tokens");
-      recovery.push({
-        role: "user",
-        content:
-          "Your last reply reached the route's maximum output and was discarded. Return concise JSON for the requested ids; omit commentary and split work where possible. No result from that reply was saved.",
-      });
-      continue;
-    }
-    model.signal?.throwIfAborted();
-    if (reply.usage) model.onUsage?.(reply.usage, reasoningTask);
-    if (reply.toolCalls?.length) {
-      messages.push({
-        role: "assistant",
-        content: reply.content ?? "",
-        toolCalls: reply.toolCalls,
-      });
-      for (const call of reply.toolCalls) {
-        const outcome =
-          call.function.name === parts.tool.definition.function.name
-            ? await parts.tool.execute(call.function.arguments, {
-                step: 0,
-                ...(model.signal ? { signal: model.signal } : {}),
-              })
-            : {
-                kind: "ok" as const,
-                content: `There is no tool called ${call.function.name}. Use read_context_part or return the requested JSON.`,
-              };
-        if (outcome.kind === "ok")
-          messages.push({
-            role: "tool",
-            toolCallId: call.id,
-            content: outcome.content,
-          });
+      model.signal?.throwIfAborted();
+      if (reply.usage) model.onUsage?.(reply.usage, reasoningTask);
+      if (reply.toolCalls?.length) {
+        messages.push({
+          role: "assistant",
+          content: reply.content ?? "",
+          toolCalls: reply.toolCalls,
+        });
+        for (const call of reply.toolCalls) {
+          const outcome =
+            call.function.name === parts.tool.definition.function.name
+              ? await parts.tool.execute(call.function.arguments, {
+                  step: 0,
+                  ...(model.signal ? { signal: model.signal } : {}),
+                })
+              : {
+                  kind: "ok" as const,
+                  content: `There is no tool called ${call.function.name}. Use read_context_part or return the requested JSON.`,
+                };
+          if (outcome.kind === "ok")
+            messages.push({
+              role: "tool",
+              toolCallId: call.id,
+              content: outcome.content,
+            });
+        }
+        continue;
       }
-      continue;
+      if (["length", "max_output_tokens"].includes(reply.finishReason ?? "")) {
+        if (reasoningTask === "fit_batch")
+          throw new ModelOutputLimitError(reply.finishReason);
+        recovery.push({
+          role: "user",
+          content:
+            "Your last reply reached the route's maximum output and was discarded. Return concise JSON for the requested ids; omit commentary and split work where possible. No result from that reply was saved.",
+        });
+        continue;
+      }
+      const raw = (reply.content ?? "")
+        .trim()
+        .replace(/^```(?:json)?\s*/iu, "")
+        .replace(/```$/u, "");
+      return schema.parse(JSON.parse(raw));
     }
-    if (["length", "max_output_tokens"].includes(reply.finishReason ?? "")) {
-      if (reasoningTask === "fit_batch")
-        throw new ModelOutputLimitError(reply.finishReason);
-      recovery.push({
-        role: "user",
-        content:
-          "Your last reply reached the route's maximum output and was discarded. Return concise JSON for the requested ids; omit commentary and split work where possible. No result from that reply was saved.",
-      });
-      continue;
-    }
-    const raw = (reply.content ?? "")
-      .trim()
-      .replace(/^```(?:json)?\s*/iu, "")
-      .replace(/```$/u, "");
-    return schema.parse(JSON.parse(raw));
+  } finally {
+    parts.dispose();
   }
 }
 

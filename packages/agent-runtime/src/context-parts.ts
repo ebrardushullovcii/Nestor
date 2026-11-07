@@ -4,6 +4,11 @@ import type {
   AgentLoopToolOutcome,
 } from "./agent-loop";
 import { contextMessageChars } from "./context-history";
+import {
+  createContextArchive,
+  contextTextKey,
+  type ExactContextText,
+} from "./context-archive";
 
 /** Provider input rejection, including gateways that wrap the provider's error. */
 export function isModelInputLimit(error: unknown): boolean {
@@ -34,17 +39,23 @@ export function isModelInputLimit(error: unknown): boolean {
 /** Exact, run-owned content. Part size is a representation of the route window,
  * never a limit on the amount of evidence the model can read. */
 export function createContextParts() {
-  const contents = new Map<string, string>();
+  const contents = new Map<string, ExactContextText>();
   const ids = new Map<string, string>();
+  const archive = createContextArchive();
+  let messageIds = new WeakMap<
+    AgentLoopMessage,
+    { text: string; id: string }
+  >();
   let nextId = 0;
   let partChars = 1;
   let recoveryChars = Infinity;
   const remember = (text: string): string => {
-    const existing = ids.get(text);
+    const key = contextTextKey(text);
+    const existing = ids.get(key);
     if (existing) return existing;
     const id = `context-${++nextId}`;
     contents.set(id, text);
-    ids.set(text, id);
+    ids.set(key, id);
     return id;
   };
   const part = (id: string, offset: number): AgentLoopToolOutcome => {
@@ -110,15 +121,32 @@ export function createContextParts() {
       return Promise.resolve(part(args.id, Number(args.offset)));
     },
   };
-  const notice = (text: string, previewChars: number): string => {
-    const id = remember(text);
+  const notice = (
+    text: ExactContextText,
+    previewChars: number,
+    id: string,
+  ): string => {
     const end = Math.min(text.length, previewChars);
     return `[Exact content in ordered parts: ${id}; totalChars=${text.length}. First part: characters 0..${end}. Read the rest with read_context_part({"id":"${id}","offset":${end}}); follow nextOffset until null. Every character remains available.]\n${text.slice(0, end)}`;
+  };
+  const messageId = (message: AgentLoopMessage) => {
+    let saved = messageIds.get(message);
+    if (!saved || saved.text !== message.content) {
+      saved = { text: message.content, id: remember(message.content) };
+      messageIds.set(message, saved);
+    }
+    return saved.id;
   };
   const size = (messages: readonly AgentLoopMessage[]) =>
     messages.reduce((n, message) => n + contextMessageChars(message) + 32, 0);
   return {
     tool,
+    dispose(): void {
+      contents.clear();
+      ids.clear();
+      archive.clear();
+      messageIds = new WeakMap();
+    },
     /** Called only after an actual provider rejection. No actions are replayed. */
     recover(maxChars: number): void {
       recoveryChars = Math.max(
@@ -167,52 +195,57 @@ export function createContextParts() {
             }
           }
           return message.role !== "system" && message.content.length > partChars
-            ? { ...message, content: notice(message.content, partChars) }
+            ? {
+                ...message,
+                content: notice(message.content, partChars, messageId(message)),
+              }
             : message;
         });
-      let represented = represent();
-      if (size(represented) <= windowChars) return represented;
       // Archive older complete call/result batches. The newest batch stays
       // inline; the archive preserves message roles, call ids and exact text.
-      const first = represented.findIndex(
-        (message) => message.role !== "system",
+      // Keep the original input/goal visible under its stable part id. Paging
+      // action history must never replace it with a growing archive of reads.
+      const first = messages.findIndex(
+        (message) => message.role === "assistant",
       );
-      let cut = represented.length - 1;
+      let cut = messages.length - 1;
       while (
         cut > first &&
-        represented[cut]?.role !== "assistant" &&
-        represented[cut]?.role !== "user"
+        messages[cut]?.role !== "assistant" &&
+        messages[cut]?.role !== "user"
       )
         cut--;
       // A user observation can follow tool results. Keep its complete batch.
-      while (cut > first && represented[cut - 1]?.role === "tool") cut--;
+      while (cut > first && messages[cut - 1]?.role === "tool") cut--;
       while (
         cut > first &&
-        represented[cut]?.role !== "assistant" &&
-        represented[cut]?.role !== "user"
+        messages[cut]?.role !== "assistant" &&
+        messages[cut]?.role !== "user"
       )
         cut--;
       if (first >= 0 && cut > first) {
-        const exact = JSON.stringify(
-          messages.slice(first, cut).map((message) => {
-            if (message.role !== "assistant") return message;
-            return {
-              role: message.role,
-              content: message.content,
-              ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
-            };
-          }),
-        );
+        const exact = archive(messages.slice(first, cut));
+        // The prefix key is stable for an unchanged snapshot. Its JSON is
+        // read lazily; never materialize a cumulative multi-megabyte string.
+        const key = `history:${exact.key}`;
+        let id = ids.get(key);
+        if (!id) {
+          id = `context-${++nextId}`;
+          ids.set(key, id);
+          contents.set(id, exact);
+        }
         active = [
           ...messages.slice(0, first),
           {
             role: "user",
-            content: `Earlier conversation messages (exact archive; includes the original goal and action history):\n${notice(exact, 0)}`,
+            content: `Earlier action history (exact archive; read only if needed). The original input remains above; continue reading its original id, not copies of earlier reads:\n${notice(exact, 0, id)}`,
           },
           ...messages.slice(cut),
         ];
-        represented = represent();
       }
+      // Only materialize the active batches. Resizing every archived reader
+      // result on every turn also creates quadratic transient allocations.
+      let represented = represent();
       // A single batch can contain many independent observations. Divide the
       // inline representation further until the entire batch fits, keeping
       // every original result behind its own stable id.

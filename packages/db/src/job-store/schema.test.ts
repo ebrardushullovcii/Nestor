@@ -94,6 +94,8 @@ const RELEASED_COLUMNS: Record<string, string> = {
     "job_id level state updated_at error draft_json previous_json approved_at pdf_path",
   search_sources:
     "id search_id source_id label url state lane phase cards related unrelated seen failed_reads found added hidden message",
+  search_source_queue: "search_id source_id target_json full completed",
+  search_listing_queue: "id search_id source_id url card_json leased",
   searches:
     "id state settings_json started_at finished_at sources_total sources_done found added merged scored error",
   seen_listing_cards: "url role_goals_key card_fingerprint verdict",
@@ -365,7 +367,7 @@ describe("job store schema", () => {
       });
     });
 
-    it("closes its handle when stopping a cut-off search fails", () => {
+    it("opens without attempting to stop a cut-off search", () => {
       withFile((file) => {
         openJobStore(file).close();
         // Called below with the instance it belongs to.
@@ -379,8 +381,9 @@ describe("job store schema", () => {
           },
         );
         const close = vi.spyOn(DatabaseSync.prototype, "close");
-        expect(() => openJobStore(file)).toThrow("database is locked");
-        expect(close).toHaveBeenCalledOnce();
+        const reopened = openJobStore(file);
+        expect(close).not.toHaveBeenCalled();
+        reopened.close();
       });
     });
   });

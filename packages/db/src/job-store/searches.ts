@@ -69,10 +69,8 @@ function toSearch(record: SearchRecord | undefined): JobSearchRecord | null {
 }
 
 export function createSearches(sql: Statements): JobSearches {
-  // A search still marked running was cut off when the app last closed.
-  sql(
-    "UPDATE searches SET state = 'stopped', finished_at = ? WHERE state = 'running'",
-  ).run(Date.now());
+  // Running rows and their durable source queue survive quit/crash. The runner
+  // resumes them; only the person's Stop changes a search to stopped.
   const get = (id: string) =>
     toSearch(
       sql("SELECT * FROM searches WHERE id = ?").get(id) as

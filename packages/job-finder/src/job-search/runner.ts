@@ -11,6 +11,7 @@ import {
   isRunnableJobDiscoveryTarget,
   jobSiteTarget,
   JobSearchSettingsSchema,
+  JobDiscoveryTargetSchema,
   type JobDiscoveryTarget,
   type JobSearchRecord,
   type JobSearchStatus,
@@ -30,6 +31,7 @@ import type {
 
 type FitQueue = ReturnType<typeof createFitQueue>;
 interface ActiveSearch {
+  suspended?: boolean;
   controller: AbortController;
   record: JobSearchRecord | null;
   starting: Promise<JobSearchRecord> | null;
@@ -175,7 +177,7 @@ export function createJobSearchRunner(
     state: "done" | "stopped" | "failed",
     error: string | null = null,
   ) => {
-    if (!run.record || run.record.state !== "running") return;
+    if (run.suspended || !run.record || run.record.state !== "running") return;
     run.record =
       deps.store.searches.finish(run.record.id, state, error) ?? run.record;
     search = run.record;
@@ -191,7 +193,11 @@ export function createJobSearchRunner(
     run: ActiveSearch,
     context: JobSearchContext,
     targets: JobDiscoveryTarget[],
-    forced: { ids: ReadonlySet<string>; full: boolean },
+    forced: {
+      ids: ReadonlySet<string>;
+      full: boolean;
+      fullIds?: ReadonlySet<string>;
+    },
   ) => {
     recoveryError = null;
     setMaxListeners(0, run.controller.signal);
@@ -279,8 +285,15 @@ export function createJobSearchRunner(
           : "") +
         (source.notes.length ? ` ${source.notes.join(" ")}` : "") +
         (source.readFailures.length ? ` ${source.readFailures.join(" ")}` : "");
-      write(source);
-      update(run, { sourcesDone: 1 });
+      // The settled row, queue acknowledgement and count commit together.
+      // A crash cannot acknowledge work whose result was not saved.
+      deps.store.transaction(() => {
+        resultRows.put(run.record!.id, source.row);
+        if (resultRows.settle(run.record!.id, source.target.id))
+          update(run, { sourcesDone: 1 });
+      });
+      dirty.delete(source);
+      revision++;
       source.urls.clear();
     };
     const needsAccess = (source: SourceWork, message: string) => {
@@ -494,7 +507,17 @@ export function createJobSearchRunner(
       if (before?.counted) update(run, { sourcesDone: -1 });
       else if (run.enqueue) update(run, { sourcesTotal: 1 });
       const source = sourceWork(target, full);
+      // Keep saved-result counts when restarting an interrupted source; URL
+      // identity in the job store keeps already saved postings out of reads.
+      const previous = resultRows.get(run.record!.id, target.id);
+      if (previous) {
+        source.row.found = previous.found;
+        source.row.added = previous.added;
+        source.row.hidden = previous.hidden;
+      }
+      resultRows.plan(run.record!.id, target, full);
       states.set(target.id, source);
+      pipeline.restore(source);
       write(source);
       void http
         .run(new URL(target.startingUrl).hostname, signal, async () => {
@@ -519,7 +542,6 @@ export function createJobSearchRunner(
         .catch((error: unknown) => {
           if (current(source)) {
             source.collected = true;
-            source.processed = source.row.cards;
             source.row.state = "failed";
             source.row.message = errorMessage(error);
             markDone(source);
@@ -533,11 +555,13 @@ export function createJobSearchRunner(
           enqueue(
             target,
             forced.ids.has(target.id),
-            forced.full && forced.ids.has(target.id),
+            forced.fullIds?.has(target.id) ??
+              (forced.full && forced.ids.has(target.id)),
           );
         flush();
       });
       run.enqueue = enqueue;
+      await pipeline.start();
       run.setReady(fits);
       fits.enqueue([
         ...visibleIds,
@@ -595,6 +619,7 @@ export function createJobSearchRunner(
   const begin = (
     input: JobSearchSettingsInput,
     forced?: { targets: JobDiscoveryTarget[]; full?: boolean },
+    resume?: JobSearchRecord,
   ): Promise<JobSearchRecord> => {
     if (active)
       return active.record
@@ -640,7 +665,7 @@ export function createJobSearchRunner(
             : settings.sites.ids
           ).map(String),
         );
-        const targets = forced
+        let targets = forced
           ? forced.targets.map((target) => ({ ...target, enabled: true }))
           : [
               ...new Map(
@@ -655,16 +680,85 @@ export function createJobSearchRunner(
                   .map((target) => [target.id, target]),
               ).values(),
             ];
-        run.record = deps.store.searches.start(settings, targets.length);
+        let fullIds: Set<string> | undefined;
+        deps.store.transaction(() => {
+          run.record =
+            resume ?? deps.store.searches.start(settings, targets.length);
+          if (resume && !resultRows.planned(resume.id)) {
+            // Upgrade an interrupted search written before durable queues.
+            const rows = [];
+            let after = 0;
+            for (;;) {
+              const page = resultRows.list({
+                searchId: resume.id,
+                text: "",
+                state: null,
+                after,
+                limit: 100,
+              });
+              rows.push(...page.rows);
+              if (page.nextCursor === null) break;
+              after = page.nextCursor;
+            }
+            const currentTargets = new Map(
+              context.sources.map((target) => [target.id, target]),
+            );
+            // Old forced retries kept the person's all-sites settings but ran
+            // only the recorded source rows. Do not expand one into all sites.
+            const byId = new Map(
+              (rows.length ? [] : targets).map((target) => [target.id, target]),
+            );
+            for (const row of rows) {
+              const existing = currentTargets.get(row.sourceId);
+              const target = existing
+                ? { ...existing, label: row.label, startingUrl: row.url }
+                : JobDiscoveryTargetSchema.parse({
+                    id: row.sourceId,
+                    label: row.label,
+                    startingUrl: row.url,
+                    enabled: true,
+                  });
+              byId.set(row.sourceId, target);
+            }
+            let done = 0;
+            for (const target of byId.values()) {
+              resultRows.plan(resume.id, target, false);
+              const row = rows.find((row) => row.sourceId === target.id);
+              if (
+                row &&
+                row.phase === null &&
+                row.state !== "waiting" &&
+                row.state !== "searching"
+              ) {
+                resultRows.settle(resume.id, target.id);
+                done++;
+              }
+            }
+            run.record = deps.store.searches.count(resume.id, {
+              sourcesDone: done - resume.sourcesDone,
+            });
+          }
+          if (resume) {
+            const pending = resultRows.pending(resume.id);
+            targets = pending.map((item) => item.target);
+            fullIds = new Set(
+              pending.filter((item) => item.full).map((item) => item.target.id),
+            );
+          } else {
+            for (const target of targets)
+              resultRows.plan(run.record!.id, target, Boolean(forced?.full));
+          }
+        });
         search = run.record;
         revision++;
-        const started = structuredClone(run.record);
+        const started = structuredClone(run.record!);
         void yieldTurn()
           .then(() =>
             withProviderProgress(() =>
               execute(run, context, targets, {
                 ids: new Set(forced?.targets.map((target) => target.id)),
                 full: forced?.full ?? false,
+                ...(fullIds ? { fullIds } : {}),
               }),
             ),
           )
@@ -771,6 +865,18 @@ export function createJobSearchRunner(
       run.setReady(null);
       finish(run, "stopped");
     },
+    suspend() {
+      if (continuation) clearTimeout(continuation);
+      continuation = null;
+      recovery?.controller.abort();
+      const run = active;
+      if (!run) return;
+      run.flush?.();
+      run.suspended = true;
+      run.controller.abort();
+      run.setReady(null);
+      active = null;
+    },
     status,
     onStatus(listener) {
       listeners.add(listener);
@@ -869,5 +975,10 @@ export function createJobSearchRunner(
       return result;
     },
   };
+  if (search?.state === "running")
+    void begin(search.settings, undefined, search).catch((error: unknown) => {
+      recoveryError = errorMessage(error);
+      notify(true);
+    });
   return runner;
 }

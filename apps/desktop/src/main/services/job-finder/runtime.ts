@@ -45,7 +45,7 @@ import { startResumeService, stopResumeService } from "../resumes";
 import { startApplicationService } from "../applications";
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
 import { withEmbeddedBrowserActivity } from "../browser/embedded-browser-runtime";
-import { setJobSearchServiceFactory } from "../job-commands";
+import { setJobSearchServiceFactory, suspendJobSearch } from "../job-commands";
 import { getJobStore } from "../job-store";
 import { getSendGuards } from "../send-guards";
 import { createLocalJobFinderDocumentManager } from "../../adapters/job-finder-document-manager";
@@ -647,6 +647,7 @@ export async function setJobFinderRuntimeTestEnv(
 
 /** Stops a running site check, the resume writer and Apply. */
 export async function shutdownJobFinderRuntime() {
+  await suspendJobSearch();
   const starting = runtimePromise;
   runtimePromise = undefined;
   if (!starting) return;

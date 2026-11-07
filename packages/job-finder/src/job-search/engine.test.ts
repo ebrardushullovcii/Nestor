@@ -16,6 +16,105 @@ import { createListingSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import { fitContextFingerprint } from "./fit-input";
 
+test("screening, full reads and fit use the selected million-token route's real window", async () => {
+  const seed = createSeed();
+  const base = createDeterministicJobFinderAiClient();
+  const text = "Published duty. ".repeat(22000) + "FINAL FACT";
+  const card = {
+    url: "https://board.example/jobs/one",
+    title: "Frontend Engineer",
+    text,
+    listingText: text,
+    cardFingerprint: "one",
+    sourceId: "board",
+    sourceLabel: "Board",
+  };
+  const stages: string[] = [];
+  const engine = createListingSearchEngine({
+    aiClient: {
+      ...base,
+      getStatus: () => ({
+        ...base.getStatus(),
+        modelContextWindowTokens: 1_000_000,
+      }),
+      chatWithTools: (messages, _tools, options) => {
+        stages.push(options?.reasoningTask ?? "");
+        expect(JSON.stringify(messages)).not.toContain(
+          "Exact content in ordered parts:",
+        );
+        expect(JSON.stringify(messages)).toContain("FINAL FACT");
+        if (options?.reasoningTask === "listing_screen")
+          return Promise.resolve({ content: '{"keep":{"0":1}}' });
+        if (options?.reasoningTask === "page_read")
+          return Promise.resolve({
+            content: JSON.stringify({
+              jobs: [
+                {
+                  id: 0,
+                  title: card.title,
+                  company: "Synthetic Employer",
+                  location: "Remote",
+                  workModes: ["remote"],
+                  sourceJobId: null,
+                  employmentType: null,
+                  seniority: null,
+                  salaryText: null,
+                  closed: false,
+                },
+              ],
+            }),
+          });
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              {
+                id: 1,
+                s: 72,
+                why: "Synthetic",
+                r: ["related", "Synthetic"],
+                p: ["aligned", "Synthetic"],
+                c: ["partial", "Synthetic"],
+              },
+            ],
+          }),
+        });
+      },
+    },
+    browserRuntime: {},
+  });
+  const store = openJobStore(":memory:");
+  const context = {
+    profile: seed.profile,
+    searchPreferences: seed.searchPreferences,
+    sources: [],
+    sourceInstructionArtifacts: [],
+  };
+  const signal = new AbortController().signal;
+  try {
+    const screened = await engine.screenCards({
+      cards: [card],
+      context,
+      settings: JobSearchSettingsSchema.parse({}),
+      signal,
+      knownUrls: () => [],
+      seenCards: () => [],
+    });
+    expect(screened.related).toHaveLength(1);
+    const read = await engine.readListings({ cards: [card], signal });
+    expect(read.failures).toEqual([]);
+    expect(read.jobs).toHaveLength(1);
+    const saved = store.saveFoundJobs({ searchId: null, jobs: read.jobs });
+    await engine.fitJobs({
+      jobs: [store.getJob(saved.ids[0]!)!],
+      context,
+      signal,
+    });
+    expect(stages).toEqual(["listing_screen", "page_read", "fit_batch"]);
+  } finally {
+    store.close();
+  }
+});
+
 test("a repeated search does not read or rescore an unchanged saved posting", async () => {
   const seed = createSeed();
   const store = openJobStore(":memory:");

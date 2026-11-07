@@ -250,7 +250,7 @@ export function openJobStore(
     migrateHideOwners(statements);
     return statements;
   });
-  // Its setup writes (a search cut off by the last close is stopped).
+  // Search rows preserve interrupted work for the runner's durable recovery.
   const searches = closingOnFailure(db, () => createSearches(sql));
   const listeners = new Set<(change: JobChange) => void>();
   let depth = 0;

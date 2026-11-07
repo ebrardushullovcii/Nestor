@@ -1,6 +1,8 @@
 import { expect, test, vi } from "vitest";
 import type { ListingCard } from "@nestor/contracts";
 import { createCardWaves } from "./card-waves";
+import { createSearchSourcesStore, openJobStore } from "@nestor/db/job-store";
+import { JobSearchSettingsSchema } from "@nestor/contracts";
 
 const card = {
   sourceId: "synthetic",
@@ -10,6 +12,50 @@ const card = {
   sourceLabel: "Synthetic",
   cardFingerprint: "one",
 } satisfies ListingCard;
+
+test("a durable backlog acknowledges browser cards immediately while a slow source is screening", async () => {
+  const store = openJobStore(":memory:");
+  const search = store.searches.start(JobSearchSettingsSchema.parse({}), 2);
+  const controller = new AbortController();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const read: string[] = [];
+  const queue = createSearchSourcesStore(store).cardQueue(search.id);
+  const waves = createCardWaves(
+    controller.signal,
+    async (cards) => {
+      if (cards[0]!.sourceId === "slow") await gate;
+      read.push(...cards.map((card) => card.url));
+    },
+    2,
+    queue,
+  );
+  const cards = Array.from({ length: 3201 }, (_, i) => ({
+    ...card,
+    sourceId: "slow",
+    url: `https://slow.example/${i}`,
+  }));
+  try {
+    await waves.push(cards); // Does not await screening or consume 180 seconds of tool idle.
+    expect(
+      createSearchSourcesStore(store).cardUrls(search.id, "slow"),
+    ).toHaveLength(3201);
+    await waves.push([
+      { ...card, sourceId: "healthy", url: "https://healthy.example/one" },
+    ]);
+    await waves.checkpoint("healthy");
+    expect(read).toEqual(["https://healthy.example/one"]);
+    release();
+    await waves.drain();
+    expect(read).toHaveLength(3202);
+  } finally {
+    release();
+    controller.abort();
+    store.close();
+  }
+});
 
 test("a checkpoint flushes a small page, then restores pooling for later pages", async () => {
   vi.useFakeTimers();

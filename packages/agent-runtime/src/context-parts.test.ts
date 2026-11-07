@@ -166,3 +166,20 @@ test.each([
 test("ordinary provider failures are not context recovery", () => {
   expect(isModelInputLimit(Error("Insufficient account funds"))).toBe(false);
 });
+
+test("a completed call releases its snapshots while a live call can read them", async () => {
+  const parts = createContextParts();
+  const represented = parts.prepare(
+    [{ role: "user", content: "Facts 🦉".repeat(1000) }],
+    1000,
+  );
+  const id = /parts: ([^;]+);/u.exec(represented[0]!.content)![1]!;
+  const read = () =>
+    parts.tool.execute(JSON.stringify({ id, offset: 0 }), { step: 0 });
+  expect((await read()).kind).toBe("ok");
+  parts.dispose();
+  const result = await read();
+  expect(result.kind === "ok" && result.content).toContain(
+    "Unknown context part id",
+  );
+});

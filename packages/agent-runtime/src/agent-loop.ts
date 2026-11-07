@@ -440,6 +440,7 @@ export async function runAgentLoop(
       stop?: { reason: string; data?: unknown };
     } = {},
   ): AgentLoopResult => {
+    contextParts.dispose();
     if (["timed_out", "ceiling", "stalled"].includes(ending))
       traceOurs(
         "packages/agent-runtime/src/agent-loop.ts:runAgentLoop",

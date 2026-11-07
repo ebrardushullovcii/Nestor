@@ -98,6 +98,11 @@ export function createListingSearchEngine(deps: {
   const client = {
     chatWithTools: coalesceScreening(deps.aiClient.chatWithTools),
   };
+  const modelContext = () => {
+    const contextWindowTokens =
+      deps.aiClient.getStatus().modelContextWindowTokens;
+    return contextWindowTokens ? { contextWindowTokens } : {};
+  };
   const onUsage = (usage: ModelTokenUsage, stage: string) =>
     console.info("[Job search AI]", JSON.stringify({ stage, ...usage }));
   const browser = createHostQueue({
@@ -382,20 +387,29 @@ export function createListingSearchEngine(deps: {
           decisions.delete(decisions.keys().next().value!);
       }
       const startedAt = Date.now();
-      return screenCards({
-        decisions: cache,
-        client,
-        onUsage,
-        cards: input.cards,
-        signal: input.signal,
-        goals,
-        lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
-        refreshUrls: input.refreshUrls ?? [],
-        lookupSeenCards: (cards, key) =>
-          Promise.resolve(input.seenCards(cards, key)),
-        readPage,
-        ...(input.onRelated ? { onRelated: input.onRelated } : {}),
-      }).finally(() =>
+      return withTraceScope(
+        {
+          sourceId: undefined,
+          sourceUrl: undefined,
+          sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
+        },
+        () =>
+          screenCards({
+            ...modelContext(),
+            decisions: cache,
+            client,
+            onUsage,
+            cards: input.cards,
+            signal: input.signal,
+            goals,
+            lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
+            refreshUrls: input.refreshUrls ?? [],
+            lookupSeenCards: (cards, key) =>
+              Promise.resolve(input.seenCards(cards, key)),
+            readPage,
+            ...(input.onRelated ? { onRelated: input.onRelated } : {}),
+          }),
+      ).finally(() =>
         timing("screen", startedAt, {
           count: input.cards.length,
           source: input.cards[0]?.sourceId ?? "",
@@ -404,7 +418,21 @@ export function createListingSearchEngine(deps: {
     },
     async readListings(input) {
       if (input.lane !== "browser" || !input.context)
-        return readListings({ client, onUsage, ...input, readPage });
+        return withTraceScope(
+          {
+            sourceId: undefined,
+            sourceUrl: undefined,
+            sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
+          },
+          () =>
+            readListings({
+              client,
+              onUsage,
+              ...input,
+              readPage,
+              ...modelContext(),
+            }),
+        );
       const context = input.context;
       const result: ReadListingResult = { jobs: [], failures: [] };
       for (const card of input.cards) {
@@ -529,29 +557,47 @@ export function createListingSearchEngine(deps: {
       return result;
     },
     fitJobs: (input) =>
-      fitJobs({
-        client: {
-          chatWithTools: (messages, tools, options) =>
-            client.chatWithTools(messages, tools, {
-              ...options,
-              conversationKey: modelConversationKeys.fitJudging(
-                input.context.profile,
+      withTraceScope(
+        {
+          sourceId: undefined,
+          sourceUrl: undefined,
+          listingUrl: undefined,
+          sourceIds: [
+            ...new Set(
+              input.jobs.flatMap((job) =>
+                job.sightings.map((sighting) => sighting.sourceId),
               ),
+            ),
+          ],
+          jobIds: input.jobs.map((job) => job.id),
+        },
+        () =>
+          fitJobs({
+            ...modelContext(),
+            client: {
+              chatWithTools: (messages, tools, options) =>
+                client.chatWithTools(messages, tools, {
+                  ...options,
+                  conversationKey: modelConversationKeys.fitJudging(
+                    input.context.profile,
+                  ),
+                }),
+            },
+            ...input,
+            onUsage: (usage, stage) => {
+              onUsage(usage, stage);
+              input.onUsage?.(usage);
+            },
+            profile: input.context.profile,
+            ...(input.context.countryOptionFallbacks?.length
+              ? { countryOptionFallbacks: input.context.countryOptionFallbacks }
+              : {}),
+            goals: toJobSearchGoals({
+              ...input.context.searchPreferences,
+              remoteCountsAsAnyLocation:
+                input.context.remoteCountsAsAnyLocation,
             }),
-        },
-        ...input,
-        onUsage: (usage, stage) => {
-          onUsage(usage, stage);
-          input.onUsage?.(usage);
-        },
-        profile: input.context.profile,
-        ...(input.context.countryOptionFallbacks?.length
-          ? { countryOptionFallbacks: input.context.countryOptionFallbacks }
-          : {}),
-        goals: toJobSearchGoals({
-          ...input.context.searchPreferences,
-          remoteCountsAsAnyLocation: input.context.remoteCountsAsAnyLocation,
-        }),
-      }),
+          }),
+      ),
   };
 }

@@ -2,16 +2,47 @@ import type { ListingCard } from "@nestor/contracts";
 import { abortable } from "./async";
 import { reportSelfLimitHit } from "@nestor/core";
 
+export interface CardWaveQueue {
+  push(cards: readonly ListingCard[]): void;
+  counts(): [string, number][];
+  take(sourceId: string, size: number): ListingCard[];
+  complete(cards: readonly ListingCard[]): void;
+}
+
 /** Bounded, serial waves per source; a slow source must not hold healthy ones. */
 export function createCardWaves(
   signal: AbortSignal,
   consume: (cards: ListingCard[]) => Promise<void>,
   concurrency = 1,
+  durable?: CardWaveQueue,
 ) {
   const pending: ListingCard[] = [];
+  const queue: CardWaveQueue = durable ?? {
+    push(cards) {
+      pending.push(...cards);
+    },
+    counts() {
+      const counts = new Map<string, number>();
+      for (const card of pending)
+        counts.set(card.sourceId, (counts.get(card.sourceId) ?? 0) + 1);
+      return [...counts];
+    },
+    take(sourceId, size) {
+      const batch: ListingCard[] = [];
+      for (let index = 0; index < pending.length && batch.length < size; ) {
+        if (pending[index]!.sourceId === sourceId)
+          batch.push(...pending.splice(index, 1));
+        else index++;
+      }
+      return batch;
+    },
+    complete() {},
+  };
+  const pendingCount = () =>
+    queue.counts().reduce((n, [, count]) => n + count, 0);
   const space: (() => void)[] = [];
   const checkpoints: { targets: Map<string, number>; resolve(): void }[] = [];
-  const queued = new Map<string, number>();
+  const queued = new Map<string, number>(queue.counts());
   const consumed = new Map<string, number>();
   const active = new Map<string, Promise<void>>();
   const limit = Math.max(1, Math.floor(concurrency));
@@ -44,7 +75,7 @@ export function createCardWaves(
       releaseCheckpoints();
       return;
     }
-    if (pending.length && active.size >= limit)
+    if (pendingCount() && active.size >= limit)
       reportSelfLimitHit({
         limit: "card_wave_concurrency",
         kind: "concurrency",
@@ -52,32 +83,24 @@ export function createCardWaves(
         where: "job-finder/createCardWaves",
       });
     while (active.size < limit) {
-      const source = pending.find(
-        (card) => !active.has(card.sourceId),
-      )?.sourceId;
+      const source = queue.counts().find(([id]) => !active.has(id))?.[0];
       if (source === undefined) return;
-      const batch: ListingCard[] = [];
-      for (const card of pending) {
-        if (card.sourceId === source) batch.push(card);
-        if (batch.length === 400) break;
-      }
-      if (!draining && !flushing && !force && batch.length < 400) {
+      const count = queue.counts().find(([id]) => id === source)?.[1] ?? 0;
+      if (!draining && !flushing && !force && count < 400) {
         timer ??= setTimeout(() => {
           timer = null;
           pump(true);
         }, 400);
         return;
       }
-      let remaining = batch.length;
-      for (let index = 0; index < pending.length && remaining > 0; ) {
-        if (pending[index]!.sourceId === source) {
-          pending.splice(index, 1);
-          remaining--;
-        } else index++;
-      }
+      const batch = queue.take(source, 400);
       for (const resolve of space.splice(0)) resolve();
       const work = Promise.resolve()
-        .then(() => consume(batch))
+        .then(async () => {
+          await consume(batch);
+          signal.throwIfAborted();
+          queue.complete(batch);
+        })
         .catch((reason: unknown) => {
           error = reason instanceof Error ? reason : new Error(String(reason));
         })
@@ -97,7 +120,10 @@ export function createCardWaves(
       for (let index = 0; index < cards.length; index += 400) {
         signal.throwIfAborted();
         checkError();
-        while (pending.length >= 2000) {
+        // Production queues persist before acknowledging acceptance and read
+        // only active waves into memory. They never wait for another source's
+        // screening inside a browser tool's connection-idle boundary.
+        while (!durable && pendingCount() >= 2000) {
           reportSelfLimitHit({
             limit: "card_wave_pending",
             kind: "count",
@@ -112,11 +138,12 @@ export function createCardWaves(
         }
         signal.throwIfAborted();
         const chunk = cards.slice(index, index + 400);
-        pending.push(...chunk);
+        queue.push(chunk);
         for (const card of chunk)
           queued.set(card.sourceId, (queued.get(card.sourceId) ?? 0) + 1);
         pump();
       }
+      pump(); // Also starts durable work restored after a crash.
     },
     /** Snapshot accepted work. Quick waits only for its own source's cards. */
     async checkpoint(sourceId?: string) {
@@ -143,7 +170,7 @@ export function createCardWaves(
       draining = true;
       try {
         pump();
-        while (active.size || pending.length) {
+        while (active.size || pendingCount()) {
           if (active.size)
             await abortable(Promise.race(active.values()), signal);
           else pump();

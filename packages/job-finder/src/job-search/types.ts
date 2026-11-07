@@ -56,6 +56,8 @@ export interface JobSearchRunner {
   start(settings: JobSearchSettingsInput): Promise<JobSearchRecord>;
   /** Also cancels a standalone scoreUnscored call. Saved jobs stay saved. */
   stop(): void;
+  /** Quit preserves the running record and queue for the next process. */
+  suspend(): void;
   /** Rechecks only this site; joins the running search, or starts a single-site search. */
   retrySource(id: number): Promise<JobSearchRecord>;
   /** Reads the rest of one site, or of every site the last search left partial. */
