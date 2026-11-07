@@ -4,6 +4,7 @@ import {
   ApplyExecutionResultSchema,
   JobListingFactsSchema,
   JobSearchSettingsSchema,
+  JobDiscoveryTargetSchema,
   ResumeDraftSchema,
   SavedOptionFallbackSchema,
   SubmissionOutcomeRecordSchema,
@@ -48,6 +49,7 @@ interface StoredJsonSchema {
 }
 
 const STORED_JSON: Record<string, StoredJsonSchema> = {
+  JobDiscoveryTargetSchema,
   ResumeDraftSchema,
   JobSearchSettingsSchema,
   TrackerFilterSchema,
@@ -75,6 +77,7 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
 };
 
 const FIXTURES: Record<string, string> = {
+  JobDiscoveryTargetSchema: "job-discovery-target",
   ResumeDraftSchema: "resume-draft",
   JobSearchSettingsSchema: "job-search-settings",
   TrackerFilterSchema: "tracker-filter",

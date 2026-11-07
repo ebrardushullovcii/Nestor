@@ -1,4 +1,6 @@
 import {
+  JobDiscoveryTargetSchema,
+  type JobDiscoveryTarget,
   JobSearchSourceQuerySchema,
   type JobSearchSourceQuery,
   type JobSearchSourcePage,
@@ -31,6 +33,14 @@ CREATE TABLE IF NOT EXISTS search_sources (
 CREATE INDEX IF NOT EXISTS search_sources_page ON search_sources(search_id, id);
 CREATE INDEX IF NOT EXISTS search_sources_state ON search_sources(search_id, state, phase, id);
 CREATE INDEX IF NOT EXISTS search_sources_label ON search_sources(search_id, label, id);
+CREATE TABLE IF NOT EXISTS search_source_queue (
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  full INTEGER NOT NULL DEFAULT 0,
+  completed INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(search_id, source_id)
+);
 CREATE TRIGGER IF NOT EXISTS search_sources_finished AFTER UPDATE OF state ON searches
 WHEN NEW.state IN ('stopped', 'failed') BEGIN
   UPDATE search_sources SET state = 'stopped', phase = NULL WHERE search_id = NEW.id AND state IN ('waiting', 'searching');
@@ -41,6 +51,50 @@ const COLUMNS = `source_id AS sourceId, label, url, state, lane, phase, cards, r
 export function createSearchSourcesStore(store: JobStore) {
   const { sql } = store;
   return {
+    get(searchId: string, sourceId: string): JobSearchSourceRow | null {
+      return (
+        (sql(
+          `SELECT ${COLUMNS} FROM search_sources WHERE search_id=? AND source_id=?`,
+        ).get(searchId, sourceId) as JobSearchSourceRow | undefined) ?? null
+      );
+    },
+    plan(searchId: string, target: JobDiscoveryTarget, full: boolean): void {
+      sql(`INSERT INTO search_source_queue(search_id, source_id, target_json, full)
+        VALUES (?, ?, ?, ?) ON CONFLICT(search_id, source_id) DO UPDATE SET
+        target_json=excluded.target_json, full=excluded.full, completed=0`).run(
+        searchId,
+        target.id,
+        JSON.stringify(target),
+        Number(full),
+      );
+    },
+    settle(searchId: string, sourceId: string): boolean {
+      return (
+        Number(
+          sql(`UPDATE search_source_queue SET completed=1
+        WHERE search_id=? AND source_id=? AND completed=0`).run(
+            searchId,
+            sourceId,
+          ).changes,
+        ) > 0
+      );
+    },
+    planned(searchId: string): boolean {
+      return Boolean(
+        sql("SELECT 1 FROM search_source_queue WHERE search_id=? LIMIT 1").get(
+          searchId,
+        ),
+      );
+    },
+    pending(searchId: string): { target: JobDiscoveryTarget; full: boolean }[] {
+      const rows = sql(
+        "SELECT target_json, full FROM search_source_queue WHERE search_id=? AND completed=0 ORDER BY rowid",
+      ).all(searchId) as { target_json: string; full: number }[];
+      return rows.map((row) => ({
+        target: JobDiscoveryTargetSchema.parse(JSON.parse(row.target_json)),
+        full: Boolean(row.full),
+      }));
+    },
     put(searchId: string, row: JobSearchSourceRow): void {
       store.transaction(() => {
         sql(`INSERT INTO search_sources(search_id, source_id, label, url, state, lane, phase, cards, related, unrelated, seen, failed_reads, found, added, hidden, message)

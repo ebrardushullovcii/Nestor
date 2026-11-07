@@ -382,20 +382,28 @@ export function createListingSearchEngine(deps: {
           decisions.delete(decisions.keys().next().value!);
       }
       const startedAt = Date.now();
-      return screenCards({
-        decisions: cache,
-        client,
-        onUsage,
-        cards: input.cards,
-        signal: input.signal,
-        goals,
-        lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
-        refreshUrls: input.refreshUrls ?? [],
-        lookupSeenCards: (cards, key) =>
-          Promise.resolve(input.seenCards(cards, key)),
-        readPage,
-        ...(input.onRelated ? { onRelated: input.onRelated } : {}),
-      }).finally(() =>
+      return withTraceScope(
+        {
+          sourceId: undefined,
+          sourceUrl: undefined,
+          sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
+        },
+        () =>
+          screenCards({
+            decisions: cache,
+            client,
+            onUsage,
+            cards: input.cards,
+            signal: input.signal,
+            goals,
+            lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
+            refreshUrls: input.refreshUrls ?? [],
+            lookupSeenCards: (cards, key) =>
+              Promise.resolve(input.seenCards(cards, key)),
+            readPage,
+            ...(input.onRelated ? { onRelated: input.onRelated } : {}),
+          }),
+      ).finally(() =>
         timing("screen", startedAt, {
           count: input.cards.length,
           source: input.cards[0]?.sourceId ?? "",

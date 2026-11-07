@@ -20,6 +20,7 @@ import { getJobStore } from "./job-store";
 
 /** A search runner that also reports its progress. */
 export interface JobSearchService extends JobSearchControl {
+  suspend?(): void;
   onStatus(listener: (status: JobSearchStatus) => void): () => void;
 }
 
@@ -153,7 +154,11 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     else
       console.warn("[Desktop] Dropped a malformed job change.", checked.error);
   });
-  if (store.stageCounts().found > 0 || store.unscoredJobIds(1).length > 0) {
+  if (
+    store.searches.latest()?.state === "running" ||
+    store.stageCounts().found > 0 ||
+    store.unscoredJobIds(1).length > 0
+  ) {
     setTimeout(scoreUnscoredJobs, 5_000).unref?.();
   }
 }
@@ -164,4 +169,13 @@ export async function discardJobSearch(): Promise<void> {
   searchService = null;
   searchServicePending = null;
   (await pending?.catch(() => null))?.stop();
+}
+
+/** Quit interrupts execution, while preserving the search's durable queue. */
+export async function suspendJobSearch(): Promise<void> {
+  const pending = searchServicePending;
+  const current = searchService;
+  searchService = null;
+  searchServicePending = null;
+  (current ?? (await pending?.catch(() => null)))?.suspend?.();
 }

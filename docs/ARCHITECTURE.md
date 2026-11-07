@@ -79,7 +79,10 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   destructive collection replacement.
 - Job, resume and application commands write selected rows in immediate SQLite
   transactions. Profile, goals, settings and setup have their own row stores;
-  search progress lives in search and source rows.
+  search progress lives in search and source rows. The durable source queue
+  snapshots each selected target before work starts; source results, queue
+  acknowledgement and completion counts commit together. Quit or crash leaves
+  the running search resumable at startup; explicit Stop remains stopped.
 - Resume-affecting profile and settings writes invalidate affected approvals
   in the same transaction (`packages/db/src/job-store/profile-effects.ts`).
 

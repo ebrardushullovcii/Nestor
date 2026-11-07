@@ -1,0 +1,14 @@
+{
+  "id": "synthetic-board",
+  "label": "Synthetic board",
+  "startingUrl": "https://board.example/jobs",
+  "enabled": true,
+  "adapterKind": "auto",
+  "customInstructions": "Read the published vacancy facts.",
+  "instructionStatus": "missing",
+  "validatedInstructionId": null,
+  "draftInstructionId": null,
+  "lastDebugRunId": null,
+  "lastVerifiedAt": null,
+  "staleReason": null
+}
