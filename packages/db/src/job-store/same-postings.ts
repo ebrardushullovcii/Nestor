@@ -7,6 +7,7 @@ import {
   samePostingCandidates,
   savedPostingFacts,
 } from "./found-jobs";
+import { sentPages, sentThrough } from "./sent-postings";
 import type { Statements } from "./statements";
 
 export interface SamePostingMerge {
@@ -133,6 +134,7 @@ export function mergeSamePostings(sql: Statements): SamePostingMergeReport {
         own.boards,
         own.targets,
         id,
+        own.sent,
       ).filter((other) => other < id);
       if (candidates.length !== 1) continue;
       const other = candidates[0]!;
@@ -147,6 +149,25 @@ export function mergeSamePostings(sql: Statements): SamePostingMergeReport {
     }
   }
   return report;
+}
+
+/**
+ * Joins two saved jobs found to be one posting, by the same rule as the
+ * startup merge. Returns the kept job, or null when each has its own
+ * application, tracker entry or resume and they stay apart.
+ */
+export function joinSavedJobs(
+  sql: Statements,
+  left: number,
+  right: number,
+): number | null {
+  const result = mergePair(
+    sql,
+    jobReferences(sql),
+    Math.min(left, right),
+    Math.max(left, right),
+  );
+  return "kept" in result ? result.kept : null;
 }
 
 function mergePair(
@@ -247,10 +268,15 @@ function untangleJobs(sql: Statements): { id: number; released: number }[] {
       const target = employerApplyTarget(row.url, row.apply_url);
       if (target) targets.add(target);
     }
+    // The posting its application was sent through ties a listing too, when
+    // the listing that was applied to stored no link to it.
+    const sent = sentPages(sql, job.id);
     const tied = (row: { url: string; apply_url: string | null }) => {
       if (listingOf(row.url) === own) return true;
       const target = employerApplyTarget(row.url, row.apply_url);
-      return target !== null && targets.has(target);
+      return (
+        target !== null && (targets.has(target) || sentThrough(sent, target))
+      );
     };
     const listings = new Map<string, Set<string>>();
     for (const row of sightings) {

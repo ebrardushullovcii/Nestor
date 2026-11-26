@@ -152,6 +152,10 @@ export function createHttpPageReader(
             return null;
           }
           answered(address.hostname);
+          if (readOptions.landingOnly) {
+            await response.body?.cancel();
+            return { html: "", finalUrl: response.url || url };
+          }
           if (!response.ok) {
             await response.body?.cancel();
             throw new DiscoveryPageReadError(response.status);

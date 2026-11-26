@@ -4,6 +4,13 @@ import type {
   SaveFoundJobsResult,
 } from "@nestor/contracts";
 import { toWorkModeMask } from "./job-list";
+import { joinSavedJobs } from "./same-postings";
+import {
+  hasSentApplication,
+  sentElsewhere,
+  sentPages,
+  sentThroughPosting,
+} from "./sent-postings";
 import type { Statements } from "./statements";
 
 const TRACKING_PARAMETERS = new Set([
@@ -157,11 +164,14 @@ export function boardOf(url: string): string {
   }
 }
 
-/** A saved job's boards and employer apply targets, from every sighting. */
+/**
+ * A saved job's boards and employer apply targets, from every sighting, and
+ * the employer pages its sent application went through.
+ */
 export function savedPostingFacts(
   sql: Statements,
   id: number,
-): { boards: Set<string>; targets: Set<string> } {
+): { boards: Set<string>; targets: Set<string>; sent: Set<string> } {
   const rows = sql(
     `SELECT url, apply_url FROM job_sightings WHERE job_id = ?
      UNION ALL SELECT url, apply_url FROM jobs WHERE id = ?`,
@@ -173,7 +183,7 @@ export function savedPostingFacts(
     const target = employerApplyTarget(row.url, row.apply_url);
     if (target) targets.add(target);
   }
-  return { boards, targets };
+  return { boards, targets, sent: sentPages(sql, id) };
 }
 
 /**
@@ -188,6 +198,7 @@ export function samePostingCandidates(
   boards: ReadonlySet<string>,
   targets: ReadonlySet<string>,
   except?: number,
+  sent: ReadonlySet<string> = new Set(),
 ): number[] {
   const ids = (
     sql(
@@ -198,7 +209,11 @@ export function samePostingCandidates(
     if (id === except) return false;
     const saved = savedPostingFacts(sql, id);
     for (const board of boards) if (saved.boards.has(board)) return false;
-    return !targetsConflict(saved.targets, targets);
+    return !(
+      targetsConflict(saved.targets, targets) ||
+      sentElsewhere(saved.sent, targets) ||
+      sentElsewhere(sent, saved.targets)
+    );
   });
 }
 
@@ -296,7 +311,7 @@ export function writeFoundJobs(
     `UPDATE jobs SET seen_at = max(seen_at, ?),
        salary_text = coalesce(salary_text, ?),
        posted_at = CASE WHEN posted_at = 0 THEN ? ELSE posted_at END,
-       apply_url = coalesce(apply_url, ?),
+       apply_url = CASE WHEN ? THEN ? ELSE coalesce(apply_url, ?) END,
        work_modes = CASE WHEN work_modes = 0 THEN ? ELSE work_modes END,
        source_count = (SELECT count(DISTINCT site) FROM job_sightings WHERE job_id = ?)
      WHERE id = ?`,
@@ -361,6 +376,38 @@ export function writeFoundJobs(
         otherBoard = true;
       }
     }
+
+    // A saved job that already holds this listing's employer posting, or
+    // sent an application through it, is this posting too. A listing first
+    // saved under its board's redirect meets it only now that the redirect
+    // was followed.
+    if (keys.target) {
+      const holder = findKey.get(`url:${keys.target}`) as
+        | (KeyMatch & { company: string })
+        | undefined;
+      const others = new Set<number>(
+        sentThroughPosting(sql, keys.role, keys.target),
+      );
+      if (holder && sameEmployer(holder.company, job.company))
+        others.add(holder.job_id);
+      for (const other of others) {
+        if (!match) match = jobMatch.get(other) as KeyMatch;
+        else if (other !== match.job_id) {
+          const kept = joinSavedJobs(sql, match.job_id, other);
+          if (kept !== null) match = jobMatch.get(kept) as KeyMatch;
+        }
+      }
+    }
+
+    // A job with a sent application keeps the employer, role and posting it
+    // was applied to. Only its own listing's read rewrites them; any other
+    // listing of it adds its sighting.
+    const held =
+      match !== undefined &&
+      hasSentApplication(sql, match.job_id) &&
+      normalizeUrl((oldListing.get(match.job_id) as { url: string }).url) !==
+        normalizeUrl(job.url);
+    if (held) otherBoard = true;
 
     const postedAt = toMs(job.postedAt);
     const workModes = toWorkModeMask(job.workModes);
@@ -465,22 +512,37 @@ export function writeFoundJobs(
           "DELETE FROM job_keys WHERE job_id=? AND key LIKE 'facts:%' AND key IS NOT ?",
         ).run(id, keys.facts);
       }
+      // The employer's form replaces a board's own link the job had.
+      const stored = oldListing.get(id) as {
+        url: string;
+        apply_url: string | null;
+      };
       refreshJob.run(
         now,
         job.salaryText,
         postedAt,
+        keys.target !== null &&
+          employerApplyTarget(stored.url, stored.apply_url) === null
+          ? 1
+          : 0,
+        job.applyUrl,
         job.applyUrl,
         workModes,
         id,
         id,
       );
+      const replaces = held ? 0 : fullRead;
       refreshDetails.run(
-        fullRead,
+        replaces,
         job.description,
         job.description,
         job.description,
         fullRead,
-        JSON.stringify(job.facts ?? {}),
+        JSON.stringify(
+          held
+            ? { applyLinkFollowed: job.facts?.applyLinkFollowed }
+            : (job.facts ?? {}),
+        ),
         ...[
           job.summary,
           job.seniority,
@@ -488,7 +550,7 @@ export function writeFoundJobs(
           job.salaryMin,
           job.salaryMax,
           job.salaryCurrency,
-        ].flatMap((value) => [fullRead, value, value]),
+        ].flatMap((value) => [replaces, value, value]),
         id,
       );
       merged.add(id);

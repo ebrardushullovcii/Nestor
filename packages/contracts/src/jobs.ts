@@ -181,6 +181,8 @@ export type JobSighting = z.infer<typeof JobSightingSchema>;
 export const JobListingFactsSchema = z.object({
   /** A successful read of this posting body, rather than a results card. */
   fullListingRead: z.boolean().optional(),
+  /** The listing's apply link on its own board was followed to where it lands. */
+  applyLinkFollowed: z.boolean().optional(),
   keySkills: z.array(z.string()).default([]),
   responsibilities: z.array(z.string()).default([]),
   minimumQualifications: z.array(z.string()).default([]),

@@ -92,6 +92,33 @@ function unboundApplyUrl(card: ListingCard, applyUrl: string): boolean {
   }
 }
 
+/**
+ * A stored apply link on the listing's own board that is not its own form
+ * (a /go/ or /l/ hop) was never followed to the employer's form. The listing
+ * is read once more, and that read follows it.
+ */
+function unfollowedBoardLink(
+  sql: Statements,
+  card: ListingCard,
+  row: StoredListing,
+): boolean {
+  if (!row.apply_url) return false;
+  try {
+    const own = new URL(card.url),
+      apply = new URL(row.apply_url);
+    const host = (url: URL) =>
+      url.hostname.toLowerCase().replace(/^www\./u, "");
+    if (host(own) !== host(apply) || !unboundApplyUrl(card, row.apply_url))
+      return false;
+  } catch {
+    return false;
+  }
+  const followed = sql(
+    "SELECT json_extract(facts_json, '$.applyLinkFollowed') AS followed FROM job_details WHERE job_id=?",
+  ).get(row.id) as { followed: number | null } | undefined;
+  return !followed?.followed;
+}
+
 function legacyNeedsRead(card: ListingCard, row: StoredListing): boolean {
   if (!row.full_read || !row.description.trim() || !row.apply_url) return true;
   if (text(card.title) !== text(row.title)) return true;
@@ -148,10 +175,11 @@ export function prepareListingCards(
           | { fingerprint: string; record_fingerprint: string }
           | undefined;
         if (
-          prior
+          (prior
             ? prior.fingerprint !== fingerprint ||
               prior.record_fingerprint !== recordFingerprint
-            : legacyNeedsRead(card, row)
+            : legacyNeedsRead(card, row)) ||
+          unfollowedBoardLink(sql, card, row)
         )
           refreshUrls.push(card.url);
         else if (!prior)
