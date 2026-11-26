@@ -209,6 +209,28 @@ test("trace omits credentials, MFA answers and private reasoning but retains the
   for (const fact of ["My experience", "Visible answer", "high"])
     expect(text).toContain(fact);
 });
+test("an environment secret is masked as its own token, never inside another word", () => {
+  // Windows CI images set PGPASSWORD=root machine-wide.
+  vi.stubEnv("PGPASSWORD", "root");
+  vi.stubEnv("NESTOR_TEST_API_KEY", "sk-test.key+1");
+  expect(
+    traceSafe({
+      description: "a button, link, custom element, shadow-root control",
+      path: "/srv/rootfs/app",
+      login: "user root on db",
+      header: "key=sk-test.key+1&x=1",
+      quoted: '{"note":"sk-test.key+1"}',
+      longer: "sk-test.key+12",
+    }),
+  ).toEqual({
+    description: "a button, link, custom element, shadow-root control",
+    path: "/srv/rootfs/app",
+    login: "user [secret omitted] on db",
+    header: "key=[secret omitted]&x=1",
+    quoted: '{"note":"[secret omitted]"}',
+    longer: "sk-test.key+12",
+  });
+});
 test("unwritable evidence cannot change execution", () => {
   vi.stubEnv("NESTOR_RUN_TRACE_DIR", "\0");
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

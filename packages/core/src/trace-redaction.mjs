@@ -9,11 +9,20 @@ export function traceSafe(value) {
         val &&
         val.length > 3,
     )
-    .map(([, val]) => val);
+    // A value counts where it stands as its own token, never inside a longer
+    // word: Windows CI sets PGPASSWORD=root, which must not turn "shadow-root"
+    // in a tool description into "shadow-[secret omitted]".
+    .map(
+      ([, val]) =>
+        new RegExp(
+          `(?<![\\p{L}\\p{N}_-])${val.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_-])`,
+          "gu",
+        ),
+    );
   const cleanText = (text) => {
     text = redactVerificationText(text);
     for (const secret of secrets)
-      text = text.split(secret).join("[secret omitted]");
+      text = text.replace(secret, "[secret omitted]");
     return (
       text
         .replace(/Bearer\s+[^\s"']+/gi, "Bearer [secret omitted]")
