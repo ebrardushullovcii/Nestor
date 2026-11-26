@@ -13,7 +13,7 @@ export const KEYBOARD_TOOL_DEFINITIONS: AgentLoopToolDefinition[] = [
     function: {
       name: "type_keys",
       description:
-        "Focus a field and type text key by key with real browser keyboard events, appending at the caret. Use for autocompletes that search on keydown or keyup. Read the suggestions, then click one or use press_key. Use the vault tools for passwords.",
+        "Focus a field and type text key by key with real browser keyboard events, appending at the caret. Use for autocompletes that search on keydown or keyup. Returns once the field's lookup has answered, with the options its list then offers; click one or use press_key. Use the vault tools for passwords.",
       parameters: {
         type: "object",
         properties: { ref: { type: "string" }, text: { type: "string" } },
@@ -102,7 +102,7 @@ export function createKeyboardTools(
         kind: "ok",
         status: result.ok ? "done" : "failed",
         progress: result.ok,
-        content: `${result.ok ? lead : result.error}${result.controlState ? `\nControl state: ${JSON.stringify(result.controlState)}` : ""}\n\nThe page now:\n\n${describe(await observe())}`,
+        content: `${result.ok ? lead : result.error}${result.controlState ? `\nControl state: ${JSON.stringify(result.controlState)}` : ""}${result.optionList ? `\nOption list once the field's lookup answered: ${JSON.stringify(result.optionList)}` : ""}\n\nThe page now:\n\n${describe(await observe())}`,
       };
     },
   }));

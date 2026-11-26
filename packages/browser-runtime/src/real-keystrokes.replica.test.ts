@@ -247,18 +247,14 @@ test.each([
             case 0:
               return call("type_keys", { ref: field!.ref, text: "Prishtina" });
             case 1:
-              await page
-                .getByRole("option", { name: "Prishtina, Kosovo" })
-                .waitFor();
-              return call("observe", {});
-            case 2:
+              // type_keys returns once the search has answered.
               sawSuggestion = String(
                 messages.filter((m) => m.role === "tool").at(-1)?.content,
               ).includes("Prishtina, Kosovo");
               return call("press_key", { ref: field!.ref, key: "ArrowDown" });
-            case 3:
+            case 2:
               return call("press_key", { key: "Enter" });
-            case 4:
+            case 3:
               sawSelection =
                 field!.value === "Prishtina, Kosovo" &&
                 seen.bodyTextExcerpt.includes("Location selected");
@@ -312,7 +308,7 @@ test("named keys edit the caret, dismiss suggestions and tab, and stale keyboard
       (c) => c.id === "location",
     )!.ref!;
     await raw.typeKeys!(ref, "Prishtina");
-    await page.getByRole("option").waitFor();
+    expect(await page.getByRole("option").count()).toBe(1);
     await raw.pressKey(ref, "Escape");
     expect(await page.getByRole("option").count()).toBe(0);
     await raw.pressKey(ref, "ControlOrMeta+A");

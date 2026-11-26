@@ -62,37 +62,8 @@ export async function choosePageOption(
   label: string,
 ): Promise<ApplyWriteResult> {
   watchPageSelfLimits(page);
-  let lastNetworkProgress = Date.now();
-  const pending = new Set<Request>();
-  // Only the control's own document fetches its choices. Another frame's
-  // traffic, such as a challenge widget that keeps polling, is not the
-  // list loading and would otherwise keep it "busy" without end.
-  let frame: Frame | null = null;
-  const fromControl = (request: Request) => {
-    if (!frame) return true;
-    try {
-      return request.frame() === frame;
-    } catch {
-      return false;
-    }
-  };
-  const requestStarted = (request: Request) => {
-    if (!fromControl(request)) return;
-    pending.add(request);
-    lastNetworkProgress = Date.now();
-  };
-  const networkProgress = (request: Request) => {
-    if (!pending.delete(request) && !fromControl(request)) return;
-    lastNetworkProgress = Date.now();
-  };
-  const response = (answer: Response) => {
-    if (fromControl(answer.request())) lastNetworkProgress = Date.now();
-  };
-  const progressAt = () => (pending.size ? Date.now() : lastNetworkProgress);
-  page.on?.("request", requestStarted);
-  page.on?.("response", response);
-  page.on?.("requestfinished", networkProgress);
-  page.on?.("requestfailed", networkProgress);
+  const requests = watchControlRequests(page, locator);
+  const progressAt = requests.progressAt;
   let latest: ListState = {
     visible: false,
     loading: false,
@@ -108,7 +79,7 @@ export async function choosePageOption(
       seen.set(normalizeOptionLabel(option), option);
   };
   try {
-    frame = await controlFrame(locator).catch(() => null);
+    await requests.bound;
     const native = await evaluatePresent(
       locator,
       (element) => element.tagName === "SELECT",
@@ -166,10 +137,124 @@ export async function choosePageOption(
       },
     };
   } finally {
-    page.off?.("request", requestStarted);
-    page.off?.("response", response);
-    page.off?.("requestfinished", networkProgress);
-    page.off?.("requestfailed", networkProgress);
+    requests.stop();
+  }
+}
+
+/** What one control's own document is fetching. */
+export interface ControlRequests {
+  /** When that document's connection last moved; now while a request is open. */
+  progressAt: () => number;
+  /** Resolves once requests are attributed to the control's frame. */
+  bound: Promise<void>;
+  stop: () => void;
+}
+
+/**
+ * Watches the requests the control's own document makes. Only that document
+ * fetches its choices. Another frame's traffic, such as a challenge widget
+ * that keeps polling, is not the list loading and would otherwise keep it
+ * "busy" without end. Start it before the keys go in so the lookup they
+ * trigger is seen.
+ */
+export function watchControlRequests(
+  page: Page,
+  locator: Locator,
+): ControlRequests {
+  let lastNetworkProgress = Date.now();
+  const pending = new Set<Request>();
+  let frame: Frame | null = null;
+  const fromControl = (request: Request) => {
+    if (!frame) return true;
+    try {
+      return request.frame() === frame;
+    } catch {
+      return false;
+    }
+  };
+  const requestStarted = (request: Request) => {
+    if (!fromControl(request)) return;
+    pending.add(request);
+    lastNetworkProgress = Date.now();
+  };
+  const networkProgress = (request: Request) => {
+    if (!pending.delete(request) && !fromControl(request)) return;
+    lastNetworkProgress = Date.now();
+  };
+  const response = (answer: Response) => {
+    if (fromControl(answer.request())) lastNetworkProgress = Date.now();
+  };
+  page.on?.("request", requestStarted);
+  page.on?.("response", response);
+  page.on?.("requestfinished", networkProgress);
+  page.on?.("requestfailed", networkProgress);
+  const bound = controlFrame(locator)
+    .catch(() => null)
+    .then((owner) => {
+      frame = owner;
+      for (const request of pending)
+        if (!fromControl(request)) pending.delete(request);
+    });
+  return {
+    progressAt: () => (pending.size ? Date.now() : lastNetworkProgress),
+    bound,
+    stop: () => {
+      page.off?.("request", requestStarted);
+      page.off?.("response", response);
+      page.off?.("requestfinished", networkProgress);
+      page.off?.("requestfailed", networkProgress);
+    },
+  };
+}
+
+/**
+ * After text goes into a field, waits for the field's own lookup to answer:
+ * the requests from its document are done and its list has stopped changing
+ * (the same idle and stability clocks the picker uses). Returns what the
+ * list then offers, or nothing when the field names no list.
+ */
+export async function settleFieldLookup(
+  page: Page,
+  locator: Locator,
+  requests: ControlRequests,
+): Promise<ApplyWriteResult["optionList"]> {
+  await requests.bound;
+  const scope = (await controlFrame(locator).catch(() => null)) ?? page;
+  let lastKey: string | null = null;
+  let stableSince = Date.now();
+  for (;;) {
+    const list = await boundList(scope, locator).catch(() => null);
+    const state = list ? await readList(list) : null;
+    const expanded = await attribute(locator, "aria-expanded").catch(
+      () => null,
+    );
+    const busy =
+      (state?.loading ?? false) ||
+      (await attribute(locator, "aria-busy").catch(() => null)) === "true";
+    const key = JSON.stringify({ state, busy, expanded });
+    if (key !== lastKey) {
+      lastKey = key;
+      stableSince = Date.now();
+    }
+    const quiet = Date.now() - Math.max(stableSince, requests.progressAt());
+    if ((!busy && quiet >= STABLE_MS) || quiet >= IDLE_MS) {
+      if (busy)
+        reportSelfLimitHit({
+          limit: "field_lookup_idle",
+          kind: "idle",
+          value: IDLE_MS,
+          where: "browser-runtime/settleFieldLookup",
+        });
+      if (!state) return undefined;
+      const open = expanded === "false" ? false : state.visible;
+      return {
+        open,
+        busy,
+        options: open ? state.options : [],
+        complete: open && !busy,
+      };
+    }
+    await pause(POLL_MS);
   }
 }
 
@@ -369,7 +454,10 @@ async function readList(list: Locator): Promise<ListState | null> {
     .map(({ text }) => text);
   return {
     visible: read.visible,
-    loading: read.loading,
+    // A menu whose only content is its "Loading..." notice is still fetching.
+    loading:
+      read.loading ||
+      (read.options.length === 0 && LOADING_ROW.test(read.menuText.trim())),
     options,
     noResults: options.length === 0 && NO_RESULTS.test(read.menuText),
   };
