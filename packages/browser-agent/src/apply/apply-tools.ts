@@ -335,6 +335,11 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
               description:
                 "True when the site says this posting is closed or no longer accepts applications. Include the site's evidence in reason.",
             },
+            duplicateOfApplication: {
+              type: "integer",
+              description:
+                "When you finish without sending because this same posting was already sent, the id of that recorded application in the application history. Put your evidence that it is the same posting in reason. Nothing is sent and Send is not offered for this one.",
+            },
             needsPerson: {
               type: "boolean",
               description:
@@ -551,6 +556,17 @@ export function parseApplyProposal(
         typeof args.applicationClosed !== "boolean"
       )
         return { ok: false, error: "applicationClosed must be a boolean." };
+      const duplicate = args.duplicateOfApplication;
+      if (
+        duplicate !== undefined &&
+        (typeof duplicate !== "number" ||
+          !Number.isInteger(duplicate) ||
+          duplicate < 1)
+      )
+        return {
+          ok: false,
+          error: "duplicateOfApplication must be an application id.",
+        };
       const reason = asString(args.reason) ?? "Finished without saying why.";
       const rawItems = Array.isArray(args.forPerson) ? args.forPerson : [];
       const requests = rawItems.map((item) =>
@@ -570,6 +586,9 @@ export function parseApplyProposal(
           reason,
           stuck: args.stuck === true,
           applicationClosed: args.applicationClosed === true,
+          ...(typeof duplicate === "number"
+            ? { duplicateOfApplication: duplicate }
+            : {}),
           // A named item is something waiting on the person.
           needsPerson: args.needsPerson === true || forPerson.length > 0,
           forPerson,

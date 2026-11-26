@@ -115,7 +115,8 @@ const WORK_LABEL: Record<ApplicationWorkState, string> = {
   submitting: "Sending",
   submitted: "Applied",
   stopped: "Stopped",
-  skipped: "Skipped",
+  // Apply's model found this posting already sent and did not send it.
+  skipped: "Already applied",
   blocked: "Blocked",
   failed: "Could not apply",
   closed: "Posting closed",
@@ -132,7 +133,7 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
   submitted: "Sent. It moves to Applied.",
   stopped: "Apply stopped.",
   skipped:
-    "Your saved rule skipped this application. You can still open the job and apply by hand.",
+    "Not sent: Apply found this posting was already sent as another application.",
   blocked:
     "The site blocked this browser. Open the job in your browser to continue by hand.",
   failed: "Apply couldn’t finish this application.",
@@ -190,7 +191,7 @@ const WORK_NEXT: Record<ApplicationWorkState, { text: string; act: boolean }> =
     submitting: { text: "Apply is sending it", act: false },
     submitted: { text: "Moves to Applied", act: false },
     stopped: { text: "Stopped before sending", act: false },
-    skipped: { text: "Apply by hand if you want it", act: false },
+    skipped: { text: "Already sent as another application", act: false },
     blocked: { text: "Continue by hand in your browser", act: true },
     failed: { text: "Try again or apply by hand", act: true },
     closed: { text: "Posting closed", act: false },

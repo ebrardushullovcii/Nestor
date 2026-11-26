@@ -17,16 +17,22 @@ const TRACKING_PARAMETERS = new Set([
   "trk",
 ]);
 
+/** The URL without its fragment and tracking parameters. */
+function withoutTracking(value: string): URL {
+  const url = new URL(value.trim());
+  url.hash = "";
+  for (const name of [...url.searchParams.keys()]) {
+    const lower = name.toLowerCase();
+    if (lower.startsWith("utm_") || TRACKING_PARAMETERS.has(lower)) {
+      url.searchParams.delete(name);
+    }
+  }
+  return url;
+}
+
 export function normalizeUrl(value: string): string {
   try {
-    const url = new URL(value.trim());
-    url.hash = "";
-    for (const name of [...url.searchParams.keys()]) {
-      const lower = name.toLowerCase();
-      if (lower.startsWith("utm_") || TRACKING_PARAMETERS.has(lower)) {
-        url.searchParams.delete(name);
-      }
-    }
+    const url = withoutTracking(value);
     url.searchParams.sort();
     const path = url.pathname.replace(/\/+$/u, "") || "/";
     return `${url.host.toLowerCase()}${path}${url.search}`;
@@ -55,11 +61,12 @@ function siteOf(url: string): string {
 
 /**
  * An apply link identifies a job only when it points at one form, not at a
- * careers home page that every job of the employer shares.
+ * careers home page that every job of the employer shares. Tracking
+ * parameters name the board that sent the person, not the form.
  */
 function isSpecificApplyUrl(url: string): boolean {
   try {
-    const parsed = new URL(url);
+    const parsed = withoutTracking(url);
     return (
       parsed.search.length > 1 ||
       parsed.pathname.split("/").filter(Boolean).length >= 2
@@ -87,6 +94,12 @@ export function rolePrefix(company: string, title: string): string | null {
   if (!employer || !role || UNSTATED.has(employer) || UNSTATED.has(role))
     return null;
   return `role:${employer}|${role}|`;
+}
+
+/** One employer, or one side does not name it. */
+function sameEmployer(left: string, right: string): boolean {
+  const [a, b] = [normalizeText(left), normalizeText(right)];
+  return !a || !b || UNSTATED.has(a) || UNSTATED.has(b) || a === b;
 }
 
 /** The end of a role prefix's key range: "|" is followed by "}". */
@@ -207,10 +220,10 @@ function keysOf(job: FoundJob): JobKeys {
     strong.push(`id:${job.sourceId}:${job.sourceJobId.trim().toLowerCase()}`);
   }
   strong.push(`url:${listing}`);
-  if (job.applyUrl && isSpecificApplyUrl(job.applyUrl)) {
-    const apply = normalizeUrl(job.applyUrl);
-    if (apply !== listing) strong.push(`url:${apply}`);
-  }
+  // Only the employer's own form names one posting. A board's own apply,
+  // sign-in or help page can be shared by every listing on that board.
+  const target = employerApplyTarget(job.url, job.applyUrl);
+  if (target && target !== listing) strong.push(`url:${target}`);
   const title = normalizeText(job.title);
   const company = normalizeText(job.company);
   const location = normalizeText(job.location);
@@ -221,7 +234,7 @@ function keysOf(job: FoundJob): JobKeys {
         ? `facts:${title}|${company}|${location}`
         : null,
     role: rolePrefix(job.company, job.title),
-    target: employerApplyTarget(job.url, job.applyUrl),
+    target,
     site: siteOf(job.url),
   };
 }
@@ -252,7 +265,7 @@ export function writeFoundJobs(
   const mergedStages = new Set<JobStage>();
   const ids: number[] = [];
   const findKey = sql(
-    "SELECT k.job_id, j.stage, j.found_by FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
+    "SELECT k.job_id, j.stage, j.found_by, j.company FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
   );
   const sameSite = sql(
     "SELECT 1 FROM job_sightings WHERE job_id = ? AND site = ? LIMIT 1",
@@ -312,7 +325,18 @@ export function writeFoundJobs(
     const keys = keysOf(job);
     let match: KeyMatch | undefined;
     for (const key of keys.strong) {
-      match = findKey.get(key) as KeyMatch | undefined;
+      const found = findKey.get(key) as
+        | (KeyMatch & { company: string })
+        | undefined;
+      // A board's job number can repeat across its employers (arbeitnow ends
+      // every listing URL in one): it names a posting only within one employer.
+      if (
+        found &&
+        key.startsWith("id:") &&
+        !sameEmployer(found.company, job.company)
+      )
+        continue;
+      match = found;
       if (match) break;
     }
     // Facts and role matches join another board's sighting of the posting.

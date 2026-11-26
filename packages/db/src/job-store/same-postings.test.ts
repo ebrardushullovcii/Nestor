@@ -202,7 +202,11 @@ it("joins duplicates saved before role matching, keeping applications, resumes a
   expect(again.added).toEqual([]);
   expect(again.merged.sort()).toEqual([zen[0]!, page!].sort());
   // Running it again changes nothing.
-  expect(store.mergeSamePostings()).toEqual({ merged: [], keptApart: [] });
+  expect(store.mergeSamePostings()).toEqual({
+    untangled: [],
+    merged: [],
+    keptApart: [],
+  });
 });
 
 it("leaves two jobs apart when each already has its own application, and says so", () => {
@@ -235,4 +239,215 @@ it("counts only another site's application form as an employer target", () => {
   expect(
     employerApplyTarget(remotive.url, "https://zenrows.test/careers"),
   ).toBeNull();
+});
+
+// The owner's arbeitnow listings once all named one blog article as their
+// apply link, and We Work Remotely's all named its account sign-up page.
+const arbeitnow = (company: string, slug: string, title: string) =>
+  posting({
+    title,
+    company,
+    location: "Berlin, Germany",
+    url: `https://www.arbeitnow.test/jobs/companies/${company.toLowerCase()}/${slug}`,
+    applyUrl: "https://www.arbeitnow.test/blog/applying-for-german-citizenship",
+    sourceId: "arbeitnow",
+    sourceLabel: "arbeitnow.com",
+    facts: { fullListingRead: true },
+  });
+const circuitHub = arbeitnow(
+  "CircuitHub",
+  "remote-software-engineer-operations-research-57308",
+  "Software Engineer, Operations Research",
+);
+const javaDeveloper = arbeitnow(
+  "Collaboration",
+  "java-developer-berlin-44767",
+  "Java Developer (m/w/d)",
+);
+
+it("keeps listings apart that share a board's own page as their apply link", () => {
+  const store = open();
+  const saved = store.saveFoundJobs({
+    searchId: "s1",
+    jobs: [
+      circuitHub,
+      javaDeveloper,
+      ...["samsara", "squarespace"].map((company) =>
+        posting({
+          company,
+          title: `${company} engineer`,
+          url: `https://weworkremotely.test/remote-jobs/${company}-engineer`,
+          applyUrl:
+            "https://weworkremotely.test/job-seekers/account/register?alert=Create+an+account+to+view+full+job+details.",
+          sourceId: "wwr",
+        }),
+      ),
+    ],
+  });
+  expect(saved.added).toHaveLength(4);
+  expect(saved.merged).toEqual([]);
+  expect(store.getJob(saved.added[0]!)?.title).toBe(
+    "Software Engineer, Operations Research",
+  );
+});
+
+it("keeps different employers apart when a board repeats its job number, and joins one employer's", () => {
+  const store = open();
+  const numbered = (company: string, path: string) =>
+    posting({
+      company,
+      title: company === "Bjak" ? "Full Stack Engineer" : "IT-System Engineer",
+      url: `https://www.arbeitnow.test/jobs/companies/${path}`,
+      sourceId: "arbeitnow",
+      sourceJobId: "250365",
+    });
+  const saved = store.saveFoundJobs({
+    searchId: "s1",
+    jobs: [
+      numbered("Bjak", "bjak/full-stack-engineer-ai-systems-germany-250365"),
+      numbered("think about IT GmbH", "think/it-system-engineer-bochum-250365"),
+    ],
+  });
+  expect(saved.added).toHaveLength(2);
+  // One LinkedIn posting under two wordings of its address is one job.
+  const linkedInSlugs = [
+    "confirme-java-4474772284",
+    "confirme-java-angular-4474772284",
+  ].map((slug) =>
+    posting({
+      company: "Sopra Steria",
+      title: "Développeur Fullstack",
+      url: `https://fr.linkedin.test/jobs/view/${slug}`,
+      sourceId: "linkedin",
+      sourceJobId: "4474772284",
+    }),
+  );
+  expect(
+    store.saveFoundJobs({ searchId: "s2", jobs: linkedInSlugs }).added,
+  ).toHaveLength(1);
+});
+
+it("does not take a board's tracking parameters for one employer form", () => {
+  const store = open();
+  const saved = store.saveFoundJobs({
+    searchId: "s1",
+    jobs: ["Senior QA Automation Engineer", "Senior Fullstack Developer"].map(
+      (title, n) =>
+        posting({
+          company: "Proxify AB",
+          title,
+          url: `https://weworkremotely.test/listings/proxify-${n}`,
+          applyUrl:
+            "https://career.proxify.test/apply?utm_source=weworkremotely&utm_medium=job_posting",
+          sourceId: "wwr",
+        }),
+    ),
+  });
+  expect(saved.added).toHaveLength(2);
+});
+
+/** What the old apply-link key left behind: other listings on one job, and its facts rewritten. */
+function tangle(store: JobStore, id: number, others: FoundJob[]): void {
+  for (const other of others) {
+    store
+      .sql(
+        `INSERT INTO job_sightings (job_id, url, site, source_id, source_label, apply_url, seen_at)
+         VALUES (?, ?, 'board', ?, ?, NULL, 1)`,
+      )
+      .run(id, other.url, other.sourceId, other.sourceLabel);
+    store
+      .sql("INSERT INTO job_keys (key, job_id) VALUES (?, ?)")
+      .run(`url:${other.url.replace(/^https:\/\//u, "")}`, id);
+    store
+      .sql(
+        `INSERT INTO listing_card_evidence (url, source_id, job_id, fingerprint, record_fingerprint)
+         VALUES (?, ?, ?, 'card', 'record')`,
+      )
+      .run(other.url, other.sourceId, id);
+  }
+  store
+    .sql(
+      "INSERT INTO job_keys (key, job_id) VALUES ('id:arbeitnow:44767', ?), ('role:collaboration|java developer m w d|' || ?, ?)",
+    )
+    .run(id, id, id);
+  store
+    .sql(
+      "UPDATE jobs SET title = 'Java Developer (m/w/d)', company = 'Collaboration', apply_url = ? WHERE id = ?",
+    )
+    .run(`${javaDeveloper.url}/apply`, id);
+}
+
+it("lets a job go of listings a shared board page joined to it, so each is read and saved again", () => {
+  const store = open();
+  const [own] = store.saveFoundJobs({
+    searchId: "s1",
+    jobs: [circuitHub],
+  }).added;
+  const zen = store.saveFoundJobs({
+    searchId: "s1",
+    jobs: [remotive, builtIn, himalayas],
+  }).added[0]!;
+  const elsewhere = posting({
+    company: "virtual7",
+    title: "Senior Java Fullstack Developer",
+    url: "https://de.linkedin.test/jobs/view/senior-java-fullstack-developer-4471681305",
+    sourceId: "linkedin",
+  });
+  tangle(store, own!, [
+    javaDeveloper,
+    arbeitnow("0g", "remote-product-engineer-96085", "Product Engineer"),
+    elsewhere,
+  ]);
+  expect(store.getJob(own!)?.sightings).toHaveLength(4);
+
+  const report = store.mergeSamePostings();
+  expect(report.untangled).toEqual([{ id: own, released: 3 }]);
+  const job = store.getJob(own!)!;
+  expect(job.sightings.map((sighting) => sighting.url)).toEqual([
+    circuitHub.url,
+  ]);
+  // The link its own listing gave, not the one another listing wrote over it.
+  expect(job.applyUrl).toBe(circuitHub.applyUrl);
+  // A job whose listings are one per board is left alone.
+  expect(store.getJob(zen)?.sightings).toHaveLength(3);
+  expect(
+    store
+      .sql("SELECT count(*) AS n FROM listing_card_evidence WHERE job_id = ?")
+      .get(own!),
+  ).toEqual({ n: 0 });
+
+  // The next search saves each released listing as its own job, and its own
+  // page gives the applied job back its facts.
+  const again = store.saveFoundJobs({
+    searchId: "s2",
+    jobs: [javaDeveloper, elsewhere, circuitHub],
+  });
+  expect(again.added).toHaveLength(2);
+  expect(again.merged).toEqual([own]);
+  expect(store.getJob(own!)).toMatchObject({
+    title: "Software Engineer, Operations Research",
+    company: "CircuitHub",
+  });
+  expect(store.mergeSamePostings().untangled).toEqual([]);
+});
+
+it("keeps one posting's sightings on a board's country hosts together", () => {
+  const store = open();
+  const id = store.saveFoundJobs({ searchId: "s1", jobs: [linkedIn] })
+    .added[0]!;
+  store
+    .sql(
+      `INSERT INTO job_sightings (job_id, url, site, source_id, source_label, apply_url, seen_at)
+       VALUES (?, ?, 'de.linkedin.test/jobs', 'linkedin', 'LinkedIn', NULL, 1)`,
+    )
+    .run(id, `${linkedIn.url.replace("al.", "de.")}?position=3&refId=x`);
+  // We Work Remotely files one posting under two sections.
+  store
+    .sql(
+      `INSERT INTO job_sightings (job_id, url, site, source_id, source_label, apply_url, seen_at)
+       VALUES (?, ?, 'de.linkedin.test/jobs', 'linkedin', 'LinkedIn', NULL, 1)`,
+    )
+    .run(id, linkedIn.url.replace("/jobs/view/", "/jobs/collections/"));
+  expect(store.mergeSamePostings().untangled).toEqual([]);
+  expect(store.getJob(id)?.sightings).toHaveLength(3);
 });

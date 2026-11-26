@@ -63,7 +63,7 @@ export function assistantApplicationCommands() {
         async execute(input: unknown, { session }: AssistantToolContext) {
           const { selection } = ApplyJobsInputSchema.parse(input);
           // A filter expanded into ids is still a bulk choice: it must not
-          // bring back a job a saved rule skipped.
+          // bring back a job Apply left unsent as already applied.
           const bulk = !("ids" in selection);
           const ids = getApplicationStore().selectedJobIds(selection);
           const decisions = decideUnderGrants({

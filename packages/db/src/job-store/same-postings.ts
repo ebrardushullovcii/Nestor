@@ -1,5 +1,8 @@
 import type { JobStage } from "@nestor/contracts";
 import {
+  boardOf,
+  employerApplyTarget,
+  normalizeUrl,
   rolePrefix,
   samePostingCandidates,
   savedPostingFacts,
@@ -12,6 +15,8 @@ export interface SamePostingMerge {
 }
 
 export interface SamePostingMergeReport {
+  /** Jobs that let go of listings nothing tied to them, and how many. */
+  untangled: { id: number; released: number }[];
   merged: SamePostingMerge[];
   /** Pairs left apart because each job has its own application, tracker or resume record. */
   keptApart: { ids: [number, number]; tables: string[] }[];
@@ -89,7 +94,11 @@ function jobReferences(
  * reported. Safe to run again: merged jobs no longer exist.
  */
 export function mergeSamePostings(sql: Statements): SamePostingMergeReport {
-  const report: SamePostingMergeReport = { merged: [], keptApart: [] };
+  const report: SamePostingMergeReport = {
+    untangled: untangleJobs(sql),
+    merged: [],
+    keptApart: [],
+  };
   const addKey = sql(
     "INSERT OR IGNORE INTO job_keys (key, job_id) VALUES (?, ?)",
   );
@@ -189,4 +198,107 @@ function mergePair(
   // What could not move is a repeat of the kept job's own row.
   sql("DELETE FROM jobs WHERE id = ?").run(merged);
   return { kept, merged };
+}
+
+/**
+ * One listing on a board, across its hosts, its tracking parameters and the
+ * sections it is filed under: We Work Remotely serves one posting at
+ * /listings/<name> and /remote-jobs/<name>.
+ */
+function listingOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const name = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "";
+    return `${boardOf(url)}/${name.toLowerCase()}`;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+/**
+ * Lets a job go of listings that were joined to it by mistake. A board's own
+ * page that many listings carry as their apply link (a help article, an
+ * account sign-up) and a board number that repeats across employers once
+ * joined every such listing into one job, and the next full read of any of
+ * them rewrote that job's facts. A job is tangled when its own board holds
+ * another listing, or another board holds several, that neither its own
+ * listing (its first URL, which is never rewritten) nor its employer's
+ * application form ties to it. A tangled job keeps only those tied listings.
+ * The rest are let go with their keys and remembered cards, and its own
+ * card is forgotten too, so the next search reads each listing again and
+ * saves or joins it by the current rules; reading its own page restores the
+ * job's facts. Jobs whose listings are one per board are left alone.
+ */
+function untangleJobs(sql: Statements): { id: number; released: number }[] {
+  const report: { id: number; released: number }[] = [];
+  const jobs = sql(
+    `SELECT j.id, j.url, j.apply_url FROM jobs j
+     WHERE (SELECT count(*) FROM job_sightings s WHERE s.job_id = j.id) > 1`,
+  ).all() as { id: number; url: string; apply_url: string | null }[];
+  for (const job of jobs) {
+    const sightings = sql(
+      "SELECT url, apply_url FROM job_sightings WHERE job_id = ?",
+    ).all(job.id) as { url: string; apply_url: string | null }[];
+    const own = listingOf(job.url);
+    const targets = new Set<string>();
+    // Its facts and apply link may have been rewritten; its own listing's
+    // sightings keep the link that listing gave.
+    for (const row of sightings.filter((s) => listingOf(s.url) === own)) {
+      const target = employerApplyTarget(row.url, row.apply_url);
+      if (target) targets.add(target);
+    }
+    const tied = (row: { url: string; apply_url: string | null }) => {
+      if (listingOf(row.url) === own) return true;
+      const target = employerApplyTarget(row.url, row.apply_url);
+      return target !== null && targets.has(target);
+    };
+    const listings = new Map<string, Set<string>>();
+    for (const row of sightings) {
+      const board = boardOf(row.url);
+      const seen = listings.get(board) ?? new Set<string>();
+      seen.add(listingOf(row.url));
+      listings.set(board, seen);
+    }
+    const loose = sightings.filter((row) => !tied(row));
+    const tangled = loose.some((row) => {
+      const board = boardOf(row.url);
+      return board === boardOf(job.url) || listings.get(board)!.size > 1;
+    });
+    if (!tangled) continue;
+    const kept = sightings.filter(tied);
+    for (const row of loose)
+      sql("DELETE FROM job_sightings WHERE job_id = ? AND url = ?").run(
+        job.id,
+        row.url,
+      );
+    // Its keys came partly from listings that were never this job's, and
+    // partly from shared board pages no key is made from any more. It keeps
+    // the keys of its own listings and employer forms; its own page gives
+    // back the rest when it is read again.
+    sql(
+      `DELETE FROM job_keys WHERE job_id = ? AND (key >= 'id:' AND key < 'id;'
+         OR key >= 'url:' AND key < 'url;' OR key >= 'facts:' AND key < 'facts;'
+         OR key >= 'role:' AND key < 'role;')`,
+    ).run(job.id);
+    const addKey = sql(
+      "INSERT OR IGNORE INTO job_keys (key, job_id) VALUES (?, ?)",
+    );
+    addKey.run(`url:${normalizeUrl(job.url)}`, job.id);
+    for (const row of kept) {
+      addKey.run(`url:${normalizeUrl(row.url)}`, job.id);
+      const target = employerApplyTarget(row.url, row.apply_url);
+      if (target) addKey.run(`url:${target}`, job.id);
+    }
+    sql("DELETE FROM listing_card_evidence WHERE job_id = ?").run(job.id);
+    if (!kept.some((row) => row.apply_url === job.apply_url))
+      sql("UPDATE jobs SET apply_url = ? WHERE id = ?").run(
+        kept.find((row) => listingOf(row.url) === own)?.apply_url ?? null,
+        job.id,
+      );
+    sql(
+      "UPDATE jobs SET source_count = (SELECT count(DISTINCT site) FROM job_sightings WHERE job_id = ?) WHERE id = ?",
+    ).run(job.id, job.id);
+    report.push({ id: job.id, released: loose.length });
+  }
+  return report;
 }

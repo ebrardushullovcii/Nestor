@@ -21,8 +21,8 @@ export const ApplyJobsInputSchema = z
     selection: JobSelectionSchema,
     /**
      * The ids stand for a bulk choice ("Apply all", a filter the Assistant
-     * expanded), not jobs the person named: a job a saved rule skipped
-     * stays skipped.
+     * expanded), not jobs the person named: a job Apply left unsent as
+     * already applied stays that way.
      */
     bulk: z.boolean().optional(),
   })

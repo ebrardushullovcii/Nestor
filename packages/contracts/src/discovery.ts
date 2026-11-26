@@ -2415,7 +2415,7 @@ export const ApplyExecutionResultSchema = z.object({
   pickerAttempts: optionalStoredField(z.array(ApplyPickerAttemptSchema), []),
   formPath: optionalStoredField(z.array(ApplyFormPathStepSchema), []),
   stepReceipts: optionalStoredField(z.array(ApplyStepReceiptSchema), []),
-  skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
+  skipReason: optionalStoredField(z.string().min(1).nullable(), null),
   applyUsageTotals: optionalStoredField(
     ApplicationApplyUsageTotalsSchema.nullable(),
     null,

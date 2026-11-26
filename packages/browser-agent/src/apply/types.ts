@@ -568,7 +568,8 @@ export interface ApplyAgentResult {
   };
   /** Confirmed-step and final-observation receipts of this attempt (send evidence). */
   stepReceipts?: ApplyStepReceipt[];
-  skipReason?: string;
+  /** The recorded application the model found already sent this posting. */
+  duplicateOfApplication?: number;
   questionContexts?: Array<{ prompt: string; step: string }>;
   /** Choices pickers on this application refused, for the next run. */
   pickerAttempts?: ApplyPickerAttempt[];
@@ -646,6 +647,7 @@ export type ApplyProposal =
       reason: string;
       stuck?: boolean;
       applicationClosed?: boolean;
+      duplicateOfApplication?: number;
       needsPerson?: boolean;
       /** Each question or task for the person, apart from the reason. */
       forPerson?: ApplyPersonRequest[];
