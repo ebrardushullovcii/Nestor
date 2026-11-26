@@ -541,8 +541,8 @@ export function buildWriterProfileOutline(
 
 /**
  * About how many words of summary and bullets fit on the page target, by the
- * template's density. A guide for the writer; the render's page count and the
- * writer's bullet priorities settle the length.
+ * template's density. A guide for the writer; the render's page count, given
+ * back to the writer, settles the length.
  */
 const RESUME_PROSE_WORDS_PER_PAGE = {
   comfortable: 300,
@@ -562,51 +562,6 @@ export function resumeLengthBudget(input: {
     approximateWords: words,
     approximateBullets: Math.round(words / 24),
   };
-}
-
-/**
- * The proposal with every bullet of `priority` or lower importance left off;
- * each shown role or project keeps its most important bullet. Null when
- * nothing was left off. Bullets without a priority stay.
- */
-export function leaveOffBulletsByPriority(
-  proposal: Record<string, unknown>,
-  priority: number,
-): Record<string, unknown> | null {
-  const priorityOf = (bullet: unknown) =>
-    bullet &&
-    typeof bullet === "object" &&
-    typeof (bullet as { priority?: unknown }).priority === "number"
-      ? (bullet as { priority: number }).priority
-      : 0;
-  let changed = false;
-  const trim = (entries: unknown) => {
-    if (!Array.isArray(entries)) return entries;
-    return entries.map((entry: unknown) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry))
-        return entry;
-      const record = entry as Record<string, unknown>;
-      if (record.hidden === true || !Array.isArray(record.bullets))
-        return entry;
-      const bullets = record.bullets as unknown[];
-      let kept = bullets.filter((bullet) => priorityOf(bullet) < priority);
-      if (kept.length === 0 && bullets.length > 0) {
-        const mostImportant = bullets.reduce((best, bullet) =>
-          priorityOf(bullet) < priorityOf(best) ? bullet : best,
-        );
-        kept = [mostImportant];
-      }
-      if (kept.length === bullets.length) return entry;
-      changed = true;
-      return { ...record, bullets: kept };
-    });
-  };
-  const next: Record<string, unknown> = { ...proposal };
-  if ("experienceEntries" in proposal)
-    next.experienceEntries = trim(proposal.experienceEntries);
-  if ("projectEntries" in proposal)
-    next.projectEntries = trim(proposal.projectEntries);
-  return changed ? next : null;
 }
 
 /**
@@ -802,52 +757,40 @@ export async function runResumeGenerationAgentTask(input: {
         flaggedRenderCategories.push(categories);
       }
       keep(proposal);
-      // Length is the writer's to decide, never the person's, and costs no
-      // second call: over the page target, the bullets it gave the lowest
-      // priority are left off, and then the draft stands (ADR 0051).
-      let finalProposal = proposal;
-      let finalRender = rendered;
+      // Length is the writer's to decide. Over the page target, the page
+      // count goes back to it as a fact, and it tightens its own text or
+      // keeps this draft with finish_task; nothing is cut by our code.
       if (
-        state.renderPreview &&
         pageCount !== null &&
         targetPageCount !== null &&
         pageCount > targetPageCount
       ) {
-        for (const priority of [3, 2]) {
-          const shorter = leaveOffBulletsByPriority(finalProposal, priority);
-          if (!shorter) continue;
-          const shorterRender = await state.renderPreview({
-            draft: completeTailoredResumeDraft(shorter, state),
-            templateId: selectedTemplateId,
-            ...(signal ? { signal } : {}),
-          });
-          // Leaving lines off cannot add a claim; if a check objects to more
-          // than before, the longer draft stands.
-          if (
-            (shorterRender.requiredModelRepairs ?? []).length > repairs.length
-          )
-            break;
-          finalProposal = shorter;
-          finalRender = shorterRender;
-          lastRenderedPreview = shorterRender;
-          keep(shorter);
-          if (
-            shorterRender.pageCount !== null &&
-            shorterRender.pageCount <= targetPageCount
-          )
-            break;
-        }
+        const fill = rendered?.lastPageFillRatio;
+        const over =
+          typeof fill === "number"
+            ? ` It runs about ${Math.max(1, Math.round((pageCount - targetPageCount - 1 + fill) * 100))}% of a page over: page ${pageCount} is ${Math.round(fill * 100)}% full.`
+            : "";
+        return {
+          summary: `Resume rendered to ${pageCount} pages; the target is ${targetPageCount}.${over} Tighten your own text by at least that much and call compose_resume_proposal again with the complete proposal, or call finish_task to keep this one.`,
+          value: {
+            selectedTemplateId,
+            pageCount,
+            targetPageCount,
+            ...(typeof fill === "number" ? { lastPageFillRatio: fill } : {}),
+            personConfirmationCount: rendered?.personConfirmationCount ?? 0,
+          },
+          progressMade: false,
+        };
       }
       return {
         summary:
           repairs.length === 0
             ? "Resume rendered and checked; nothing needs repair"
             : `Resume rendered; the check's fixes settle ${repairs.length} line${repairs.length === 1 ? "" : "s"}`,
-        ...(finalProposal !== proposal ? { draft: finalProposal } : {}),
         value: {
           selectedTemplateId,
-          pageCount: finalRender?.pageCount ?? null,
-          personConfirmationCount: finalRender?.personConfirmationCount ?? 0,
+          pageCount,
+          personConfirmationCount: rendered?.personConfirmationCount ?? 0,
         },
         progressMade: false,
         finish: true,
@@ -969,7 +912,7 @@ export async function runResumeGenerationAgentTask(input: {
       "baseResumeEvidenceRef and candidateProfile.baseResume.textContentEvidenceRef point to groundingEvidence item IDs. Read that item's complete text as the referenced resume source. The evidence IDs and selected base resume are unchanged; a distinct profile base resume is included separately. A languageFields entry that has evidenceRef instead of text has exactly the text of that groundingEvidence item. candidateProfile lists the saved records by id; their wording is in groundingEvidence.",
       "Everything you need is in the task payload. Write the complete proposal in one compose_resume_proposal call; do not call any other tool first.",
       "Return the summary or accomplishments the resume should show, including saved wording explicitly when it already fits. An empty proposal contains no writer output and must be repaired; the app does not create a fallback resume in its place.",
-      "compose_resume_proposal renders the resume, checks every line against the evidence and ends the task; there is no second draft, so write each line so the evidence backs it. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
+      "compose_resume_proposal renders the resume, checks every line against the evidence and ends the task when the render fits targetPageCount; when it runs longer you get the page count back to tighten the proposal yourself. Write each line so the evidence backs it. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
       "To use a different template, pass its templateId to compose_resume_proposal when templateSelection.selectionLocked is false.",
       "The runtime preserves identity, chronology, selected strategy, and the final typed resume shape. Your job is to do the actual job-targeted writing within the mode-specific instructions above.",
     ].join(" "),
@@ -1010,7 +953,7 @@ export async function runResumeGenerationAgentTask(input: {
       {
         name: "compose_resume_proposal",
         description:
-          "Send the complete sparse job-targeted resume proposal (the exact shape described in the task instructions). The proposal is rendered and checked in the same call, which finishes the task.",
+          "Send the complete sparse job-targeted resume proposal (the exact shape described in the task instructions). The proposal is rendered and checked in the same call, which finishes the task when the render fits targetPageCount and otherwise returns its page count.",
         inputSchema: ResumeGenerationProposalInputSchema,
         parameters: jsonObject(
           {
@@ -1126,7 +1069,7 @@ export async function runResumeGenerationAgentTask(input: {
       {
         name: "finish_task",
         description:
-          "Finish after a clean check. compose_resume_proposal finishes on its own when the check is clean, so this is rarely needed.",
+          "Keep the last composed proposal and finish. compose_resume_proposal finishes on its own when the render fits targetPageCount; call this to keep a longer render as it is.",
         inputSchema: EmptyInputSchema,
         parameters: jsonObject({}),
         permission: "read",
@@ -1191,6 +1134,9 @@ export async function runResumeGenerationAgentTask(input: {
                       0,
                   requiredModelRepairs:
                     lastRenderedPreview?.requiredModelRepairs ?? [],
+                  pageCount: lastRenderedPreview?.pageCount ?? null,
+                  lastPageFillRatio:
+                    lastRenderedPreview?.lastPageFillRatio ?? null,
                   validationIssues,
                 },
               }

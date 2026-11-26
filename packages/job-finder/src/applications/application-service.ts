@@ -93,7 +93,10 @@ import {
   toResumeJob,
   writeResume,
 } from "../resumes/write-resume";
-import { createResumeListingReader } from "../resumes/read-resume-listing";
+import {
+  createResumeListingReader,
+  PostingClosedError,
+} from "../resumes/read-resume-listing";
 import { createBrowserPostingReader } from "../internal/browser-listing-read";
 import {
   applicationAnswerDependencies,
@@ -429,18 +432,32 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const profile = savedProfile;
     // A ready PDF can predate the current writer. Rewrite at the person's
     // chosen level before loading any attachment, including an approved PDF.
+    // The posting is read first: one found closed gets no resume written.
     if (
       resume.level !== "original" &&
       resume.draft?.writerVersion !== RESUME_WRITER_VERSION
     ) {
-      job = await createResumeListingReader({
-        resumes,
-        readPosting: createBrowserPostingReader({
-          browserRuntime: browser,
-          aiClient: deps.aiClient,
-          readInputs: () => deps.readInputs(),
-        }),
-      })(job, signal);
+      try {
+        job = await createResumeListingReader({
+          resumes,
+          readPosting: createBrowserPostingReader({
+            browserRuntime: browser,
+            aiClient: deps.aiClient,
+            readInputs: () => deps.readInputs(),
+          }),
+        })(job, signal, { readFirst: true });
+      } catch (error) {
+        if (!(error instanceof PostingClosedError)) throw error;
+        signal.throwIfAborted();
+        if (!current(row)) return;
+        applications.finishPreparation({
+          id: row.id,
+          attempt: row.attempt,
+          state: "closed",
+          error: error.message,
+        });
+        return;
+      }
       const draft = await writeResume(deps, {
         profile,
         settings,

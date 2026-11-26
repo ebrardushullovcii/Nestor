@@ -3741,6 +3741,76 @@ it("a legacy rewrite of a title-only job reads its posting in Nestor's browser f
   f.releases[0]?.();
 });
 
+it("a legacy rewrite reads the posting first and writes nothing for a closed one", async () => {
+  const f = await setup(1, undefined, {
+    draft: { level: "aggressive", approve: true },
+  });
+  const id = f.ids[0]!;
+  const legacy = f.resumes.get(id)!;
+  f.jobs
+    .sql("UPDATE resumes SET draft_json=? WHERE job_id=?")
+    .run(JSON.stringify({ ...legacy.draft, writerVersion: undefined }), id);
+  f.jobs
+    .sql("UPDATE job_details SET facts_json=? WHERE job_id=?")
+    .run(JSON.stringify({ fullListingRead: true }), id);
+  const runAgentDiscovery = vi.fn(
+    (_source: string, options: { requestedListing?: { url: string } }) =>
+      Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: "2026-11-07T03:47:11.000Z",
+          completedAt: "2026-11-07T03:47:40.000Z",
+          querySummary: "Requested listing",
+          warning: null,
+          jobs: [
+            {
+              ...f.seed.savedJobs[0]!,
+              canonicalUrl: options.requestedListing!.url,
+              title: "Engineer 0",
+              description:
+                "Sorry, we couldn't find anything here. The job posting might have closed, or it has been removed.",
+              searchRejection: {
+                category: "closed",
+                reason: "The board shows a 404 page for this posting.",
+              },
+              listingDetailFetch: {
+                attemptedAt: "2026-11-07T03:47:40.000Z",
+                outcome: "enriched",
+                method: "page_text",
+                detail: "Read this listing page in full.",
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  Object.assign(f.browser, { runAgentDiscovery });
+  const createResumeDraft = vi.fn();
+  f.deps.aiClient = {
+    ...createDeterministicJobFinderAiClient(),
+    createResumeDraft,
+  };
+  f.deps.documentManager.listResumeTemplates = () => [];
+  f.applications.applyJobs(
+    { selection: { ids: [id] } },
+    "confirm_before_submit",
+  );
+  await f.service.start();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("closed"),
+  );
+  // Saved posting text no longer skips the read when Apply would write.
+  expect(runAgentDiscovery).toHaveBeenCalledOnce();
+  expect(createResumeDraft).not.toHaveBeenCalled();
+  expect(f.execute).not.toHaveBeenCalled();
+  expect(f.renderResumeArtifact).not.toHaveBeenCalled();
+  expect(
+    f.applications.getApplication(f.applications.listApplications().rows[0]!.id)
+      ?.error,
+  ).toContain("The board shows a 404 page for this posting.");
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
 it("a failed legacy rewrite reports our error and never opens the browser with the old file", async () => {
   const f = await setup(1, undefined, {
     draft: { level: "aggressive", approve: true },

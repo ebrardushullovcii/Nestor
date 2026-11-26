@@ -51,8 +51,12 @@ export const TAILORING_MODE_BY_LEVEL: Record<
   TailoringMode
 > = { light: "conservative", tailored: "balanced", aggressive: "aggressive" };
 
-/** Retires drafts made by the old skill-injecting/fallback writer on Apply. */
-export const RESUME_WRITER_VERSION = 1;
+/**
+ * Retires older drafts on Apply: 1 retired the skill-injecting/fallback
+ * writer, 2 the writer that listed every saved skill and was cut to its page
+ * target by our code instead of tightening its own text.
+ */
+export const RESUME_WRITER_VERSION = 2;
 
 /** The profile's default level: Settings' resume mode and tailoring strength. */
 export function resolveProfileResumeLevel(
@@ -659,6 +663,7 @@ export async function writeResume(
       return {
         templateId: template.id,
         pageCount: rendered.pageCount ?? null,
+        lastPageFillRatio: rendered.lastPageFillRatio ?? null,
         targetPageCount: preview.targetPageCount,
         warnings: rendered.warnings ?? [],
         fileName: rendered.fileName,

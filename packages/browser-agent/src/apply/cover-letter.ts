@@ -180,6 +180,7 @@ export function buildCoverLetterRequest(input: {
     "",
     "Rules:",
     "- Claims about the person's skills, experience, achievements, and qualifications must be supported by their resume or profile. The posting describes the employer and role; it is not evidence of the person's experience. Do not state anything else as fact.",
+    "- Tie each result to the employer where the work history or resume places it. Saved proof points name no employer; never attach one to an employer from them alone.",
     "- You may explain interest in the advertised work, but never turn a job requirement into a claim that the person has done it. Leave unsupported candidate claims out.",
     "- Use only the current saved profile name and contact details, even if the resume or sample has older or rejected details. Include the current saved email when one exists. Omit a missing contact detail; never recover it from the resume.",
     "- Compare this role’s employment type, hours and location with the person’s goals and availability. Do not repeat an incompatible generic career goal or promise hours or relocation they have not agreed to. State known material limits plainly. Do not ask the employer to accommodate incompatible hours, location or employment type unless the person has agreed to that wording for this application. If the role needs a change of intent, flag it for the person rather than claiming that change.",

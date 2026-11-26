@@ -1970,7 +1970,7 @@ export function renderResumeTemplateHtml(
       .page-credentials { page: resume-credentials; }
       .page-longform { page: resume-longform; }
       .page-pivot { page: resume-pivot; }
-      .header, .entry-block, h3, h4, .skill-group { break-inside: avoid; page-break-inside: avoid; }
+      .header, h3, h4, .skill-group, .resume-bullet-list li { break-inside: avoid; page-break-inside: avoid; }
       a { color: inherit; text-decoration: none; }
       /* Chromium prints a grid container as one unbreakable box. With the
          body and every section laid out as grids, a resume a few pixels
@@ -1978,6 +1978,17 @@ export function renderResumeTemplateHtml(
          one holding only the header. In print the body and sections flow as
          blocks with margin gaps instead, so pages break between entries. */
       .body-grid, .section-block, .section-cluster { display: block; }
+      /* A role or project breaks between its lines like any document: kept
+         whole, a long role moved to the next page and left a third of the
+         page above it blank, which pushed two-page resumes onto a third.
+         Its heading stays with the first line under it, and no single
+         bullet is split. */
+      .entry-block, .resume-bullet-list { display: block; }
+      .entry-block { break-inside: auto; page-break-inside: auto; }
+      .entry-block > * + * { margin-top: var(--print-entry-gap, 0.18rem); }
+      .resume-bullet-list > li + li { margin-top: 0.12rem; }
+      .page-longform .entry-block { --print-entry-gap: 0.11rem; }
+      .section-proof-compact .entry-block { --print-entry-gap: 0.12rem; }
       .body-grid > * + * { margin-top: var(--print-body-gap, 0.6rem); }
       .section-block > * + * { margin-top: 0.24rem; }
       .section-cluster > * + * { margin-top: 0.42rem; }
