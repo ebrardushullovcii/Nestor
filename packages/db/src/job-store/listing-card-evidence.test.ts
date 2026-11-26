@@ -156,3 +156,30 @@ test("changed card evidence rereads once; fit changes only when the resulting li
     store.close();
   }
 });
+
+test("a saved listing whose apply link is its board's own redirect is read once more, to follow it", () => {
+  const store = openJobStore(":memory:");
+  try {
+    const hop = { ...job, applyUrl: "https://board.example/job/go/101/" };
+    store.saveFoundJobs({ searchId: "old", jobs: [hop] });
+    const first = store.prepareListingCards([card]);
+    saveRead(store, first.cards[0]!, hop);
+    // Remembered, unchanged, and its link still never followed.
+    expect(store.prepareListingCards([card]).refreshUrls).toEqual([url]);
+    // That read followed it to the employer's form.
+    saveRead(store, first.cards[0]!, {
+      ...job,
+      applyUrl: "https://jobs.employer.example/own-employer/101",
+      facts: { fullListingRead: true, applyLinkFollowed: true },
+    });
+    expect(store.prepareListingCards([card]).refreshUrls).toEqual([]);
+    // A link that stayed on the board is not read again for it either.
+    saveRead(store, first.cards[0]!, {
+      ...hop,
+      facts: { fullListingRead: true, applyLinkFollowed: true },
+    });
+    expect(store.prepareListingCards([card]).refreshUrls).toEqual([]);
+  } finally {
+    store.close();
+  }
+});

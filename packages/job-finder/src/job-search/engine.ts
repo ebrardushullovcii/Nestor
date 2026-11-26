@@ -3,6 +3,7 @@ import {
   type JobFinderAiClient,
 } from "@nestor/ai-providers";
 import { createHash } from "node:crypto";
+import { followBoardApplyLinks } from "./follow-apply-links";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { withTraceScope } from "@nestor/core/run-trace";
 import {
@@ -421,20 +422,24 @@ export function createListingSearchEngine(deps: {
     },
     async readListings(input) {
       if (input.lane !== "browser" || !input.context)
-        return withTraceScope(
-          {
-            sourceId: undefined,
-            sourceUrl: undefined,
-            sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
-          },
-          () =>
-            readListings({
-              client,
-              onUsage,
-              ...input,
-              readPage,
-              ...modelContext(),
-            }),
+        return followBoardApplyLinks(
+          await withTraceScope(
+            {
+              sourceId: undefined,
+              sourceUrl: undefined,
+              sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
+            },
+            () =>
+              readListings({
+                client,
+                onUsage,
+                ...input,
+                readPage,
+                ...modelContext(),
+              }),
+          ),
+          readPage,
+          input.signal,
         );
       const context = input.context;
       const result: ReadListingResult = { jobs: [], failures: [] };
@@ -527,7 +532,7 @@ export function createListingSearchEngine(deps: {
           });
         }
       }
-      return result;
+      return followBoardApplyLinks(result, readPage, input.signal);
     },
     fitJobs: (input) =>
       withTraceScope(

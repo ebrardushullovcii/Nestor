@@ -42,6 +42,8 @@ export type ReadDiscoveryPostingPage = (
     ready?: (html: string) => boolean;
     /** Read-only JSON search query from a provider adapter, never a form submission. */
     jsonQuery?: Record<string, unknown>;
+    /** Only where the address lands after its redirects; the body is not read. */
+    landingOnly?: boolean;
   },
 ) => Promise<{ html: string; finalUrl: string; visibleText?: string }>;
 

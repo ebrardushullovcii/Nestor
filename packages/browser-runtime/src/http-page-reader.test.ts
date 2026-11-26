@@ -234,3 +234,28 @@ test.each([404, 410])(
     expect(request).toHaveBeenCalledOnce();
   },
 );
+
+test("a landing read returns where a link's redirects end without reading the page", async () => {
+  const landed = (status: number) => {
+    const response = new Response("employer page", { status });
+    Object.defineProperty(response, "url", {
+      value: "https://jobs.employer.test/acme/123",
+    });
+    return response;
+  };
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
+    .mockResolvedValueOnce(landed(200))
+    .mockResolvedValueOnce(landed(403));
+  const reader = createHttpPageReader({ fetch: request });
+  expect(
+    await reader("https://board.test/job/go/123/", { landingOnly: true }),
+  ).toEqual({ html: "", finalUrl: "https://jobs.employer.test/acme/123" });
+  // The board's request to slow down is honoured before it is asked again.
+  expect(request).toHaveBeenCalledTimes(2);
+  // The employer refusing the page does not hide where the link led.
+  expect(
+    await reader("https://board.test/job/go/124/", { landingOnly: true }),
+  ).toEqual({ html: "", finalUrl: "https://jobs.employer.test/acme/123" });
+});
