@@ -46,9 +46,14 @@ export function getJobStore(): JobStore {
     }
   }
   // One posting saved from several boards was several jobs before searches
-  // joined them; a second Apply could send it twice. Join those once here.
+  // joined them; a second Apply could send it twice. Join those once here,
+  // after letting jobs go of listings a shared board page joined to them.
   const joined = opened.mergeSamePostings();
-  if (joined.merged.length || joined.keptApart.length)
+  if (
+    joined.untangled.length ||
+    joined.merged.length ||
+    joined.keptApart.length
+  )
     console.info("[Job store] joined same postings", JSON.stringify(joined));
   store = opened;
   if (pending.status === "unreadable")

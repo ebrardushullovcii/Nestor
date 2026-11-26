@@ -162,6 +162,7 @@ async function runApplyAgentPrivate(
       : ([...sendDecisions.values()].at(-1) ?? null);
   };
   let applicationClosed = false;
+  let duplicateOfApplication: number | undefined;
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
   const modelCallIds = new Map<string, string[]>();
   const payDisclosed =
@@ -439,6 +440,7 @@ async function runApplyAgentPrivate(
     });
     if (outcome.kind === "finished") {
       applicationClosed = outcome.applicationClosed === true;
+      duplicateOfApplication = outcome.duplicateOfApplication;
       return finish(outcome.reason, outcome.stuck, outcome.forPerson);
     }
     observe(outcome.observation);
@@ -1076,6 +1078,7 @@ async function runApplyAgentPrivate(
       outcome,
       ...(waitingForVerification ? { verificationPending: true } : {}),
       ...(applicationClosed ? { applicationClosed: true } : {}),
+      ...(duplicateOfApplication ? { duplicateOfApplication } : {}),
       reason: redactVerificationText(loop.finish?.reason ?? loop.reason),
       steps: loop.steps,
       finalUrl: (page as ApplyFormObservation | null)?.url ?? null,

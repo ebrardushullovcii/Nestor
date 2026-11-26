@@ -50,8 +50,8 @@ const APPLICATION_WORDS: Record<
   },
   skipped: {
     status: "stopped",
-    badge: "Skipped",
-    detail: "Your saved rule skipped this application",
+    badge: "Already applied",
+    detail: "Not sent: already sent as another application",
   },
   blocked: {
     status: "stopped",

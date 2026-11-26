@@ -82,6 +82,7 @@ export type ApplyExecutionOutcome =
       stuck: boolean;
       needsPerson: boolean;
       applicationClosed?: boolean;
+      duplicateOfApplication?: number;
       forPerson?: ApplyPersonRequest[];
     };
 
@@ -373,6 +374,9 @@ export async function executeApplyProposal(
       stuck: proposal.stuck === true,
       needsPerson: proposal.needsPerson === true,
       applicationClosed: proposal.applicationClosed === true,
+      ...(proposal.duplicateOfApplication
+        ? { duplicateOfApplication: proposal.duplicateOfApplication }
+        : {}),
       forPerson: proposal.forPerson ?? [],
     };
   const observation = await config.hands.observe();

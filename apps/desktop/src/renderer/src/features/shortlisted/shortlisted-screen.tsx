@@ -458,7 +458,8 @@ export function ShortlistedScreen() {
       try {
         const result = await window.nestor.jobFinder.applyJobs({
           selection: input,
-          // A page is a bulk choice: a job a saved rule skipped stays skipped.
+          // A page is a bulk choice: a job left unsent as already applied
+          // stays that way.
           ...(scope === "page" ? { bulk: true } : {}),
         });
         setSelection(NO_SELECTION);

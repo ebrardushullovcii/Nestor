@@ -815,7 +815,13 @@ export async function runAgentApplicationPreparation(
     ...(result.stepReceipts?.length
       ? { stepReceipts: result.stepReceipts }
       : {}),
-    ...(result.skipReason ? { skipReason: result.skipReason } : {}),
+    // The model's own decision not to send a posting already sent: recorded
+    // as not sent, with no Send to offer.
+    ...(result.duplicateOfApplication
+      ? {
+          skipReason: `Not sent: this posting was already sent as application ${result.duplicateOfApplication}. ${result.reason}`,
+        }
+      : {}),
   };
 }
 

@@ -830,6 +830,40 @@ describe("agent application preparation seam", () => {
     expect(result.nextActionLabel).toBe("Find another job");
   });
 
+  test("a posting the model found already sent is recorded as not sent, naming that application", async () => {
+    // R6 run 02: the Himalayas listing led to the Greenhouse requisition
+    // application 35 had already sent; the model left the form untouched.
+    const result = await runAgentApplicationPreparation({
+      session: session("Senior Software Engineer application form"),
+      executionInput: executionInput(),
+      llmClient: {
+        chatWithTools: () =>
+          Promise.resolve({
+            toolCalls: [
+              {
+                id: "already_sent",
+                type: "function" as const,
+                function: {
+                  name: "finish",
+                  arguments: JSON.stringify({
+                    reason:
+                      "This listing leads to Greenhouse requisition 7776635, which the history shows was sent today.",
+                    duplicateOfApplication: 35,
+                  }),
+                },
+              },
+            ],
+          }),
+      },
+      startedAt: "2026-09-14T10:00:00.000Z",
+      siteLabel: "the careers site",
+      now: () => new Date("2026-09-14T10:05:00.000Z"),
+    });
+    expect(result.skipReason).toBe(
+      "Not sent: this posting was already sent as application 35. This listing leads to Greenhouse requisition 7776635, which the history shows was sent today.",
+    );
+  });
+
   test("a sign-in wall the model reports becomes the record's blocker", async () => {
     // The harness is told the page wants a sign-in; deciding what that means
     // is the model's, and what it says is what the person reads.

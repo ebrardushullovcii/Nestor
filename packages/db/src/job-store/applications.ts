@@ -264,8 +264,8 @@ export function createApplicationStore(store: JobStore) {
         const ready = count(readyWhere);
         const now = Date.now();
         // A job the person picked by name is their own intent: it comes
-        // back even after a saved rule skipped it. Apply all, or ids that
-        // only stand for a filter, never undo a skip.
+        // back even after Apply left it unsent as already applied. Apply
+        // all, or ids that only stand for a filter, never undo that.
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
            SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${readyWhere}

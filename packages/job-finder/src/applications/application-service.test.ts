@@ -491,19 +491,23 @@ it("records a model-reported closed posting as closed instead of failed", async 
   expect(f.applications.needsYou.list().total).toBe(0);
 });
 
-it("closes a saved-rule skip without adding a Needs you question", async () => {
+it("records a posting the model found already sent as not sent, with no Send and no Needs you question", async () => {
   const f = await setup(1);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
   f.releases.shift()!({
     ...ready(),
-    skipReason: "Neither saved option is offered.",
+    skipReason:
+      "Not sent: this posting was already sent as application 35. It leads to the same requisition.",
   });
   await vi.waitFor(() =>
     expect(
       f.applications.listApplications({ state: "skipped" }).rows,
     ).toHaveLength(1),
+  );
+  expect(f.applications.listApplications().rows[0]?.error).toContain(
+    "already sent as application 35",
   );
   expect(f.applications.needsYou.list().total).toBe(0);
   expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledTimes(1);

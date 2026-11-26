@@ -391,7 +391,7 @@ export function openJobStore(
     mergeSamePostings() {
       return transaction(() => {
         const report = mergeSamePostings(sql);
-        if (report.merged.length)
+        if (report.merged.length || report.untangled.length)
           notify({
             cause: "found",
             stages: ["found", "hidden", "shortlisted", "resume", "applied"],
