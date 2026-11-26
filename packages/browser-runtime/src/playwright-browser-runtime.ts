@@ -1,6 +1,10 @@
 import { setTimeout as waitForConnection } from "node:timers/promises";
 import { withNavigationLiveness } from "./browser-navigation";
-import { configureTaskPageOwner } from "./task-page-tabs";
+import {
+  activeTaskPage,
+  configureTaskPageOwner,
+  taskSendPage,
+} from "./task-page-tabs";
 import { withTraceScope } from "@nestor/core/run-trace";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
@@ -1625,7 +1629,11 @@ export function createBrowserAgentRuntime(
     markedPreparedApplicationKeys.delete(key);
     preparedPagesWithPerson.delete(key);
     if (page && !page.isClosed()) {
-      await traceFinalPage(page);
+      // The tab that carried the send, such as the mailbox for an
+      // application by email, is the final evidence when it is still open.
+      const sendPage = taskSendPage(page);
+      await traceFinalPage(sendPage ?? page);
+      await sendPage?.close().catch(() => undefined);
       await page.close().catch(() => undefined);
     }
   }
@@ -2439,14 +2447,16 @@ export function createBrowserAgentRuntime(
     actionInput: ExecuteExactlyOneFinalActionInput,
   ) {
     actionInput.signal?.throwIfAborted();
-    const page = await getPreparedApplicationPage(
+    const formPage = await getPreparedApplicationPage(
       source,
       actionInput.pageBindingKey,
     );
+    // The press lands in the task tab the model works in, such as a mailbox.
+    const page = activeTaskPage(formPage);
     // Marks the page in use so tab reclamation cannot close it mid-send.
     const releasePageUse = usePage(page);
     try {
-      return await executeExactlyOneFinalActionOnPage(page, actionInput);
+      return await executeExactlyOneFinalActionOnPage(formPage, actionInput);
     } finally {
       await tracePage(page, "final_action");
       releasePageUse();

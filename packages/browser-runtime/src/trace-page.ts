@@ -3,6 +3,7 @@ import { readVisibleText } from "./visible-page-text";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+  holdVerificationTrace,
   runTraceEnabled,
   traceArtifact,
   traceEvent,
@@ -11,12 +12,24 @@ import {
 
 const bindings = new WeakMap<Page, string>();
 const privatePages = new WeakSet<Page>();
-/** Mailboxes and pages that displayed a code have no retained text or pixels. */
+const mailboxPages = new WeakSet<Page>();
+/** Pages that displayed a code have no retained text or pixels. */
 export function markPrivateTracePage(page: Page): void {
   privatePages.add(page);
 }
+/**
+ * A mailbox or other auxiliary task tab. Its evidence is kept unless the run
+ * used an emailed code; then its text and pixels are omitted, also later.
+ */
+export function markMailboxTracePage(page: Page): void {
+  mailboxPages.add(page);
+  holdVerificationTrace((codeSeen) => {
+    if (codeSeen) privatePages.add(page);
+  });
+}
+/** Whether stored copies of this page must be skipped now. */
 export const pageTraceIsPrivate = (page: Page): boolean =>
-  privatePages.has(page) || verificationIsPrivate();
+  privatePages.has(page) || (mailboxPages.has(page) && verificationIsPrivate());
 export interface TraceCaptureInput {
   masks: { x: number; y: number; width: number; height: number }[];
   viewport: { width: number; height: number };
@@ -95,7 +108,7 @@ async function capturePageTrace(
   bytes?: Uint8Array,
 ): Promise<void> {
   if (!runTraceEnabled()) return;
-  if (pageTraceIsPrivate(page)) {
+  if (privatePages.has(page)) {
     traceEvent("page_snapshot", {
       applicationKey: bindings.get(page) ?? null,
       action,
@@ -139,7 +152,7 @@ async function capturePageTrace(
               type: "png",
               mask: masks,
             });
-    if (pageTraceIsPrivate(page)) {
+    if (privatePages.has(page)) {
       traceEvent("page_snapshot", {
         applicationKey,
         action,
@@ -148,7 +161,8 @@ async function capturePageTrace(
       });
       return;
     }
-    const shot = traceArtifact("shots", image, "png");
+    const mailboxPage = mailboxPages.has(page);
+    const shot = traceArtifact("shots", image, "png", { mailboxPage });
     const visibleText = await readVisibleText(page.locator("body"));
     traceEvent("page_snapshot", {
       ...(applicationKey ? { applicationKey } : {}),
@@ -157,6 +171,7 @@ async function capturePageTrace(
       url: page.url(),
       visibleText,
       captureMs: Date.now() - started,
+      ...(mailboxPage ? { mailboxPage } : {}),
     });
   } catch (error) {
     traceEvent("page_snapshot_error", { applicationKey, action, error });

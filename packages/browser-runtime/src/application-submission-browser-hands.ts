@@ -19,6 +19,7 @@ import {
   createPlaywrightApplyPageMechanics,
 } from "./apply-page-mechanics";
 import { watchPageSelfLimits } from "./self-limit-page";
+import { activeTaskPage, rememberTaskSendPage } from "./task-page-tabs";
 
 export const APPLICATION_FINAL_CONTROL_SELECTOR =
   "button, input[type='submit'], input[type='image']";
@@ -642,11 +643,14 @@ async function withPageExecutionLock<TValue>(
 /**
  * Observe all visible, enabled form final controls. The result is transient
  * and contains no DOM handles, selectors, credentials, or raw page markup.
+ * The send control is read in the task tab the model works in, such as a
+ * mail client's Send for an application by email.
  */
 export async function observeApplicationForm(
-  page: Page,
+  formPage: Page,
   options?: ObserveApplicationFormOptions,
 ): Promise<ApplicationFormObservation> {
+  const page = activeTaskPage(formPage);
   if (options?.finalActionTargets !== undefined)
     finalActionTargets.set(page, {
       url: page.url(),
@@ -674,11 +678,13 @@ export async function observeApplicationForm(
 /**
  * Re-observe the exact target and issue one click per call ID. Return page
  * and request facts; the application model records the observed outcome.
+ * The press happens in the task tab the model works in.
  */
 export async function executeExactlyOneFinalAction(
-  page: Page,
+  formPage: Page,
   input: ExecuteExactlyOneFinalActionInput,
 ): Promise<ApplicationFinalActionResult> {
+  const page = activeTaskPage(formPage);
   const expectedObservation = SubmissionObservationIdentitySchema.parse(
     input.expectedObservation,
   );
@@ -734,6 +740,7 @@ export async function executeExactlyOneFinalAction(
       finalControl = control;
     const pageBefore = initialPage;
     rememberIssuedAction(page, key);
+    rememberTaskSendPage(formPage, page);
     const press = watchPagePress(page, { applicationSend: true });
     const stopAction = () => {
       void page.close().catch(() => undefined);

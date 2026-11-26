@@ -1117,17 +1117,34 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 content:
                   "No send with that call ID belongs to this application. Read the ledger fact from submit_application.",
               };
+            const outcome =
+              decision.outcome === "confirmed"
+                ? "submitted"
+                : decision.outcome === "failed"
+                  ? "not_submitted"
+                  : "outcome_uncertain";
+            const reason =
+              decision.outcome === "waiting"
+                ? "awaiting_email_verification"
+                : "model_observed_outcome";
+            // One send call has one recorded outcome: the same report again
+            // (record_send_outcome, then finish) adds no second row.
+            if (
+              previous.outcome === outcome &&
+              (previous.browserAction?.reason === reason ||
+                previous.browserAction?.reason ===
+                  "model_reported_send_without_prior_intent")
+            )
+              return {
+                recorded: true,
+                content: `sendCallId=${decision.sendCallId} already has this ${decision.outcome} outcome recorded; nothing new was written. This call ID remains consumed and will never be replayed.`,
+              };
             const at = new Date().toISOString();
             const destination = new URL(decision.pageUrl ?? job.url);
             const receipt = SubmissionOutcomeRecordSchema.parse({
               ...previous,
               id: `${previous.id}_model_${randomUUID()}`,
-              outcome:
-                decision.outcome === "confirmed"
-                  ? "submitted"
-                  : decision.outcome === "failed"
-                    ? "not_submitted"
-                    : "outcome_uncertain",
+              outcome,
               verifiedAt:
                 decision.outcome === "uncertain" ||
                 decision.outcome === "waiting"
@@ -1155,13 +1172,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       ? "policy_decision"
                       : "outcome_uncertain",
               },
-              browserAction: {
-                ...previous.browserAction,
-                reason:
-                  decision.outcome === "waiting"
-                    ? "awaiting_email_verification"
-                    : "model_observed_outcome",
-              },
+              browserAction: { ...previous.browserAction, reason },
             });
             const recorded =
               await deps.authorityRepository.resolveSubmissionOutcome({

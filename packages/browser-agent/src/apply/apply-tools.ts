@@ -313,8 +313,13 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             sendOutcome: {
               type: "object",
               description:
-                "Report any send, including one made by click or another tool. confirmed, failed or uncertain records your evidence even if no send intent exists. Never describe a send only in reason.",
+                "Report any send, including one made by click or another tool. confirmed, failed or uncertain records your evidence even if no send intent exists. Never describe a send only in reason. It records one send call; record every other send call still without an outcome with record_send_outcome before finishing.",
               properties: {
+                sendCallId: {
+                  type: "string",
+                  description:
+                    "The send call this reports. Defaults to your latest send call.",
+                },
                 outcome: {
                   type: "string",
                   enum: ["confirmed", "failed", "uncertain"],

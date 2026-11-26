@@ -205,11 +205,13 @@ it.each([
     });
     expect(receipt.evidence[0]?.summary).toBe(decision.evidence);
     expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
-    // Reporting again updates the same consumed call; it never creates another press.
+    // Reporting again (record_send_outcome, then finish) neither presses
+    // again nor writes a second outcome for the same call.
     expect(await preparation.recordSendOutcome!(decision)).toMatchObject({
       recorded: true,
     });
     expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+    expect(await guards.listSubmissionOutcomeRecords()).toHaveLength(1);
   },
 );
 

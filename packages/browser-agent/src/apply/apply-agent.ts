@@ -143,6 +143,15 @@ async function runApplyAgentPrivate(
     string,
     "submitted" | "failed" | "uncertain" | "waiting"
   >();
+  // Each press of a send control, by call ID: when, and the page it was on.
+  const pressedSends = new Map<string, { at: string; url: string | null }>();
+  const recordedSends = new Set<string>();
+  const unresolvedSendsFact = (): string => {
+    const open = [...pressedSends].filter(([id]) => !recordedSends.has(id));
+    return open.length
+      ? `Send ledger: these send calls have no outcome you recorded yet: ${open.map(([id, press]) => `sendCallId=${id} (pressed ${press.at} on ${press.url?.split(/[?#]/u)[0] ?? "an unknown page"})`).join("; ")}. Record what each one did with record_send_outcome.`
+      : "";
+  };
   const updateSendOutcome = (
     id: string,
     outcome: "confirmed" | "failed" | "uncertain" | "waiting",
@@ -383,16 +392,20 @@ async function runApplyAgentPrivate(
     report: ApplyFinishSendOutcome,
     callId: string,
   ): Promise<string | null> => {
-    const sendCallId = [...sendDecisions.keys()].at(-1) ?? callId;
+    const sendCallId =
+      report.sendCallId ?? [...sendDecisions.keys()].at(-1) ?? callId;
     if (!config.recordSendOutcome)
       return "The send ledger is unavailable in this run.";
     const result = await config.recordSendOutcome({
-      ...report,
+      outcome: report.outcome,
       evidence: redactVerificationText(report.evidence),
       sendCallId,
-      pageUrl: page?.url ?? null,
+      // The destination is the page the send was pressed on, such as the
+      // mailbox, not the form tab finish returns to.
+      pageUrl: pressedSends.get(sendCallId)?.url ?? page?.url ?? null,
     });
     if (!result.recorded) return result.content;
+    recordedSends.add(sendCallId);
     updateSendOutcome(sendCallId, report.outcome);
     note(result.content);
     return null;
@@ -507,8 +520,15 @@ async function runApplyAgentPrivate(
         }
         const receipt = await config.submitApplication(decision);
         note(receipt.content);
-        if (receipt.outcome)
-          updateSendOutcome(receipt.sendCallId ?? callId, "uncertain");
+        if (receipt.outcome) {
+          const sendCallId = receipt.sendCallId ?? callId;
+          updateSendOutcome(sendCallId, "uncertain");
+          if (receipt.outcome === "outcome_uncertain")
+            pressedSends.set(sendCallId, {
+              at: now().toISOString(),
+              url: before.url ?? null,
+            });
+        }
         await readPage();
         content = receipt.content;
         break;
@@ -884,9 +904,11 @@ async function runApplyAgentPrivate(
       const result = await config.recordSendOutcome({
         ...parsed.data,
         evidence: redactVerificationText(parsed.data.evidence),
-        pageUrl: page?.url ?? null,
+        pageUrl:
+          pressedSends.get(parsed.data.sendCallId)?.url ?? page?.url ?? null,
       });
       if (result.recorded) {
+        recordedSends.add(parsed.data.sendCallId);
         updateSendOutcome(parsed.data.sendCallId, parsed.data.outcome);
         note(result.content);
       }
@@ -996,7 +1018,17 @@ async function runApplyAgentPrivate(
         },
       ],
       model,
-      tools: domainTools,
+      // Every tool result carries the sends still without a recorded outcome.
+      tools: domainTools.map((tool) => ({
+        ...tool,
+        execute: async (raw, context) => {
+          const result = await tool.execute(raw, context);
+          const fact = unresolvedSendsFact();
+          return result.kind === "ok" && fact
+            ? { ...result, content: `${result.content}\n\n${fact}` }
+            : result;
+        },
+      })),
       subjectLabel: input.siteLabel,
       parallelToolCalls: false,
       staleToolResultChars: null,
@@ -1053,12 +1085,7 @@ async function runApplyAgentPrivate(
       reviewObservedFieldKeys: [...observedFields],
       reviewAttachments: [...reviewAttachments.values()],
       pauses,
-      notes: [
-        ...notes,
-        ...(verificationIsPrivate()
-          ? ["Verification mailbox activity omitted from saved notes."]
-          : loop.turnNotes),
-      ].map(redactVerificationText),
+      notes: [...notes, ...loop.turnNotes].map(redactVerificationText),
       timeline,
       modelTurns: timingRecord.snapshot().modelTurns,
       timing: timingRecord.snapshot(),

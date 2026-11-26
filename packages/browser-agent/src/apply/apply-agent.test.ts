@@ -863,6 +863,132 @@ test("submit returns page and ledger facts, then the model records its observed 
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
   ).toContain("POST employer.example.test/api/apply 200");
 });
+test("a mailbox send records the mailbox as its destination after finish returns to the form", async () => {
+  const formUrl = "https://employer.example.test/kontakt";
+  const mailUrl = "https://mail.google.com/mail/u/0/#inbox?compose=new";
+  const source = page({
+    url: mailUrl,
+    controls: [],
+    actions: [{ index: 0, label: "Send", visible: true, disabled: false }],
+    tabs: [
+      {
+        id: "form",
+        url: formUrl,
+        title: "Kontakt",
+        active: false,
+        primary: true,
+      },
+      {
+        id: "tab1",
+        url: mailUrl,
+        title: "Compose",
+        active: true,
+        primary: false,
+      },
+    ],
+  });
+  const input = config(source);
+  input.authority.mode = "autonomous_submit";
+  input.hands.closeAuxiliaryTabs = () => {
+    source.url = formUrl;
+    source.tabs = [
+      {
+        id: "form",
+        url: formUrl,
+        title: "Kontakt",
+        active: true,
+        primary: true,
+      },
+    ];
+    return Promise.resolve();
+  };
+  input.submitApplication = vi.fn(() =>
+    Promise.resolve({
+      outcome: "outcome_uncertain" as const,
+      content: "Send ledger: sendCallId=mail-send",
+    }),
+  );
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({ recorded: true, content: "Recorded confirmed" }),
+  );
+  const result = await runApplyAgent(
+    input,
+    model([
+      { name: "submit_application", id: "mail-send", args: { ref: "a0" } },
+      {
+        name: "finish",
+        args: {
+          reason: "Gmail showed Message sent.",
+          sendOutcome: { outcome: "confirmed", evidence: "Message sent" },
+        },
+      },
+    ]),
+  );
+  expect(result.outcome).toBe("submitted");
+  expect(input.recordSendOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ sendCallId: "mail-send", pageUrl: mailUrl }),
+  );
+});
+test("after several presses every tool result names the send calls still without an outcome, and finish reports the call it names", async () => {
+  const input = config(page());
+  input.authority.mode = "autonomous_submit";
+  input.submitApplication = vi.fn(() =>
+    Promise.resolve({
+      outcome: "outcome_uncertain" as const,
+      content: "No requests after the click.",
+    }),
+  );
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({ recorded: true, content: "Recorded failed" }),
+  );
+  const client = model([
+    { name: "submit_application", id: "press-1", args: { ref: "a0" } },
+    { name: "submit_application", id: "press-2", args: { ref: "a0" } },
+    {
+      name: "record_send_outcome",
+      args: {
+        sendCallId: "press-1",
+        outcome: "failed",
+        evidence: "The form stayed on /apply with no request.",
+      },
+    },
+    { name: "observe", args: {} },
+    {
+      name: "finish",
+      args: {
+        reason: "The site never took the form.",
+        sendOutcome: {
+          sendCallId: "press-2",
+          outcome: "failed",
+          evidence: "The form stayed on /apply with no request.",
+        },
+      },
+    },
+  ]);
+  await runApplyAgent(input, client);
+  const lastToolResult = (turn: number) =>
+    String(
+      vi
+        .mocked(client.chatWithTools)
+        .mock.calls[turn]?.[0].filter((message) => message.role === "tool")
+        .at(-1)?.content,
+    );
+  expect(lastToolResult(2)).toMatch(
+    /no outcome you recorded yet: sendCallId=press-1 .*; sendCallId=press-2 /u,
+  );
+  expect(lastToolResult(3)).toContain(
+    "no outcome you recorded yet: sendCallId=press-2 ",
+  );
+  expect(lastToolResult(3)).not.toContain("sendCallId=press-1 (");
+  expect(
+    vi
+      .mocked(input.recordSendOutcome)
+      .mock.calls.map(([call]) => [call.sendCallId, call.outcome]),
+  ).toEqual([
+    ["press-1", "failed"],
+    ["press-2", "failed"],
+  ]);
+});
 test.each(["failed", "uncertain"] as const)(
   "a step handed to the person after a %s send waits on the person",
   async (outcome) => {

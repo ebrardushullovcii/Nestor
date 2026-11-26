@@ -10,9 +10,9 @@ export const ApplySendOutcomeDecisionSchema = z
 export type ApplySendOutcomeDecision = z.infer<
   typeof ApplySendOutcomeDecisionSchema
 >;
-export const ApplyFinishSendOutcomeSchema = ApplySendOutcomeDecisionSchema.omit(
-  { sendCallId: true },
-);
+/** Without a sendCallId, finish reports the latest send call. */
+export const ApplyFinishSendOutcomeSchema =
+  ApplySendOutcomeDecisionSchema.partial({ sendCallId: true });
 export type ApplyFinishSendOutcome = z.infer<
   typeof ApplyFinishSendOutcomeSchema
 >;
