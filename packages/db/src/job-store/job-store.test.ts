@@ -754,7 +754,7 @@ it("numeric floors share assessed-only paging, counts and filtered bulk selectio
   const store = open();
   const { added } = store.saveFoundJobs({
     searchId: "s",
-    jobs: [found(1), found(2), found(3), found(4)],
+    jobs: [found(1), found(2), found(3)],
   });
   store.setFit([
     { id: added[0]!, score: 80, summary: "Strong", reasons: [], gaps: [] },
@@ -778,7 +778,7 @@ it("keeps a fit's short reason beside its summary, for narrow rows", () => {
   const store = open();
   const { added } = store.saveFoundJobs({
     searchId: "s",
-    jobs: [found(1), found(2), found(3)],
+    jobs: [found(1), found(2), found(3), found(4)],
   });
   store.setFit([
     {
