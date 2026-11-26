@@ -456,26 +456,30 @@ export interface ResumeRenderOptions {
   includePreviewAnchors?: boolean;
 }
 
+/**
+ * The writer's own skill lists are what the resume shows. The person's other
+ * saved skills stay on the draft, hidden, for them to show again; showing
+ * them after the writer's list printed one skill twice under two spellings.
+ */
 function buildCoreAndAdditionalSkills(
   profile: Pick<CandidateProfile, "skills" | "skillGroups"> | null | undefined,
-  draftSkills: readonly string[],
+  draft: Pick<TailoredResumeDraft, "coreSkills" | "additionalSkills">,
 ) {
-  const allSkills = uniqueStrings([
-    ...draftSkills,
-    ...(profile?.skills ?? []),
-    ...(profile?.skillGroups.coreSkills ?? []),
-    ...(profile?.skillGroups.tools ?? []),
-    ...(profile?.skillGroups.languagesAndFrameworks ?? []),
-  ]);
-
+  const coreSkills = uniqueStrings(draft.coreSkills);
+  const listed = new Set(coreSkills.map((entry) => normalizeText(entry)));
+  const additionalSkills = uniqueStrings(draft.additionalSkills).filter(
+    (skill) => !listed.has(normalizeText(skill)),
+  );
+  for (const skill of additionalSkills) listed.add(normalizeText(skill));
   return {
-    coreSkills: uniqueStrings(draftSkills),
-    additionalSkills: allSkills.filter(
-      (skill) =>
-        !new Set(
-          uniqueStrings(draftSkills).map((entry) => normalizeText(entry)),
-        ).has(normalizeText(skill)),
-    ),
+    coreSkills,
+    additionalSkills,
+    hiddenSkills: uniqueStrings([
+      ...(profile?.skills ?? []),
+      ...(profile?.skillGroups.coreSkills ?? []),
+      ...(profile?.skillGroups.tools ?? []),
+      ...(profile?.skillGroups.languagesAndFrameworks ?? []),
+    ]).filter((skill) => !listed.has(normalizeText(skill))),
   };
 }
 
@@ -797,7 +801,7 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     ...sharedRefs,
     ...buildProfileSkillSourceRefs(profile),
   ];
-  const draftSkills = buildCoreAndAdditionalSkills(profile, draft.coreSkills);
+  const draftSkills = buildCoreAndAdditionalSkills(profile, draft);
   const candidateFacingTargetedKeywords = filterCandidateFacingResumeKeywords(
     draft.targetedKeywords,
   );
@@ -1141,24 +1145,26 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     );
   }
 
-  const additionalSkills = uniqueStrings([
-    ...draft.additionalSkills,
-    ...draftSkills.additionalSkills,
-  ]);
-  if (additionalSkills.length > 0) {
-    const visibleAdditionalSkills = additionalSkills;
-    sections.push(
-      createSection({
-        id: "section_additional_skills",
-        kind: "skills",
-        label: "Additional Skills",
-        bullets: visibleAdditionalSkills,
-        updatedAt: createdAt,
-        origin,
-        sortOrder: sections.length,
-        sourceRefs: skillSourceRefs,
-      }),
-    );
+  const { additionalSkills, hiddenSkills } = draftSkills;
+  if (additionalSkills.length + hiddenSkills.length > 0) {
+    const section = createSection({
+      id: "section_additional_skills",
+      kind: "skills",
+      label: "Additional Skills",
+      bullets: [...additionalSkills, ...hiddenSkills],
+      updatedAt: createdAt,
+      origin,
+      sortOrder: sections.length,
+      sourceRefs: skillSourceRefs,
+    });
+    const shown = new Set(additionalSkills);
+    sections.push({
+      ...section,
+      ...(additionalSkills.length ? {} : { included: false }),
+      bullets: section.bullets.map((bullet) =>
+        shown.has(bullet.text) ? bullet : { ...bullet, included: false },
+      ),
+    });
   }
 
   const languages = profile?.spokenLanguages.length

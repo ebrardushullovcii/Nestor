@@ -9,8 +9,6 @@ import {
   buildDeterministicStructuredResumeDraft,
   composeDeterministicFullText,
   uniqueStrings,
-  VISIBLE_ADDITIONAL_SKILL_LIMIT,
-  VISIBLE_CORE_SKILL_LIMIT,
 } from "./deterministic";
 import { parseEvidenceLinkedText } from "./resume-generation-grounding";
 
@@ -826,9 +824,8 @@ export function completeTailoredResumeDraft(
   // skill the profile does not show is the fact check's call: in aggressive
   // tailoring such a skill becomes a line to confirm.
   const strategyCoreSkills = coreSkills;
-  const finalCoreSkills = uniqueStrings(strategyCoreSkills)
-    .filter(isCompetency)
-    .slice(0, VISIBLE_CORE_SKILL_LIMIT);
+  const finalCoreSkills =
+    uniqueStrings(strategyCoreSkills).filter(isCompetency);
   const additionalCandidates =
     sanitizedAdditionalSkills.length > 0
       ? sanitizedAdditionalSkills
@@ -844,8 +841,9 @@ export function completeTailoredResumeDraft(
           (coreSkill) => coreSkill.toLowerCase() === skill.toLowerCase(),
         ),
     )
-    .filter(isCompetency)
-    .slice(0, VISIBLE_ADDITIONAL_SKILL_LIMIT);
+    // The writer's whole list stands: the person's other skills are no
+    // longer appended after it, so a cut here would drop them silently.
+    .filter(isCompetency);
   const notes = [...fallback.notes];
   const canonicalExperienceEvidenceByRecordId = new Map(
     fallbackInput.profile.experiences.map((experience) => [

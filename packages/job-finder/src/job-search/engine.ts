@@ -520,7 +520,10 @@ export function createListingSearchEngine(deps: {
               sourceJobId: job.sourceJobId ?? null,
               postedAt: job.postedAt ?? null,
               description: job.description,
-              facts: { fullListingRead: true },
+              // An index the agent walked yields cards, not read postings.
+              facts: {
+                fullListingRead: job.listingDetailFetch?.outcome === "enriched",
+              },
               summary: null,
               seniority: job.seniority ?? null,
               employmentType: job.employmentType ?? null,

@@ -89,3 +89,23 @@ it("applies on this page when the person picks Apply on this link", () => {
     "https://employer.example.test/apply/1",
   );
 });
+
+it("saves results cards as unread and a full page read as read", () => {
+  const store = open();
+  const pageUrl = "https://careers.example.test/jobs";
+  const cards = savePageJobs(store, { postings: [posting(1)], pageUrl });
+  const read = savePageJobs(store, {
+    postings: [posting(2)],
+    pageUrl,
+    fullListingRead: true,
+  });
+  expect(store.getJob(cards.ids[0]!)?.facts.fullListingRead).toBe(false);
+  expect(store.getJob(read.ids[0]!)?.facts.fullListingRead).toBe(true);
+  // A later full read of a saved card marks it read.
+  savePageJobs(store, {
+    postings: [posting(1)],
+    pageUrl,
+    fullListingRead: true,
+  });
+  expect(store.getJob(cards.ids[0]!)?.facts.fullListingRead).toBe(true);
+});

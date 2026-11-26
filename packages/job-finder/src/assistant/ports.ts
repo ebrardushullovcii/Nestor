@@ -29,6 +29,8 @@ export interface AssistantHostPorts {
     postings: readonly JobPosting[];
     pageUrl: string;
     applyOnThisPage?: boolean;
+    /** The page's complete vacancy was read, rather than a results card. */
+    fullListingRead?: boolean;
   }): Promise<SaveFoundJobsResult>;
   /** Only registered desktop actions; never raw IPC or arbitrary file access. */
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
