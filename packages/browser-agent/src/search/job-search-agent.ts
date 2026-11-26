@@ -693,7 +693,14 @@ async function runJobSearchAgentPrivate(
         ? `${verb} no new postings.`
         : `${verb} ${saved.length} new posting${saved.length === 1 ? "" : "s"}${isSourceCheck ? " as samples for this check" : ""}:`,
       ...saved.map(
-        (job) => `- ${job.title} — ${job.company} (${job.location})`,
+        (job) =>
+          `- ${job.title} — ${job.company} (${job.location})${
+            job.requestedListingMatch
+              ? job.requestedListingMatch.same
+                ? " — the requested listing"
+                : ` — not the requested listing: ${job.requestedListingMatch.reason}`
+              : ""
+          }`,
       ),
       rejected.length > 0
         ? `${rejected.length} rejected: ${rejected.map((job) => `${job.title}: ${job.searchRejection?.reason}`).join("; ")}`
@@ -1136,6 +1143,9 @@ async function runJobSearchAgentPrivate(
     salaryText: z.string().trim().min(1).nullable().optional(),
     postedAt: z.string().datetime().nullable().optional(),
     closedReason: z.string().trim().min(1).optional(),
+    requestedListingMatch: z
+      .object({ same: z.boolean(), reason: z.string().trim().min(1) })
+      .optional(),
   });
   const saveDataTool: AgentLoopTool = {
     definition: {
@@ -1185,6 +1195,24 @@ async function runJobSearchAgentPrivate(
                     minLength: 1,
                     pattern: "\\S",
                   },
+                  ...(config.requestedListing
+                    ? {
+                        requestedListingMatch: {
+                          type: "object",
+                          description:
+                            "Whether this is the requested listing, however its title is worded, and why.",
+                          properties: {
+                            same: { type: "boolean" },
+                            reason: {
+                              type: "string",
+                              minLength: 1,
+                              pattern: "\\S",
+                            },
+                          },
+                          required: ["same", "reason"],
+                        },
+                      }
+                    : {}),
                 },
                 required: [
                   "canonicalUrl",

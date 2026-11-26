@@ -32,6 +32,44 @@ describe("posting URL identity", () => {
     expect(prompt).toContain("and the listings name no company");
   });
 
+  test("a requested listing read records the reader's answer whether this is that posting", () => {
+    const prompt = buildJobsExtractionPrompt({
+      pageHostLabel: "careers.example.test",
+      pageType: "job_detail",
+      effectiveMaxJobs: 1,
+    });
+    expect(prompt).toContain(
+      "answer whether the vacancy on this page is that requested posting",
+    );
+    const read = (requestedListingMatch: unknown) =>
+      normalizeExtractedJobs({
+        payload: {
+          jobs: [
+            {
+              canonicalUrl: "https://careers.example.test/jobs/one",
+              title: "Operations Planning Lead (m/w/d)",
+              company: "Northwind",
+              location: "Berlin, Germany",
+              description: "Lead the operations planning team.",
+              requestedListingMatch,
+            },
+          ],
+        },
+        pageHostLabel: "careers.example.test",
+        pageUrl: "https://careers.example.test/jobs/one",
+        pageType: "job_detail",
+        effectiveMaxJobs: 1,
+      });
+    expect(
+      read({ same: true, reason: "The same vacancy, reworded." })[0]
+        ?.requestedListingMatch,
+    ).toEqual({ same: true, reason: "The same vacancy, reworded." });
+    // A malformed answer is dropped, never the posting it came with.
+    const [job] = read({ same: "maybe" });
+    expect(job?.title).toBe("Operations Planning Lead (m/w/d)");
+    expect(job?.requestedListingMatch).toBeUndefined();
+  });
+
   test("keeps explicit distinct URLs for separate roles with matching titles and companies", () => {
     const urls = [
       "https://careers.example.test/jobs/one",

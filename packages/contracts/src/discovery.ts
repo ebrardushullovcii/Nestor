@@ -1149,6 +1149,13 @@ export const JobPostingSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * On a read of one requested listing, the reading model's answer whether
+   * this vacancy is that posting, however its title is worded.
+   */
+  requestedListingMatch: z
+    .object({ same: z.boolean(), reason: NonEmptyStringSchema })
+    .optional(),
   /** The observed page that produced this extraction, independent of the run target. */
   producingPageUrl: UrlStringSchema.optional(),
   source: JobSourceSchema,
