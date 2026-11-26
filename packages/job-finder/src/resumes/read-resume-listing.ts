@@ -35,24 +35,40 @@ export function hasPostingText(
   return words(text).some((word) => !heading.has(word));
 }
 
+/** The posting says it is closed; no resume is written for it. */
+export class PostingClosedError extends Error {
+  override name = "PostingClosedError";
+}
+
 /**
  * Queued writing and a retired draft on Apply both write from the posting.
  * Saved posting text is used as it is. Only a job whose saved text is its
  * heading alone, or a card marked as partial, has its posting read first, by
  * the model in Nestor's browser, the way search reads the listings it keeps.
+ * Apply reads it first whenever it would write: a posting found closed gets
+ * no resume written.
  */
 export function createResumeListingReader(deps: {
   resumes: Pick<ResumeStore, "saveListing">;
   readPosting?: PostingReader;
 }) {
   const resumes = deps.resumes;
-  return async function withListing(job: JobDetail, signal: AbortSignal) {
+  return async function withListing(
+    job: JobDetail,
+    signal: AbortSignal,
+    options: {
+      /** Read the posting even when its text is saved, to learn it is open. */
+      readFirst?: boolean;
+    } = {},
+  ) {
     const saved = hasPostingText(job, job.description);
-    if (saved && job.facts.fullListingRead !== false) return job;
+    if (!options.readFirst && saved && job.facts.fullListingRead !== false)
+      return job;
     try {
       return await readListing(job, signal);
     } catch (error) {
       signal.throwIfAborted();
+      if (error instanceof PostingClosedError) throw error;
       // A failed read never blocks a job whose own text is saved; the
       // writer sees that this text may be partial.
       if (saved) return job;
@@ -64,6 +80,10 @@ export function createResumeListingReader(deps: {
     if (!deps.readPosting) throw new Error("Browser reading is unavailable.");
     const posting = await deps.readPosting(job, signal);
     signal.throwIfAborted();
+    if (posting.searchRejection?.category === "closed")
+      throw new PostingClosedError(
+        `The posting is closed: ${posting.searchRejection.reason}`,
+      );
     if (!hasPostingText(job, posting.description)) {
       throw new Error(
         "The full listing could not be read. Try writing the resume again when the posting is available.",

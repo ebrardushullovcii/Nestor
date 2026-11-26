@@ -11,7 +11,6 @@ import {
 
 import {
   buildWriterProfileOutline,
-  leaveOffBulletsByPriority,
   mergeImportCandidateSets,
   runProfileCopilotAgentTask,
   runResumeEditAgentTask,
@@ -870,7 +869,7 @@ describe("tool-using AI capabilities", () => {
     expect(result.notes.join(" ")).not.toContain("review");
   });
 
-  test("a clean draft over the page target leaves off its lowest-priority bullets without another call", async () => {
+  test("a render over the page target goes back to the writer with its page count", async () => {
     const achievements = [
       "Led the synthetic billing migration for four teams.",
       "Cut synthetic report time from two days to one hour.",
@@ -889,6 +888,7 @@ describe("tool-using AI capabilities", () => {
     ];
     let turn = 0;
     const payloads: Array<Record<string, unknown>> = [];
+    const toolResults: string[] = [];
     const client: AgentCapableJobFinderAiClient = {
       ...createDeterministicJobFinderAiClient(),
       chatWithTools(messages) {
@@ -898,6 +898,13 @@ describe("tool-using AI capabilities", () => {
             messages.find((message) => message.role === "user")!.content,
           ) as Record<string, unknown>,
         );
+        toolResults.push(
+          ...messages
+            .filter((message) => message.role === "tool")
+            .map((message) => String(message.content)),
+        );
+        // The writer tightens its own text after hearing the page count.
+        const shown = turn === 1 ? achievements : achievements.slice(0, 2);
         return Promise.resolve({
           toolCalls: [
             composeCall(`compose_${turn}`, {
@@ -905,13 +912,12 @@ describe("tool-using AI capabilities", () => {
                 experienceEntries: [
                   {
                     profileRecordId: "role_1",
-                    bullets: achievements.map((text, index) => ({
+                    bullets: shown.map((text, index) => ({
                       text,
                       evidenceRefs: [`experience:role_1:achievement:${index}`],
                       sourceAchievementIds: [
                         `experience:role_1:achievement:${index}`,
                       ],
-                      priority: [1, 2, 3, 3][index],
                     })),
                   },
                 ],
@@ -934,6 +940,8 @@ describe("tool-using AI capabilities", () => {
           return Promise.resolve({
             templateId: "classic_ats",
             pageCount: bullets > 2 ? 3 : 2,
+            lastPageFillRatio: bullets > 2 ? 0.08 : 0.9,
+            lastPageLineCount: bullets > 2 ? 4 : 40,
             targetPageCount: 2,
             warnings: [],
             fileName: "preview.pdf",
@@ -942,47 +950,63 @@ describe("tool-using AI capabilities", () => {
         },
       },
     });
-    // One writer call; the over-long render is shortened by its priorities.
-    expect(turn).toBe(1);
     expect(payloads[0]?.lengthBudget).toEqual({
       targetPageCount: 2,
       approximateWords: 720,
       approximateBullets: 30,
     });
+    // Nothing is cut by our code: each render is the writer's own proposal.
     expect(renderedBullets).toEqual([4, 2]);
+    expect(turn).toBe(2);
+    expect(toolResults.join(" ")).toContain(
+      "It rendered to 3 pages; the target is 2. It runs about 8% of a page over: page 3 is 8% full and holds 4 lines of text.",
+    );
+    expect(
+      (payloads[1]?.lastCheck as { pageCount?: number } | undefined)?.pageCount,
+    ).toBe(3);
     expect(result.experienceEntries[0]?.bullets).toEqual(
       achievements.slice(0, 2),
     );
   });
 
-  test("bullets without a priority stay, and a role keeps its most important bullet", () => {
-    const proposal = {
-      experienceEntries: [
-        {
-          profileRecordId: "a",
-          bullets: [
-            { text: "x", evidenceRefs: [], priority: 3 },
-            { text: "y", evidenceRefs: [], priority: 2 },
+  test("the writer may keep a longer render with finish_task", async () => {
+    const request = baseRequest();
+    let turn = 0;
+    const client: AgentCapableJobFinderAiClient = {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools() {
+        turn += 1;
+        return Promise.resolve({
+          toolCalls: [
+            turn === 1
+              ? composeCall("compose_1")
+              : {
+                  id: "finish_1",
+                  type: "function" as const,
+                  function: { name: "finish_task", arguments: "{}" },
+                },
           ],
-        },
-        {
-          profileRecordId: "b",
-          bullets: [{ text: "z", evidenceRefs: [] }],
-        },
-      ],
+        });
+      },
     };
-    expect(leaveOffBulletsByPriority(proposal, 2)).toEqual({
-      experienceEntries: [
-        {
-          profileRecordId: "a",
-          bullets: [{ text: "y", evidenceRefs: [], priority: 2 }],
-        },
-        { profileRecordId: "b", bullets: [{ text: "z", evidenceRefs: [] }] },
-      ],
-    });
-    expect(leaveOffBulletsByPriority(proposal.experienceEntries[1]!, 2)).toBe(
-      null,
+    const renderPreview = vi.fn(() =>
+      Promise.resolve({
+        templateId: "classic_ats",
+        pageCount: 3,
+        targetPageCount: 2,
+        warnings: [],
+        fileName: "preview.pdf",
+        requiredModelRepairs: [],
+      }),
     );
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Balanced mode substantive resume instructions.",
+      request: { ...request, targetPageCount: 2, renderPreview },
+    });
+    expect(turn).toBe(2);
+    expect(renderPreview).toHaveBeenCalledTimes(1);
+    expect(result.summary).toContain("Builds reliable automation.");
   });
 
   const templateRequest = (

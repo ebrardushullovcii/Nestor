@@ -383,6 +383,8 @@ export async function getPdfPageCount(filePath: string): Promise<number> {
 export async function inspectPdfLayout(filePath: string): Promise<{
   pageCount: number
   lastPageFillRatio: number
+  /** Lines of text on the last page: what a writer over its target cuts. */
+  lastPageLineCount: number
 }> {
   ensurePdfJsRuntimePolyfills()
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
@@ -396,9 +398,11 @@ export async function inspectPdfLayout(filePath: string): Promise<{
     // Templates use 0.4–0.64 inch vertical margins; half an inch is a
     // deliberately approximate common printable area, not a word-count guess.
     const margin = 36
-    const bottom = text.items.filter(isPdfTextItem).filter((item) => item.str.trim()).reduce((extent, item) =>
+    const items = text.items.filter(isPdfTextItem).filter((item) => item.str.trim())
+    const bottom = items.reduce((extent, item) =>
       Math.max(extent, viewport.height - (item.transform[5] ?? 0)), margin)
-    return { pageCount: document.numPages, lastPageFillRatio: Math.max(0, Math.min(1, (bottom - margin) / (viewport.height - 2 * margin))) }
+    const lastPageLineCount = new Set(items.map((item) => Math.round(item.transform[5] ?? 0))).size
+    return { pageCount: document.numPages, lastPageFillRatio: Math.max(0, Math.min(1, (bottom - margin) / (viewport.height - 2 * margin))), lastPageLineCount }
   } finally {
     await document.destroy()
   }

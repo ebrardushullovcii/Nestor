@@ -400,6 +400,10 @@ export interface CreateResumeDraftInput extends TailorResumeInput {
   }) => Promise<{
     templateId: string;
     pageCount: number | null;
+    /** How full the last page is, 0 to 1, when the renderer measured it. */
+    lastPageFillRatio?: number | null;
+    /** Lines of text on the last page, when the renderer measured them. */
+    lastPageLineCount?: number | null;
     /** Pages the person's resume should fit on; the writer aims for it. */
     targetPageCount?: number;
     warnings: readonly string[];

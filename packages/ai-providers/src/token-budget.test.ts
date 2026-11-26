@@ -232,12 +232,14 @@ test("the writer gets the evidence once and a record outline, and a refused prop
       );
     }
 
-  // The repair turn carries the proposal once: as workingProposal.
+  // The repair turn carries the proposal twice: in the writer's own earlier
+  // tool call, which it must see to revise its draft instead of resending it,
+  // and as workingProposal.
   const repairTurn = JSON.stringify(turns[1]);
   console.info(
     `[token budget] writer repair turn: ${repairTurn.length} chars, proposal copies ${repairTurn.split(marker).length - 1}`,
   );
-  expect(repairTurn.split(marker).length - 1).toBe(1);
+  expect(repairTurn.split(marker).length - 1).toBe(2);
 });
 
 test("a full listing read gets the trimmed profile, not contact details or saved answers", () => {

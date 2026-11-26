@@ -59,6 +59,8 @@ export interface ResumePdfInspection {
   pageCount: number;
   /** Text extent on the last PDF page, relative to its printable height. */
   lastPageFillRatio?: number | null;
+  /** Lines of text on the last PDF page. */
+  lastPageLineCount?: number | null;
   sha256: string;
 }
 
