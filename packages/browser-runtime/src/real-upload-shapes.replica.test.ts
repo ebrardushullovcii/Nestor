@@ -584,9 +584,9 @@ test("remote-search replica returns city and degree rows, commits exact retries 
       reason: "option_not_offered",
       offeredOptions: [...offered],
     });
-    expect((await page.locator(`#${id}`).inputValue()).length).toBeGreaterThan(
-      0,
-    );
+    // The list it searched is closed again; the box holds no half-typed answer.
+    expect(await page.locator(`#${id}`).inputValue()).toBe("");
+    expect(await page.getByRole("listbox").isVisible()).toBe(false);
     await registerPrepareOnlyPreparedValue(page, offered[0]);
     expect(await session.chooseOption(ref, offered[0])).toMatchObject({
       ok: true,

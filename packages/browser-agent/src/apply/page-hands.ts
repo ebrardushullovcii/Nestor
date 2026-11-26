@@ -606,6 +606,9 @@ export function createApplyPageHands(
       : {}),
     chooseOption: (ref, optionLabel) =>
       mechanics.chooseOption(ref, optionLabel),
+    ...(mechanics.readOptions
+      ? { readOptions: (ref: string) => mechanics.readOptions!(ref) }
+      : {}),
     setToggle: (ref, checked) => mechanics.setToggle(ref, checked),
     uploadFile: (ref, file) => mechanics.uploadFile(ref, file),
     clickAction: (ref) => mechanics.clickAction(ref),

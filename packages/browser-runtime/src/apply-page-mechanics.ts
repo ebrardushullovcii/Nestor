@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
 import {
   choosePageOption,
+  readPageOptions,
   settleFieldLookup,
   watchControlRequests,
   type ControlRequests,
@@ -2763,6 +2764,11 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           controlState: await controlResultState(locator),
         };
       }
+    },
+    readOptions: async (ref) => {
+      const locator = controlLocator(page, ref);
+      if (!locator) return null;
+      return readPageOptions(page, locator).catch(() => null);
     },
     setToggle: async (ref, checked): Promise<ApplyWriteResult> => {
       if (/^s\d+$/u.test(ref)) return setClosedShadowToggle(page, ref, checked);

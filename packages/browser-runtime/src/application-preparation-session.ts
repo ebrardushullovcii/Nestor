@@ -30,6 +30,11 @@ export function guardApplicationPreparationSession(
     readPage: () => guard(() => session.readPage()),
     fillText: (ref, value) => guard(() => session.fillText(ref, value)),
     chooseOption: (ref, value) => guard(() => session.chooseOption(ref, value)),
+    ...(session.readOptions
+      ? {
+          readOptions: (ref: string) => guard(() => session.readOptions!(ref)),
+        }
+      : {}),
     setToggle: (ref, checked) => guard(() => session.setToggle(ref, checked)),
     uploadFile: (ref, file) => guard(() => session.uploadFile(ref, file)),
     clickAction: (ref) => guard(() => session.clickAction(ref)),

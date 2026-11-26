@@ -353,6 +353,7 @@ export interface ApplyPageHands {
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
   typeKeys?: ApplyRawPageHands["typeKeys"];
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
+  readOptions?: ApplyRawPageHands["readOptions"];
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;

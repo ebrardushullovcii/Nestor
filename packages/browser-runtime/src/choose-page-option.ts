@@ -21,6 +21,8 @@ const IDLE_MS = 5_000;
 /** A list unchanged this long, and not loading, has finished drawing. */
 const STABLE_MS = 700;
 const POLL_MS = 150;
+/** Names a list found beside its control, so later reads find the same one. */
+const LIST_MARK = "data-nestor-option-list";
 
 /** Spelling only: spacing, case and Unicode forms do not make a different choice. */
 export function normalizeOptionLabel(value: string): string {
@@ -89,6 +91,9 @@ export async function choosePageOption(
       ? chooseNativeOption(locator, label, progressAt, report)
       : chooseCustomOption(page, locator, label, progressAt, report));
     if (!native) {
+      // A list this call opened and did not choose from is closed again, so
+      // it does not lie over the next field.
+      if (!result.ok) await closeList(locator);
       const scope = (await controlFrame(locator)) ?? page;
       const list = await boundList(scope, locator);
       const state = list ? await readList(list) : null;
@@ -139,6 +144,72 @@ export async function choosePageOption(
   } finally {
     requests.stop();
   }
+}
+
+/**
+ * The choices a list offers, for a question handed to the person. Opens the
+ * list the way select does, reads it to its end without choosing, and closes
+ * it again. Null when the list cannot be read.
+ */
+export async function readPageOptions(
+  page: Page,
+  locator: Locator,
+): Promise<string[] | null> {
+  const native = await evaluatePresent(
+    locator,
+    (element) =>
+      element instanceof HTMLSelectElement
+        ? Array.from(element.options)
+            .filter((option) => !option.disabled && option.value !== "")
+            .map((option) => option.text.replace(/\s+/gu, " ").trim())
+        : null,
+    undefined,
+  );
+  if (native) return native.filter((text) => !PLACEHOLDER.test(text));
+  const requests = watchControlRequests(page, locator);
+  try {
+    await requests.bound;
+    const scope = (await controlFrame(locator)) ?? page;
+    const expanded = await attribute(locator, "aria-expanded");
+    const list = await boundList(scope, locator);
+    const open = list ? await readList(list) : null;
+    if (expanded !== "true" && (expanded === "false" || !open?.visible))
+      await clickPresent(locator);
+    // No row can match this, so the list is read to its end.
+    const nothing = "\u0000";
+    const shown = await settle(
+      scope,
+      locator,
+      nothing,
+      IDLE_MS,
+      false,
+      nothing,
+      requests.progressAt,
+    );
+    if (shown.kind !== "settled") return null;
+    const read = await readWholeList(shown.list, nothing);
+    return read.options.length ? read.options : null;
+  } finally {
+    requests.stop();
+    await closeList(locator);
+  }
+}
+
+/**
+ * Leaves the picker the way a person leaves one they gave up on: focus moves
+ * away, which closes its list and drops unfinished search text.
+ */
+async function closeList(locator: Locator): Promise<void> {
+  await evaluatePresent(
+    locator,
+    (element) => {
+      const active = (element.getRootNode() as Document | ShadowRoot)
+        .activeElement;
+      (element as HTMLElement).blur();
+      if (active instanceof HTMLElement && active !== element) active.blur();
+    },
+    undefined,
+  ).catch(() => undefined);
 }
 
 /** What one control's own document is fetching. */
@@ -325,9 +396,14 @@ async function chooseNativeOption(
           (element as HTMLSelectElement).selectedOptions[0]?.text ?? "",
         undefined,
       );
+      const held = chosen.replace(/\s+/gu, " ").trim();
       return normalizeOptionLabel(chosen) === wanted
-        ? { ok: true, observedValue: chosen.replace(/\s+/gu, " ").trim() }
-        : uncertain(`The list did not keep "${label}" selected.`);
+        ? { ok: true, observedValue: held }
+        : uncertain(
+            held
+              ? `After "${label}" was chosen the list holds "${held}", so "${label}" is not what it holds.`
+              : `The list did not keep "${label}" selected.`,
+          );
     }
     const real = state.options
       .filter(
@@ -664,7 +740,12 @@ function attribute(locator: Locator, name: string): Promise<string | null> {
   );
 }
 
-/** The list this control names as its own, or the only list open beside it. */
+/**
+ * The list this control names as its own. A control that names none (some
+ * pickers say so only while open, or not at all) owns the list its active
+ * option sits in, else the one open list nearest to it, else the only list
+ * open on the page.
+ */
 async function boundList(
   scope: Frame | Page,
   locator: Locator,
@@ -679,6 +760,35 @@ async function boundList(
     .filter(Boolean);
   if (ids.length === 1)
     return scope.locator(`[id="${ids[0]!.replace(/["\\]/gu, "\\$&")}"]`);
+  const near = await evaluatePresent(
+    locator,
+    (element, mark) => {
+      const shown = (node: Element) =>
+        node.getClientRects().length > 0 &&
+        getComputedStyle(node).visibility !== "hidden";
+      const root = element.getRootNode() as Document | ShadowRoot;
+      const active = element.getAttribute("aria-activedescendant");
+      let list =
+        (active
+          ? root.getElementById?.(active)?.closest("[role='listbox']")
+          : null) ?? null;
+      for (
+        let at = element.parentElement;
+        !list && at && at !== document.body;
+        at = at.parentElement
+      ) {
+        const open = [...at.querySelectorAll("[role='listbox']")].filter(shown);
+        if (open.length === 1) list = open[0]!;
+        if (open.length > 1) break;
+      }
+      if (!list) return null;
+      if (!list.getAttribute(mark))
+        list.setAttribute(mark, Math.random().toString(36).slice(2));
+      return list.getAttribute(mark);
+    },
+    LIST_MARK,
+  );
+  if (near) return scope.locator(`[${LIST_MARK}="${near}"]`);
   const open = scope.locator("[role='listbox']:visible");
   return (await open.count()) === 1 ? open : null;
 }
@@ -696,14 +806,102 @@ function exactName(text: string): RegExp {
 }
 
 /**
- * Clicks the row by what it says, not where it sits: a list that redraws as
- * it scrolls puts a different choice at the same position.
+ * Presses the row by what it says, not where it sits: a list that redraws as
+ * it scrolls puts a different choice at the same position. The press goes to
+ * the row itself in one step. A pointer aimed at its position can land on
+ * another row when the page moves in between, as a menu that scrolls the
+ * page open does on the frame the pointer's own move draws.
  */
-async function clickRow(list: Locator, text: string): Promise<string> {
-  await clickPresent(
+async function pressRow(list: Locator, text: string): Promise<void> {
+  await evaluatePresent(
     list.getByRole("option", { name: exactName(text) }).first(),
+    (node) => {
+      const row = node as HTMLElement;
+      const box = row.getBoundingClientRect();
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      // What a person's pointer would touch inside the row, such as its link.
+      const hit = (row.getRootNode() as Document | ShadowRoot).elementFromPoint(
+        x,
+        y,
+      );
+      const target = hit && row.contains(hit) ? hit : row;
+      const mouse = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        button: 0,
+      };
+      const pointer = {
+        ...mouse,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      };
+      target.dispatchEvent(new PointerEvent("pointerover", pointer));
+      target.dispatchEvent(new MouseEvent("mouseover", mouse));
+      target.dispatchEvent(new PointerEvent("pointermove", pointer));
+      target.dispatchEvent(new MouseEvent("mousemove", mouse));
+      target.dispatchEvent(
+        new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
+      );
+      target.dispatchEvent(
+        new MouseEvent("mousedown", { ...mouse, buttons: 1 }),
+      );
+      target.dispatchEvent(new PointerEvent("pointerup", pointer));
+      target.dispatchEvent(new MouseEvent("mouseup", mouse));
+      target.dispatchEvent(new MouseEvent("click", { ...mouse, detail: 1 }));
+    },
+    undefined,
   );
-  return text;
+}
+
+/** What the control shows as chosen: its value, chips, or the list's marked row. */
+async function shownChoices(
+  list: Locator,
+  locator: Locator,
+  text: string,
+): Promise<string[]> {
+  const composite = (
+    await locator.evaluateAll(collectCustomComboboxStates, [0])
+  )[0]?.[1];
+  const own = await evaluatePresent(
+    locator,
+    (element) => {
+      const root = element.closest(
+        "[class*='__control'], [class*='-control'], .select-shell, [class*='select-shell']",
+      );
+      const chips = root
+        ? [
+            ...root.querySelectorAll<HTMLElement>(
+              "[class*='multi-value__label'], [class*='multiValue'] [class*='label' i]",
+            ),
+          ].map((chip) => chip.innerText)
+        : [];
+      const value =
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+          ? element.value
+          : ((element as HTMLElement).innerText ?? element.textContent ?? "");
+      return [...chips, value];
+    },
+    undefined,
+  );
+  // A list that stays open marks what it holds.
+  const marked = await list
+    .getByRole("option", { name: exactName(text), selected: true })
+    .count()
+    .catch(() => 0);
+  return [
+    ...new Set(
+      [composite?.selectedOptionLabel ?? "", ...own, marked ? text : ""]
+        .map((value) => value.replace(/\s+/gu, " ").trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 /** Search queries only, never guesses at alternative answers. */
@@ -719,24 +917,46 @@ function shorterSearches(label: string): string[] {
   ].filter((query) => query && query.length < label.trim().length);
 }
 
+/**
+ * Presses the row and reports what the control then holds. The result is a
+ * success only when that is the row the model asked for; anything else is
+ * returned as what the picker shows, so the model sees the actual answer.
+ */
 async function selectRow(
   list: Locator,
   locator: Locator,
   text: string,
-  searchable: boolean,
 ): Promise<ApplyWriteResult> {
-  await clickRow(list, text);
-  if (!searchable) return { ok: true, observedValue: text };
-  const selected = (
-    await locator.evaluateAll(collectCustomComboboxStates, [0])
-  )[0]?.[1];
-  const retained = await evaluatePresent(
-    locator,
-    (element) =>
-      (element as HTMLInputElement).value ?? element.textContent ?? "",
-    undefined,
-  );
-  return { ok: true, observedValue: selected?.selectedOptionLabel || retained };
+  await pressRow(list, text);
+  const wanted = normalizeOptionLabel(text);
+  // A picker may commit its choice a moment after the press; read until what
+  // it shows stops changing.
+  const pressedAt = Date.now();
+  let shown: string[] = [];
+  let lastKey = "";
+  let stableSince = Date.now();
+  for (;;) {
+    shown = await shownChoices(list, locator, text);
+    const match = shown.find((value) => normalizeOptionLabel(value) === wanted);
+    if (match) return { ok: true, observedValue: match };
+    const key = JSON.stringify(shown);
+    if (key !== lastKey) {
+      lastKey = key;
+      stableSince = Date.now();
+    }
+    if (
+      Date.now() - stableSince >= STABLE_MS ||
+      Date.now() - pressedAt >= IDLE_MS
+    )
+      break;
+    await pause(POLL_MS);
+  }
+  return {
+    ok: false,
+    error: shown.length
+      ? `After "${text}" was pressed the picker shows ${shown.map((value) => `"${value}"`).join(", ")}, so "${text}" is not what it holds.`
+      : `"${text}" was pressed, but the picker shows no choice.`,
+  };
 }
 
 /**
@@ -906,18 +1126,12 @@ async function chooseFromList(
     networkProgress,
     report,
   );
-  if (first.kind === "found")
-    return selectRow(first.list, locator, first.text, searchable);
+  if (first.kind === "found") return selectRow(first.list, locator, first.text);
   if (first.kind === "unbound") {
     // No list says it belongs to this control. A list elsewhere on the page
     // may still hold the choice, but its rows are not evidence of absence.
     try {
-      return await selectRow(
-        scope.locator("body"),
-        locator,
-        label.trim(),
-        searchable,
-      );
+      return await selectRow(scope.locator("body"), locator, label.trim());
     } catch {
       return uncertain(
         "The picker did not identify its option list, so its choices could not be confirmed.",
@@ -941,8 +1155,7 @@ async function chooseFromList(
       },
       read.complete && read.found === null,
     );
-    if (read.found)
-      return selectRow(first.list, locator, read.found, searchable);
+    if (read.found) return selectRow(first.list, locator, read.found);
     collect(read.options);
     if (!read.complete && !searchable) {
       return uncertain(
@@ -973,11 +1186,11 @@ async function chooseFromList(
     report,
   );
   if (listed.kind === "found")
-    return selectRow(listed.list, locator, listed.text, searchable);
+    return selectRow(listed.list, locator, listed.text);
   const whole =
     listed.kind === "settled" ? await readWholeList(listed.list, wanted) : null;
   if (whole?.found && listed.kind === "settled")
-    return selectRow(listed.list, locator, whole.found, searchable);
+    return selectRow(listed.list, locator, whole.found);
   if (whole?.complete && whole.options.length > 0) {
     return missing(label, whole.options);
   }
@@ -998,11 +1211,10 @@ async function chooseFromList(
         report,
       );
       if (searched.kind === "found")
-        return selectRow(searched.list, locator, searched.text, searchable);
+        return selectRow(searched.list, locator, searched.text);
       if (searched.kind === "settled") {
         const read = await readWholeList(searched.list, wanted);
-        if (read.found)
-          return selectRow(searched.list, locator, read.found, searchable);
+        if (read.found) return selectRow(searched.list, locator, read.found);
         collect(read.options);
       }
     }

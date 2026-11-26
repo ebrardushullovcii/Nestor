@@ -113,6 +113,7 @@ export function withAccountWindowSession(input: {
     fillText: (ref, value) => active().fillText(ref, value),
     typeKeys: (ref, text) => active().typeKeys!(ref, text),
     chooseOption: (ref, value) => active().chooseOption(ref, value),
+    readOptions: async (ref) => (await active().readOptions?.(ref)) ?? null,
     setToggle: (ref, value) => active().setToggle(ref, value),
     uploadFile: (ref, file) => active().uploadFile(ref, file),
     clickElement: (ref) => active().clickElement(ref),
