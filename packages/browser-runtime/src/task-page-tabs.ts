@@ -5,9 +5,25 @@ import type {
 import { markVerificationPrivate } from "@nestor/core/run-trace";
 import type { Page } from "playwright";
 import { withNavigationLiveness } from "./browser-navigation";
-import { markPrivateTracePage } from "./trace-page";
+import { markMailboxTracePage, markPrivateTracePage } from "./trace-page";
 
 const sessions = new WeakMap<Page, ApplyRawPageHands>();
+const activePages = new WeakMap<Page, () => Page>();
+const sendPages = new WeakMap<Page, Page>();
+
+/** The task tab the model works in now; the form tab itself otherwise. */
+export function activeTaskPage(primary: Page): Page {
+  const page = activePages.get(primary)?.();
+  return page && !page.isClosed() ? page : primary;
+}
+/** An auxiliary tab that carried an application send stays for final evidence. */
+export function rememberTaskSendPage(primary: Page, page: Page): void {
+  if (page !== primary) sendPages.set(primary, page);
+}
+export function taskSendPage(primary: Page): Page | null {
+  const page = sendPages.get(primary);
+  return page && !page.isClosed() ? page : null;
+}
 const owners = new WeakMap<Page, (page: Page) => void | Promise<void>>();
 export function configureTaskPageOwner(
   page: Page,
@@ -39,22 +55,24 @@ export function withTaskPageTabs(
     }
     return result;
   };
-  const privateRead = () => {
+  activePages.set(primary, () => active);
+  const privateRead = (page: Page) => {
     markVerificationPrivate();
-    markPrivateTracePage(primary);
-    markPrivateTracePage(active);
+    markMailboxTracePage(page);
   };
-  const closeAuxiliaryTabs = async () => {
+  const closeTabs = async (keepSendTab: boolean) => {
     active = primary;
+    const sendPage = keepSendTab ? taskSendPage(primary) : null;
     await Promise.all(
       [...pages]
-        .filter(([id]) => id !== "form")
+        .filter(([id, page]) => id !== "form" && page !== sendPage)
         .map(async ([id, page]) => {
           await page.close().catch(() => undefined);
           pages.delete(id);
         }),
     );
   };
+  const closeAuxiliaryTabs = () => closeTabs(true);
   const base = create(primary);
   hands.set(primary, base);
   const operations: Pick<
@@ -81,10 +99,9 @@ export function withTaskPageTabs(
       ),
     }),
     openTab: async (url): Promise<ApplyNavigationResult> => {
-      privateRead();
       const page = await primary.context().newPage();
       pages.set(`tab${++nextId}`, page);
-      markPrivateTracePage(page);
+      privateRead(page);
       active = page;
       try {
         await owners.get(primary)?.(page);
@@ -105,7 +122,7 @@ export function withTaskPageTabs(
       if (!page || page.isClosed())
         return { ok: false, error: "That task tab is no longer open." };
       active = page;
-      if (active !== primary) privateRead();
+      if (active !== primary) privateRead(page);
       await owners.get(primary)?.(page);
       await page.bringToFront();
       return { ok: true, url: page.url() };
@@ -213,7 +230,7 @@ export function withTaskPageTabs(
     },
   );
   primary.once?.("close", () => {
-    void closeAuxiliaryTabs();
+    void closeTabs(false);
   });
   sessions.set(primary, wrapped);
   return wrapped;

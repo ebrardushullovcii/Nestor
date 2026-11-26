@@ -1,8 +1,5 @@
 import process from "node:process";
-import {
-  redactVerificationText,
-  verificationIsPrivate,
-} from "./verification-privacy.mjs";
+import { redactVerificationText } from "./verification-privacy.mjs";
 /** Never retain authentication material or private model continuation state. */
 export function traceSafe(value) {
   const secrets = Object.entries(process.env)
@@ -12,18 +9,34 @@ export function traceSafe(value) {
         val &&
         val.length > 3,
     )
-    .map(([, val]) => val);
+    // A value counts where it stands as its own token, never inside a longer
+    // word: Windows CI sets PGPASSWORD=root, which must not turn "shadow-root"
+    // in a tool description into "shadow-[secret omitted]".
+    .map(
+      ([, val]) =>
+        new RegExp(
+          `(?<![\\p{L}\\p{N}_-])${val.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_-])`,
+          "gu",
+        ),
+    );
   const cleanText = (text) => {
     text = redactVerificationText(text);
     for (const secret of secrets)
-      text = text.split(secret).join("[secret omitted]");
-    return text
-      .replace(/Bearer\s+[^\s"']+/gi, "Bearer [secret omitted]")
-      .replace(
-        /([?&](?:access_token|id_token|token|code|key|api_key|password)=)[^&#\s"']*/gi,
-        "$1[secret omitted]",
-      )
-      .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[secret omitted]@");
+      text = text.replace(secret, "[secret omitted]");
+    return (
+      text
+        .replace(/Bearer\s+[^\s"']+/gi, "Bearer [secret omitted]")
+        .replace(
+          /([?&](?:access_token|id_token|token|code|key|api_key|password)=)[^&#\s"']*/gi,
+          "$1[secret omitted]",
+        )
+        // URL userinfo only: never span quotes or JSON punctuation into a
+        // neighbouring field such as an email address.
+        .replace(
+          /(https?:\/\/)[^\s/@:"'<>{},]+:[^\s/@"'<>{},]+@/gi,
+          "$1[secret omitted]@",
+        )
+    );
   };
   const visit = (item) => {
     if (typeof item === "string") {
@@ -88,10 +101,6 @@ export function traceSafe(value) {
         })
         .map(([key, val]) => [
           key,
-          (verificationIsPrivate() &&
-            /^(?:request|response|body|raw|arguments|result|content|visibleText|bodyText|bodyTextExcerpt|text|toolCalls|messages|choices|dataUrl)$/i.test(
-              key,
-            )) ||
           (/^(?:authorization|cookies?|set-cookie|password|passwd|access_token|refresh_token|id_token|api_key|apiKey|secret|mfaCode|otp)$/i.test(
             key,
           ) &&
