@@ -664,6 +664,7 @@ export async function writeResume(
         templateId: template.id,
         pageCount: rendered.pageCount ?? null,
         lastPageFillRatio: rendered.lastPageFillRatio ?? null,
+        lastPageLineCount: rendered.lastPageLineCount ?? null,
         targetPageCount: preview.targetPageCount,
         warnings: rendered.warnings ?? [],
         fileName: rendered.fileName,

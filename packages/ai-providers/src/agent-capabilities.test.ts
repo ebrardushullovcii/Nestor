@@ -941,6 +941,7 @@ describe("tool-using AI capabilities", () => {
             templateId: "classic_ats",
             pageCount: bullets > 2 ? 3 : 2,
             lastPageFillRatio: bullets > 2 ? 0.08 : 0.9,
+            lastPageLineCount: bullets > 2 ? 4 : 40,
             targetPageCount: 2,
             warnings: [],
             fileName: "preview.pdf",
@@ -958,7 +959,7 @@ describe("tool-using AI capabilities", () => {
     expect(renderedBullets).toEqual([4, 2]);
     expect(turn).toBe(2);
     expect(toolResults.join(" ")).toContain(
-      "Resume rendered to 3 pages; the target is 2. It runs about 8% of a page over: page 3 is 8% full.",
+      "It rendered to 3 pages; the target is 2. It runs about 8% of a page over: page 3 is 8% full and holds 4 lines of text.",
     );
     expect(
       (payloads[1]?.lastCheck as { pageCount?: number } | undefined)?.pageCount,

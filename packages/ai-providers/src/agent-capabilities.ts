@@ -766,17 +766,19 @@ export async function runResumeGenerationAgentTask(input: {
         pageCount > targetPageCount
       ) {
         const fill = rendered?.lastPageFillRatio;
+        const lines = rendered?.lastPageLineCount;
         const over =
           typeof fill === "number"
-            ? ` It runs about ${Math.max(1, Math.round((pageCount - targetPageCount - 1 + fill) * 100))}% of a page over: page ${pageCount} is ${Math.round(fill * 100)}% full.`
+            ? ` It runs about ${Math.max(1, Math.round((pageCount - targetPageCount - 1 + fill) * 100))}% of a page over: page ${pageCount} is ${Math.round(fill * 100)}% full${typeof lines === "number" ? ` and holds ${lines} line${lines === 1 ? "" : "s"} of text` : ""}.`
             : "";
         return {
-          summary: `Resume rendered to ${pageCount} pages; the target is ${targetPageCount}.${over} Tighten your own text by at least that much and call compose_resume_proposal again with the complete proposal, or call finish_task to keep this one.`,
+          summary: `The proposal you just sent was applied; it is workingProposal in the task state, and lastCheck describes its render. It rendered to ${pageCount} pages; the target is ${targetPageCount}.${over} Starting from workingProposal, remove at least that much text (a typical bullet is two or three lines) and call compose_resume_proposal again with the complete proposal, or call finish_task to keep this one.`,
           value: {
             selectedTemplateId,
             pageCount,
             targetPageCount,
             ...(typeof fill === "number" ? { lastPageFillRatio: fill } : {}),
+            ...(typeof lines === "number" ? { lastPageLineCount: lines } : {}),
             personConfirmationCount: rendered?.personConfirmationCount ?? 0,
           },
           progressMade: false,
@@ -1137,6 +1139,8 @@ export async function runResumeGenerationAgentTask(input: {
                   pageCount: lastRenderedPreview?.pageCount ?? null,
                   lastPageFillRatio:
                     lastRenderedPreview?.lastPageFillRatio ?? null,
+                  lastPageLineCount:
+                    lastRenderedPreview?.lastPageLineCount ?? null,
                   validationIssues,
                 },
               }

@@ -568,14 +568,15 @@ export function createLocalJobFinderDocumentManager(
       // Chromium's sandboxed renderer processes do layout/printing (at most
       // two). HTML generation and PDF parsing/hash work use the document
       // worker too, leaving main to coordinate files and approval writes.
-      const { pageCount, lastPageFillRatio, sha256 } = options.inspectPdf
-        ? await options.inspectPdf(pdfPath)
-        : {
-            ...(await inspectPdfLayout(pdfPath)),
-            sha256: createHash("sha256")
-              .update(await readFile(pdfPath))
-              .digest("hex"),
-          };
+      const { pageCount, lastPageFillRatio, lastPageLineCount, sha256 } =
+        options.inspectPdf
+          ? await options.inspectPdf(pdfPath)
+          : {
+              ...(await inspectPdfLayout(pdfPath)),
+              sha256: createHash("sha256")
+                .update(await readFile(pdfPath))
+                .digest("hex"),
+            };
 
       return {
         fileName: outputFileName,
@@ -584,6 +585,7 @@ export function createLocalJobFinderDocumentManager(
         format: "pdf",
         pageCount,
         lastPageFillRatio: lastPageFillRatio ?? null,
+        lastPageLineCount: lastPageLineCount ?? null,
         warnings: [],
       };
     },
