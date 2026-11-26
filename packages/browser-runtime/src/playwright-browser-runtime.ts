@@ -3861,34 +3861,12 @@ export function createBrowserAgentRuntime(
         // can navigate later if it needs more; an unavailable landing page
         // must not prevent it from reviewing the feed.
         const hasSourceCatalog = (agentOptions.sourceCatalog?.length ?? 0) > 0;
-        if (!hasSourceCatalog && warmPageReusable && navigationTarget) {
-          // A source check may have left its starting URL open even when that
-          // URL returned 404. Reusing the page must not bypass the same
-          // failure check a fresh navigation would make.
-          const warmStatus = await page
-            .evaluate(() => {
-              const navigation = performance
-                .getEntriesByType("navigation")
-                .at(-1);
-              return navigation && "responseStatus" in navigation
-                ? Number(navigation.responseStatus)
-                : null;
-            })
-            .catch(() => null);
-          if (
-            !agentOptions.requestedListing &&
-            (warmStatus === 404 || warmStatus === 410)
-          ) {
-            throw new Error(
-              `Starting page returned HTTP ${warmStatus}: ${navigationTarget}`,
-            );
-          }
-        }
-
+        // A starting page that answers 404 or 410 is evidence for the model:
+        // it reads that page and can find where the board moved.
         if (!hasSourceCatalog && !warmPageReusable) {
           if (navigationTarget) {
             allowPrepareOnlyRunNavigation(page, navigationTarget);
-            const response = await page
+            await page
               .goto(navigationTarget, {
                 waitUntil: "domcontentloaded",
                 timeout: 0,
@@ -3900,15 +3878,6 @@ export function createBrowserAgentRuntime(
                   return null;
                 throw error;
               });
-            const status = response?.status() ?? null;
-            if (
-              !agentOptions.requestedListing &&
-              (status === 404 || status === 410)
-            ) {
-              throw new Error(
-                `Starting page returned HTTP ${status}: ${navigationTarget}`,
-              );
-            }
           }
         }
 

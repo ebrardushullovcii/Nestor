@@ -213,3 +213,40 @@ test("backpressure accepts and drains every card beyond 2000 without dropping wo
     controller.abort();
   }
 });
+
+test.each(["memory", "durable"] as const)(
+  "dropping waiting %s cards releases a checkpoint and never consumes them",
+  async (kind) => {
+    const store = openJobStore(":memory:");
+    const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+    const controller = new AbortController();
+    const consumed: string[] = [];
+    const waves = createCardWaves(
+      controller.signal,
+      (cards) => {
+        consumed.push(...cards.map((row) => row.url));
+        return Promise.resolve();
+      },
+      1,
+      kind === "durable"
+        ? createSearchSourcesStore(store).cardQueue(search.id)
+        : undefined,
+    );
+    try {
+      const cards = ["a", "b", "c"].map((id) => ({
+        ...card,
+        url: `https://example.com/${id}`,
+      }));
+      await waves.push(cards);
+      expect(
+        waves.drop(card.sourceId, [cards[1]!.url, "https://example.com/x"]),
+      ).toEqual([cards[1]!.url]);
+      await waves.checkpoint(card.sourceId);
+      await waves.drain();
+      expect(consumed.sort()).toEqual([cards[0]!.url, cards[2]!.url]);
+    } finally {
+      controller.abort();
+      store.close();
+    }
+  },
+);

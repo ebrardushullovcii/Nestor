@@ -149,8 +149,11 @@ export function createHostQueue(options: {
       });
     },
     pause(key: string, until: number) {
-      const host = hosts.get(key);
-      if (host) host.until = Math.max(host.until, until);
+      // A host can be paused before its first queued read, for example when
+      // another reader of the same site was refused.
+      const host = hosts.get(key) ?? { active: 0, until: 0, entries: [] };
+      hosts.set(key, host);
+      host.until = Math.max(host.until, until);
       pump();
     },
     idle(): Promise<void> {

@@ -280,6 +280,9 @@ export function createJobSearchRunner(
       source.row.phase = null;
       source.row.message =
         `${source.row.cards} listings; ${source.row.related} related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
+        (source.removed
+          ? ` ${source.removed} removed by the site (HTTP 404 or 410), recorded closed without a read.`
+          : "") +
         (source.row.failedReads
           ? ` ${source.row.failedReads} listing reads need attention.`
           : "") +
@@ -441,6 +444,11 @@ export function createJobSearchRunner(
       );
       readSignal.throwIfAborted();
       await pipeline.accept(source, inventory.cards);
+      if (inventory.complete)
+        pipeline.refresh(
+          source,
+          new Set(inventory.cards.map((card) => card.url)),
+        );
       recordAccess(inventory.cards.length);
       readSignal.throwIfAborted();
       source.accessBlocked = inventory.complete

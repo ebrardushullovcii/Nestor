@@ -45,14 +45,25 @@ test("host queues report the active total and per-host boundaries and keep queue
     expect.arrayContaining(["host_queue_per_host", "host_queue_total"]),
   );
 });
-test("an HTTP refusal keeps its site status for browser continuation instead of spending a retry budget", async () => {
-  const request = vi.fn<typeof fetch>(() =>
-    Promise.resolve(new Response("busy", { status: 429 })),
+test("an HTTP refusal waits for the site and asks again instead of handing the read to a browser", async () => {
+  vi.useFakeTimers();
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response("busy", { status: 429 }))
+    .mockResolvedValueOnce(
+      new Response("<main>Open role</main>", { status: 200 }),
+    );
+  const read = createHttpPageReader({ fetch: request })(
+    "https://example.test/job",
+    {},
   );
-  await expect(
-    createHttpPageReader({ fetch: request })("https://example.test/job", {}),
-  ).rejects.toMatchObject({ status: 429 });
+  await vi.advanceTimersByTimeAsync(0);
   expect(request).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(request).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await expect(read).resolves.toMatchObject({ html: "<main>Open role</main>" });
+  expect(request).toHaveBeenCalledTimes(2);
 });
 
 test("rendered snapshots do not wait for semantic readiness on a continually changing page", async () => {

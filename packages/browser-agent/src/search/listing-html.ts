@@ -89,7 +89,11 @@ function excluded(node: Element, excludeForms = true): boolean {
         (parent.tagName !== "form" || excludeForms)) ||
         attr(parent, "role") === "navigation" ||
         parent.attrs.some((a) => a.name === "hidden") ||
-        attr(parent, "aria-hidden") === "true")
+        attr(parent, "aria-hidden") === "true" ||
+        // Markup the page does not show, such as a closed promotional popup.
+        /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu.test(
+          attr(parent, "style"),
+        ))
     )
       return true;
   }
@@ -218,6 +222,8 @@ export function readInventoryHtml(
   /** Index pages of this site that hold more vacancy cards, such as categories. */
   directories: string[];
   needsInteraction: boolean;
+  /** Published vacancy records on this index that carry no address of their own. */
+  unlinked: number;
 } {
   const { markup, scripts } = takeScripts(html);
   const doc = parse(markup);
@@ -279,8 +285,15 @@ export function readInventoryHtml(
       /* Malformed published data does not prevent visible-card reading. */
     }
   }
+  let unlinked = 0;
   for (const job of published) {
     if (typeof job.title !== "string") continue;
+    // Only a page's one record is the page itself. Several records without
+    // their own addresses are vacancies this reader cannot link.
+    if (typeof job.url !== "string" && published.length > 1) {
+      unlinked++;
+      continue;
+    }
     let href: string;
     try {
       href = new URL(typeof job.url === "string" ? job.url : url, url).href;
@@ -639,6 +652,7 @@ export function readInventoryHtml(
     portals: [...new Set(portals)],
     directories: [...new Set(directories)],
     needsInteraction,
+    unlinked,
   };
 }
 

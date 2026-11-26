@@ -11,7 +11,7 @@ import { expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
 import { createListingSearchEngine } from "./engine";
 
-test("a navigation checkpoint can wait for profession verification to render its detail without holding the reader queue", async () => {
+test("a navigation checkpoint can wait for a listing the model asks to read to render without holding the reader queue", async () => {
   const seed = createSeed();
   const target = JobDiscoveryTargetSchema.parse({
     id: "source",
@@ -53,6 +53,7 @@ test("a navigation checkpoint can wait for profession verification to render its
   });
   const chatWithTools = vi
     .fn<NonNullable<JobFinderAiClient["chatWithTools"]>>()
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
     .mockResolvedValueOnce({ content: '{"keep":{"0":1}}' });
   const readRenderedPage = vi.fn((url: string) =>
     Promise.resolve({
