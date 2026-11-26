@@ -658,6 +658,7 @@ export const applyHereTool = defineTool({
       postings: [posting],
       pageUrl,
       applyOnThisPage: true,
+      fullListingRead: true,
     });
     const jobId = saved.ids[0]?.toString();
     if (!jobId)

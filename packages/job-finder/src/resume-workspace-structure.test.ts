@@ -1909,3 +1909,60 @@ test("non-technical project skills use a neutral label included in language tran
       .entries[0]!.summary,
   ).toContain("Eingesetzte Kenntnisse:");
 });
+
+test("skill sections are the writer's own lists, without the profile's other spellings appended", () => {
+  // TeamSystem: the writer listed "C#" and "C++ (libobs)", and assembly
+  // appended the profile's "C#/.NET" and "C++" after them.
+  const seed = createSeed();
+  const profile = {
+    ...seed.profile,
+    skills: ["C#/.NET", "C++", "OAuth and JWT", "React"],
+    skillGroups: {
+      ...seed.profile.skillGroups,
+      coreSkills: ["C#/.NET", "React"],
+      tools: ["C++"],
+      languagesAndFrameworks: ["OAuth and JWT"],
+    },
+  };
+  const draft = buildResumeDraftFromTailoredDraft({
+    job: seed.savedJobs[0]!,
+    templateId: seed.settings.resumeTemplateId,
+    createdAt: "2026-11-26T10:00:00.000Z",
+    generationMethod: "ai",
+    profile,
+    draft: {
+      label: "Tailored Resume",
+      summary: "",
+      experienceHighlights: [],
+      coreSkills: ["React", "C#"],
+      targetedKeywords: [],
+      experienceEntries: [],
+      projectEntries: [],
+      educationEntries: [],
+      certificationEntries: [],
+      coverageMetadata: [],
+      additionalSkills: ["C++ (libobs)", "OAuth and JWT", "react"],
+      languages: [],
+      fullText: "",
+      compatibilityScore: 80,
+      notes: [],
+    },
+  });
+  const skills = (label: string, included = true) =>
+    draft.sections
+      .find((section) => section.label === label)
+      ?.bullets.filter((bullet) => bullet.included === included)
+      .map((bullet) => bullet.text);
+  expect(skills("Core Skills")).toEqual(["React", "C#"]);
+  expect(skills("Additional Skills")).toEqual([
+    "C++ (libobs)",
+    "OAuth and JWT",
+  ]);
+  // The person's other saved skills stay on the draft, hidden.
+  expect(skills("Additional Skills", false)).toEqual(["C#/.NET", "C++"]);
+  const rendered = JSON.stringify(
+    buildResumeRenderDocument(profile, draft).sections,
+  );
+  expect(rendered).not.toContain("C#/.NET");
+  expect(rendered).not.toContain('"C++"');
+});

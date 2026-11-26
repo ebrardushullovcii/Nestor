@@ -292,7 +292,7 @@ describe("resumes on the store", () => {
     });
     const [id] = store.saveFoundJobs({
       searchId: null,
-      jobs: [{ ...found(2), facts: {} }],
+      jobs: [{ ...found(2), facts: { fullListingRead: false } }],
     }).added;
     expect(store.getJob(id!)!.description.length).toBeGreaterThan(400);
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
@@ -305,7 +305,7 @@ describe("resumes on the store", () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a failed full read retryable instead of writing from the card", async () => {
+  it("writes from the saved card when its posting cannot be read", async () => {
     const fetchListingHtml = vi.fn(() =>
       Promise.reject(new Error("Posting unavailable")),
     );
@@ -314,10 +314,34 @@ describe("resumes on the store", () => {
       base.createResumeDraft(input),
     );
     const { store, service } = setup({
-      aiClient: {
-        ...createDeterministicJobFinderAiClient(),
-        createResumeDraft: write,
-      },
+      aiClient: { ...base, createResumeDraft: write },
+      fetchListingHtml,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [{ ...found(2), facts: { fullListingRead: false } }],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(fetchListingHtml).toHaveBeenCalledOnce();
+    expect(write.mock.calls[0]?.[0].job.description).toBe(
+      found(2).description.trim(),
+    );
+    expect(write.mock.calls[0]?.[0].job.detailQuality).toBe("partial_detail");
+    expect(store.getJob(id!)?.facts.fullListingRead).toBe(false);
+  });
+
+  it("writes from a saved posting body without reading the site again", async () => {
+    // Teambase: a URL add stored the rendered body but no read flag.
+    const fetchListingHtml = vi.fn(() =>
+      Promise.reject(new Error("must not be read")),
+    );
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: { ...base, createResumeDraft: write },
       fetchListingHtml,
     });
     const [id] = store.saveFoundJobs({
@@ -325,9 +349,85 @@ describe("resumes on the store", () => {
       jobs: [{ ...found(2), facts: {} }],
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(fetchListingHtml).not.toHaveBeenCalled();
+    expect(write.mock.calls[0]?.[0].job.description).toBe(
+      found(2).description.trim(),
+    );
+    expect(write.mock.calls[0]?.[0].job.detailQuality).toBe("detail_enriched");
+  });
+
+  it("reads the posting of a record whose saved text is only its title", async () => {
+    // TeamSystem: a results card stored the title as its description and
+    // was marked as read.
+    const seed = createSeed();
+    const body =
+      "Lead the DevOps team: Kubernetes, Terraform, AWS, CI/CD pipelines and on-call ownership.";
+    const read = vi.fn(() =>
+      Promise.resolve([
+        {
+          ...seed.savedJobs[0]!,
+          title: found(2).title,
+          company: found(2).company,
+          description: body,
+        },
+      ]),
+    );
+    const fetchListingHtml = vi.fn((url: string) =>
+      Promise.resolve({
+        html: "<main>Posting</main>",
+        status: 200,
+        finalUrl: url,
+      }),
+    );
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: {
+        ...base,
+        extractJobsFromPage: read,
+        createResumeDraft: write,
+      },
+      fetchListingHtml,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [
+        {
+          ...found(2),
+          description: found(2).title,
+          facts: { fullListingRead: true },
+        },
+      ],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(fetchListingHtml).toHaveBeenCalledOnce();
+    expect(write.mock.calls[0]?.[0].job.description).toBe(body);
+    expect(store.getJob(id!)?.description).toBe(body);
+  });
+
+  it("keeps a title-only job retryable when its posting cannot be read", async () => {
+    const fetchListingHtml = vi.fn(() =>
+      Promise.reject(new Error("Posting unavailable")),
+    );
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: { ...base, createResumeDraft: write },
+      fetchListingHtml,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [{ ...found(2), description: found(2).title, facts: {} }],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
     expect(write).not.toHaveBeenCalled();
-    expect(store.getJob(id!)?.facts.fullListingRead).toBeUndefined();
     service.rewrite(id!);
     await waitFor(() => expect(fetchListingHtml).toHaveBeenCalledTimes(2));
   });

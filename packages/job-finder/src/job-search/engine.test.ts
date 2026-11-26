@@ -558,3 +558,72 @@ test.each([999, 403, 429])(
     }
   },
 );
+
+test("a browser listing read marks only postings it read in full", async () => {
+  // TeamSystem: a results card's title was saved as a complete posting.
+  const seed = createSeed();
+  const read = {
+    ...seed.savedJobs[0]!,
+    canonicalUrl: "https://board.example/jobs/read",
+    description: "Complete duties and requirements of the requested vacancy.",
+    listingDetailFetch: {
+      attemptedAt: new Date().toISOString(),
+      outcome: "enriched",
+      method: "page_text",
+      detail: "Read this listing page in full.",
+    },
+  };
+  const card = {
+    ...seed.savedJobs[0]!,
+    canonicalUrl: "https://board.example/jobs/card",
+    sourceJobId: "card",
+    title: "DevOps Lead",
+    description: "DevOps Lead",
+    listingDetailFetch: null,
+  };
+  const engine = createListingSearchEngine({
+    aiClient: {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools: vi.fn<NonNullable<JobFinderAiClient["chatWithTools"]>>(),
+    },
+    browserRuntime: {
+      runAgentDiscovery: () =>
+        Promise.resolve(
+          DiscoveryRunResultSchema.parse({
+            source: "target_site",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            querySummary: "Synthetic listing read",
+            warning: null,
+            jobs: [read, card],
+          }),
+        ),
+    },
+  });
+  const result = await engine.readListings({
+    lane: "browser",
+    context: {
+      profile: seed.profile,
+      searchPreferences: seed.searchPreferences,
+      sources: [],
+      sourceInstructionArtifacts: [],
+    },
+    cards: [
+      {
+        url: read.canonicalUrl,
+        title: read.title,
+        text: read.title,
+        cardFingerprint: "read",
+        sourceId: "board",
+        sourceLabel: "Board",
+      },
+    ],
+    signal: new AbortController().signal,
+  });
+  expect(
+    result.jobs.map((job) => [job.url, job.facts?.fullListingRead]),
+  ).toEqual([
+    [read.canonicalUrl, true],
+    [card.canonicalUrl, false],
+  ]);
+});

@@ -69,22 +69,22 @@ export function savePageJobs(
         employmentType: posting.employmentType,
         summary: posting.summary,
         description: posting.description,
-        ...(input.fullListingRead
+        // A results card is saved as one, so the resume writer reads its
+        // posting first; a full page read carries its facts.
+        facts: input.fullListingRead
           ? {
-              facts: {
-                fullListingRead: true,
-                keySkills: posting.keySkills,
-                responsibilities: posting.responsibilities,
-                minimumQualifications: posting.minimumQualifications,
-                preferredQualifications: posting.preferredQualifications,
-                benefits: posting.benefits,
-                department: posting.department,
-                team: posting.team,
-                employerDomain: posting.employerDomain,
-                atsProvider: posting.atsProvider,
-              },
+              fullListingRead: true,
+              keySkills: posting.keySkills,
+              responsibilities: posting.responsibilities,
+              minimumQualifications: posting.minimumQualifications,
+              preferredQualifications: posting.preferredQualifications,
+              benefits: posting.benefits,
+              department: posting.department,
+              team: posting.team,
+              employerDomain: posting.employerDomain,
+              atsProvider: posting.atsProvider,
             }
-          : {}),
+          : { fullListingRead: false },
       })),
     });
     const [posting] = input.postings;

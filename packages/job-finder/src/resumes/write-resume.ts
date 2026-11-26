@@ -89,7 +89,11 @@ export function toResumeJob(job: JobDetail): SavedJob {
     postedAt: job.postedAt,
     discoveredAt: job.foundAt,
     salaryText: job.salaryText,
-    detailQuality: "detail_enriched",
+    // A card whose posting could not be read is written from what was saved.
+    detailQuality:
+      job.facts.fullListingRead === false
+        ? "partial_detail"
+        : "detail_enriched",
     summary: job.summary,
     description: job.description || job.summary || job.title,
     keySkills: job.facts.keySkills,
