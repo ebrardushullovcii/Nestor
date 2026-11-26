@@ -110,6 +110,8 @@ test("screening, full reads and fit use the selected million-token route's real 
       signal,
     });
     expect(stages).toEqual(["listing_screen", "page_read", "fit_batch"]);
+    // The fit queue sizes its batches from the same window.
+    expect(engine.contextWindowTokens?.()).toBe(1_000_000);
   } finally {
     store.close();
   }

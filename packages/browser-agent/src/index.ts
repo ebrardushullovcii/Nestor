@@ -5,6 +5,7 @@ export {
   screenCards,
   readListings,
   fitJobs,
+  modelRequestChars,
   roleGoalsKey,
   type ListingEngineModel,
 } from "./search/listing-engine";

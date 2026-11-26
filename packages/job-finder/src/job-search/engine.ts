@@ -77,6 +77,8 @@ export interface JobSearchEngine {
     cards: readonly ListingCard[];
     signal: AbortSignal;
   }): Promise<ReadListingResult>;
+  /** The selected model's context window, when its route reports one. */
+  contextWindowTokens?(): number | undefined;
   fitJobs(input: {
     /** Save complete judgments before another batch or repair can fail. */
     onBatch?: (fits: readonly JobFitUpdate[]) => Promise<void>;
@@ -534,6 +536,7 @@ export function createListingSearchEngine(deps: {
       }
       return followBoardApplyLinks(result, readPage, input.signal);
     },
+    contextWindowTokens: () => modelContext().contextWindowTokens,
     fitJobs: (input) =>
       withTraceScope(
         {

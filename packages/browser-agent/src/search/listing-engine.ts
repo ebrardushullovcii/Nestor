@@ -104,6 +104,15 @@ function batches<T>(
   return result;
 }
 
+/**
+ * Characters of input one request to the selected model holds: its own
+ * context window, less the share left for tools and the answer. Input past
+ * it is still read in full, through read_context_part.
+ */
+export function modelRequestChars(contextWindowTokens: number | undefined) {
+  return Math.floor((contextWindowTokens ?? 64_000) * 3.6 * 0.8);
+}
+
 async function ask<Output, Input>(
   model: ListingEngineModel,
   instruction: string,
@@ -118,8 +127,7 @@ async function ask<Output, Input>(
   const tools = [parts.tool.definition];
   const requestChars = Math.max(
     1,
-    Math.floor((model.contextWindowTokens ?? 64_000) * 3.6 * 0.8) -
-      JSON.stringify(tools).length,
+    modelRequestChars(model.contextWindowTokens) - JSON.stringify(tools).length,
   );
   const messages: AgentLoopMessage[] = [
     {
@@ -823,7 +831,7 @@ export async function screenCards(
       unresolved.filter((key) => !allGone(key)),
       120,
       weight,
-      360000,
+      modelRequestChars(input.contextWindowTokens),
     ),
     3,
     (batch) => judge(batch, "card"),
@@ -835,7 +843,7 @@ export async function screenCards(
       checks.filter((key) => !allGone(key)),
       120,
       weight,
-      360000,
+      modelRequestChars(input.contextWindowTokens),
     ),
     3,
     (batch) => judge(batch, "duties"),
@@ -1235,7 +1243,8 @@ export async function fitJobs(
       input.jobs.filter((job) => job.fit === null || job.fitStale),
       48,
       (job) => job.description.length,
-      360000,
+      modelRequestChars(input.contextWindowTokens) -
+        JSON.stringify(context).length,
     ),
     6,
     async (batch) => {

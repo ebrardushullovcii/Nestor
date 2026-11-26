@@ -1728,10 +1728,42 @@ test("one pass scores the whole backlog, visible jobs first, in bounded batches"
   await runner.scoreUnscored();
   expect(engine.fitJobs.mock.calls[0]?.[0].jobs[0]?.id).toBe(ids.at(-1));
   const sizes = engine.fitJobs.mock.calls.map(([input]) => input.jobs.length);
-  // Each request stays within its budget; the pass does not stop early.
+  // Without a reported window each request stays within the default one;
+  // the pass does not stop early.
   expect(Math.max(...sizes)).toBeLessThan(48);
   expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(ids.length);
   expect(store.unscoredJobIds(200)).toHaveLength(0);
+});
+
+test("fit batches fill the selected model's own context window", async () => {
+  const { store, context, engine } = setup();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const ids = seedBacklog(store, 120, LONG_LISTING);
+  const window = { tokens: 1_000_000 };
+  const controller = new AbortController();
+  const fits = createFitQueue(
+    {
+      store,
+      engine: { ...engine, contextWindowTokens: () => window.tokens },
+      readContext: () => Promise.resolve(context),
+    },
+    context,
+    controller.signal,
+    6,
+    () => {},
+    () => {},
+  );
+  fits.enqueue(ids);
+  await fits.drain();
+  const sizes = engine.fitJobs.mock.calls.map(([input]) => input.jobs.length);
+  // With a 1M window, 120 long listings go in three requests, not split at a
+  // fixed input size.
+  expect(sizes).toEqual([48, 48, 24]);
+  expect(
+    warn.mock.calls.some(([line]) => String(line).includes("fit_batch_tokens")),
+  ).toBe(false);
+  expect(store.unscoredJobIds(200)).toHaveLength(0);
+  warn.mockRestore();
 });
 
 test("validated cards record successful access, while later auth evidence wins", async () => {

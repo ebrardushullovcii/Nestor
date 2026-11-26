@@ -1,5 +1,6 @@
 import { abortable } from "./async";
 import { reportSelfLimitHit } from "@nestor/core";
+import { modelRequestChars } from "@nestor/browser-agent";
 import {
   fitContextFingerprint,
   fitContextInput,
@@ -9,12 +10,11 @@ import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
 import type { JobDetail, JobSearchSettings } from "@nestor/contracts";
 
 /**
- * One fit request: the person's evidence plus listings up to this estimate.
- * The budget bounds each batch, not the pass: a pass-wide budget let one
- * batch spend it, so a 1,800-job backlog went one request at a time with a
- * pause between passes while the other request slots sat idle.
+ * One fit request: the person's evidence plus the listings the selected
+ * model's own context window holds. The window bounds each batch, not the
+ * pass: a pass-wide budget let one batch spend it, so a 1,800-job backlog
+ * went one request at a time while the other request slots sat idle.
  */
-const BATCH_TOKENS = 50_000;
 const BATCH_JOBS = 48;
 
 /** Scores queued jobs in parallel batches. Unfinished work stays persisted. */
@@ -155,12 +155,16 @@ export function createFitQueue(
   };
 
   /**
-   * The next batch from the front of the queue. A batch short of the budget
-   * waits for more listings unless the queue is draining; one unusually long
-   * listing is indivisible and goes alone with its full evidence.
+   * The next batch from the front of the queue. A batch short of the model's
+   * window waits for more listings unless the queue is draining; one listing
+   * longer than the window goes alone with its full evidence, which the model
+   * reads in parts.
    */
   const takeBatch = (draining: boolean): JobDetail[] | null => {
     const jobs: JobDetail[] = [];
+    // Read for each batch: the person can change the model mid-search.
+    const windowTokens =
+      modelRequestChars(deps.engine.contextWindowTokens?.()) / 3.5;
     let tokens = overhead,
       full = false;
     for (let index = 0; index < pending.length; ) {
@@ -170,13 +174,7 @@ export function createFitQueue(
         continue;
       }
       const cost = estimate(job);
-      if (jobs.length && tokens + cost > BATCH_TOKENS) {
-        reportSelfLimitHit({
-          limit: "fit_batch_tokens",
-          kind: "input",
-          value: BATCH_TOKENS,
-          where: "job-finder/fitQueue/takeBatch",
-        });
+      if (jobs.length && tokens + cost > windowTokens) {
         full = true;
         break;
       }
