@@ -2373,6 +2373,10 @@ export function createBrowserAgentRuntime(
             optionLabel,
           ),
         ),
+      readOptions: (ref) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).readOptions!(ref),
+        ),
       setToggle: (ref, checked) =>
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).setToggle(ref, checked),

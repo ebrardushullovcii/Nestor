@@ -69,17 +69,18 @@ test.each([
 );
 
 test.each([
+  // The flag says Canada: "United States +1" is not what the widget holds.
   [
     "United States +1",
     '<div class="iti__flag iti__ca"></div><span>+1</span>',
     false,
+    '"Canada +1"',
   ],
-  ["Kosovo +383", "<span>+383</span>", false],
-  ["Yes", "<span hidden>Yes</span>", false],
-  ["Yes", "Yes", true],
+  ["Kosovo +383", "<span>+383</span>", false, '"+383"'],
+  ["Yes", "<span hidden>Yes</span>", false, "shows no choice"],
 ])(
-  "returns the widget's actual abbreviated value and keeps validity as a page fact: %s",
-  async (label, value, invalid) => {
+  "a widget that shows something other than the pressed row reports what it shows: %s",
+  async (label, value, invalid, shown) => {
     const page = await browser.newPage();
     try {
       await page.setContent(picker(label, value, invalid));
@@ -88,19 +89,29 @@ test.each([
         page.getByRole("combobox"),
         label,
       );
-      const observation = await createPlaywrightApplyPageSession({
-        page,
-      }).readPage();
-      const control = observation.controls.find(
-        (entry) => entry.id === "answer",
-      )!;
-      expect(result).toMatchObject({
-        ok: true,
-        observedValue: control.selectedOptionLabel || control.value,
-      });
-      expect(control.invalid).toBe(invalid);
+      expect(result.ok).toBe(false);
+      expect(result.ok || result.error).toContain(shown);
     } finally {
       await page.close();
     }
   },
 );
+
+test("an invalid mark stays a page fact beside the chosen value", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(picker("Yes", "Yes", true));
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      "Yes",
+    );
+    const control = (
+      await createPlaywrightApplyPageSession({ page }).readPage()
+    ).controls.find((entry) => entry.id === "answer")!;
+    expect(result).toMatchObject({ ok: true, observedValue: "Yes" });
+    expect(control.invalid).toBe(true);
+  } finally {
+    await page.close();
+  }
+});

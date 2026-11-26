@@ -44,7 +44,7 @@ import {
   parseFillFields,
 } from "./apply-tools";
 import { buildCoverLetterRequest, isCoverLetterControl } from "./cover-letter";
-import { reviewFieldKey } from "./form-replay";
+import { reviewFieldKey, screenKey } from "./form-replay";
 import { applicationModelFactsMessage } from "./model-facts";
 import {
   approvedApplicationLetter,
@@ -61,6 +61,7 @@ import {
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
+  ApplyFormControl,
   ApplyFormObservation,
   ApplyProposal,
 } from "./types";
@@ -290,6 +291,29 @@ async function runApplyAgentPrivate(
       ];
     }
   };
+  // A dropdown draws its choices only while open, so the page read shows none.
+  // A dropdown handed to the person carries the choices its list offers.
+  const handedOptions = new Map<string, string[]>();
+  const handedControl = (item: ApplyPersonRequest) =>
+    typeof item === "string"
+      ? page?.controls.find((c) => c.ref === item || questionPrompt(c) === item)
+      : undefined;
+  const readHandedOptions = async (forPerson: ApplyPersonRequest[] = []) => {
+    if (!config.hands.readOptions) return;
+    for (const item of forPerson) {
+      const control = handedControl(item);
+      if (
+        !control ||
+        (control.kind !== "select" && control.kind !== "combobox") ||
+        control.options.some((option) => option.trim())
+      )
+        continue;
+      const options = await config.hands
+        .readOptions(control.ref)
+        .catch(() => null);
+      if (options?.length) handedOptions.set(control.ref, options);
+    }
+  };
   const finish = (
     reason: string,
     stuck = false,
@@ -297,12 +321,9 @@ async function runApplyAgentPrivate(
   ): AgentLoopToolOutcome => {
     const questions: ApplicationAttemptQuestion[] = [];
     for (const [index, item] of forPerson.entries()) {
-      const control =
-        typeof item === "string"
-          ? page?.controls.find(
-              (c) => c.ref === item || questionPrompt(c) === item,
-            )
-          : undefined;
+      const found = handedControl(item);
+      const options = found && handedOptions.get(found.ref);
+      const control = found && options ? { ...found, options } : found;
       if (
         typeof item !== "string" ||
         control?.credentialRole === "password" ||
@@ -441,6 +462,7 @@ async function runApplyAgentPrivate(
     if (outcome.kind === "finished") {
       applicationClosed = outcome.applicationClosed === true;
       duplicateOfApplication = outcome.duplicateOfApplication;
+      await readHandedOptions(outcome.forPerson);
       return finish(outcome.reason, outcome.stuck, outcome.forPerson);
     }
     observe(outcome.observation);
@@ -631,6 +653,46 @@ async function runApplyAgentPrivate(
               : [],
           );
         const planned = refs(page);
+        const plannedPage = page;
+        // A page that redraws its form (a client-rendered page replacing its
+        // server HTML) gives the same field a new handle. The entry follows
+        // the field the model chose: on the same screen, the control with the
+        // same kind, question, label, id, name and frame, in the same place
+        // among any identical ones.
+        const redrawn = (ref: string): string | null => {
+          const before = plannedPage;
+          const after = page;
+          const control = before?.controls.find((c) => c.ref === ref);
+          if (!before || !after || !control) return null;
+          const same = (observation: ApplyFormObservation) => {
+            const key = (c: ApplyFormControl) => {
+              let native: unknown[] = [];
+              try {
+                native = JSON.parse(c.nativeIdentity ?? "[]") as unknown[];
+              } catch {
+                native = [];
+              }
+              // The form element itself may be new, so its scope is not part
+              // of the field's identity.
+              return JSON.stringify([
+                screenKey(observation),
+                c.kind,
+                c.label,
+                questionPrompt(c),
+                native[0] ?? null,
+                native[1] ?? null,
+                c.frame ?? null,
+              ]);
+            };
+            const wanted = key(control);
+            return observation.controls.filter((c) => key(c) === wanted);
+          };
+          const was = same(before);
+          const now = same(after);
+          const match =
+            was.length === now.length ? now[was.indexOf(control)] : undefined;
+          return match && match.ref !== ref ? match.ref : null;
+        };
         const notAttempted = (from: number, reason: string) =>
           steps
             .slice(from)
@@ -638,8 +700,15 @@ async function runApplyAgentPrivate(
               (entry, index) =>
                 `${from + index + 1}. ${entry.tool}${"ref" in entry ? ` ${entry.ref}` : ""}: not attempted (${reason}).`,
             );
-        for (const [index, step] of steps.entries()) {
+        for (const [index, entry] of steps.entries()) {
+          let step = entry;
           context.signal?.throwIfAborted();
+          const plannedRef = "ref" in step ? step.ref : undefined;
+          const moved =
+            plannedRef && planned.has(plannedRef) && !refs(page).has(plannedRef)
+              ? redrawn(plannedRef)
+              : null;
+          if (moved) step = { ...step, ref: moved } as ApplyProposal;
           if (
             "ref" in step &&
             step.ref &&
@@ -657,11 +726,29 @@ async function runApplyAgentPrivate(
             };
           }
           try {
-            const result = await runProposal(
+            let result = await runProposal(
               step,
               `${batchCallId}:${index}`,
               false,
             );
+            // The page redrew this field while the entry ran: run it once on
+            // the redrawn field, the first attempt on the live control.
+            const after =
+              result.kind === "ok" &&
+              result.status === "failed" &&
+              "ref" in step &&
+              step.ref &&
+              !refs(page).has(step.ref)
+                ? redrawn(step.ref)
+                : null;
+            if (after) {
+              step = { ...step, ref: after } as ApplyProposal;
+              result = await runProposal(
+                step,
+                `${batchCallId}:${index}`,
+                false,
+              );
+            }
             if (result.kind !== "ok") {
               const remaining = notAttempted(
                 index + 1,
@@ -679,8 +766,9 @@ async function runApplyAgentPrivate(
               }
               return result;
             }
+            const ref = "ref" in step ? step.ref : undefined;
             lines.push(
-              `${index + 1}. ${step.tool}${"ref" in step ? ` ${step.ref}` : ""}: ${result.content}`,
+              `${index + 1}. ${step.tool}${ref ? ` ${ref}` : ""}${plannedRef && ref && plannedRef !== ref ? ` (planned as ${plannedRef}; the page redrew that field)` : ""}: ${result.content}`,
             );
           } catch (error) {
             context.signal?.throwIfAborted();

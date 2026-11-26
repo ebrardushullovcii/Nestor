@@ -371,8 +371,8 @@ test("rows left over from before a search are not read as its answer", async () 
 test("a picker without a bound list still chooses from the page's options", async () => {
   await withPage(async (page) => {
     await page.setContent(
-      `<button role="combobox" onclick="document.getElementById('menu').hidden=false">Sort</button>
-      <div id="menu" hidden><div role="option" onclick="document.body.dataset.chosen=this.textContent">${replay.offered[0]}</div></div>`,
+      `<button role="combobox" onclick="document.getElementById('menu').hidden=false">Choose</button>
+      <div id="menu" hidden><div role="option" onclick="document.body.dataset.chosen=this.textContent; document.querySelector('button').textContent=this.textContent">${replay.offered[0]}</div></div>`,
     );
     expect(
       await choosePageOption(
@@ -384,6 +384,22 @@ test("a picker without a bound list still chooses from the page's options", asyn
     expect(await page.locator("body").getAttribute("data-chosen")).toBe(
       replay.offered[0],
     );
+  });
+}, 15_000);
+
+test("a picker whose control does not show the pressed row reports what it shows", async () => {
+  await withPage(async (page) => {
+    await page.setContent(
+      `<button role="combobox" onclick="document.getElementById('menu').hidden=false">Sort</button>
+      <div id="menu" hidden><div role="option" onclick="document.body.dataset.chosen=this.textContent">${replay.offered[0]}</div></div>`,
+    );
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      replay.offered[0]!,
+    );
+    expect(result).toMatchObject({ ok: false });
+    expect(result.ok || result.error).toContain('"Sort"');
   });
 }, 15_000);
 
@@ -554,9 +570,9 @@ test.each([
       expect(await page.evaluate("window.queries.filter(Boolean)")).toEqual(
         queries,
       );
-      expect(await control.inputValue()).toBe(
-        await page.evaluate("window.queries.at(-1)"),
-      );
+      // The picker is left as a person leaves it; this page then drops the
+      // uncommitted search text.
+      expect(await control.inputValue()).toBe("");
       expect(await control.getAttribute("data-committed")).toBe("");
       expect(await choosePageOption(page, control, offered[0]!)).toMatchObject({
         ok: true,

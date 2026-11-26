@@ -450,6 +450,11 @@ export interface ApplyRawPageHands {
   /** Focus a field and append text with real key events, without replacing its value. */
   typeKeys?: (ref: string, text: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
+  /**
+   * The choices a list or dropdown offers, read by opening it and closing it
+   * again without choosing. Null when the list could not be read.
+   */
+  readOptions?: (ref: string) => Promise<string[] | null>;
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
