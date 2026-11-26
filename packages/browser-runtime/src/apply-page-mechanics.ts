@@ -20,7 +20,12 @@ import { clickPreparedLoginAction } from "./application-login-action";
 import { attachFile } from "./file-attachment";
 import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
-import { choosePageOption } from "./choose-page-option";
+import {
+  choosePageOption,
+  settleFieldLookup,
+  watchControlRequests,
+  type ControlRequests,
+} from "./choose-page-option";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 import {
   clickPresent,
@@ -2494,6 +2499,22 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
     .catch(() => undefined);
 }
 
+/** Adds what the field's lookup offered once it answered the typed text. */
+async function withFieldLookup(
+  page: Page,
+  locator: Locator,
+  requests: ControlRequests,
+  typed: ApplyWriteResult,
+): Promise<ApplyWriteResult> {
+  if (!typed.ok) return typed;
+  const optionList = await settleFieldLookup(page, locator, requests);
+  return {
+    ...typed,
+    controlState: await controlResultState(locator),
+    ...(optionList ? { optionList } : {}),
+  };
+}
+
 /** The live-page implementation of the apply mechanics. */
 export function createPlaywrightApplyPageMechanics(
   page: Page,
@@ -2633,7 +2654,18 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           rememberVerificationSecret(text);
           markPrivateTracePage(page);
         }
-        return await typeFieldKeys(locator, text);
+        // Keys are how a search box is driven: return once its lookup answers.
+        const requests = watchControlRequests(page, locator);
+        try {
+          return await withFieldLookup(
+            page,
+            locator,
+            requests,
+            await typeFieldKeys(locator, text),
+          );
+        } finally {
+          requests.stop();
+        }
       } catch (error) {
         return {
           ok: false,
@@ -2668,6 +2700,16 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
                 element.getAttribute("aria-label") ??
                 "",
               placeholder: input?.placeholder ?? "",
+              lookup:
+                element.getAttribute("role") === "combobox" ||
+                ["list", "both", "inline"].includes(
+                  element.getAttribute("aria-autocomplete") ?? "",
+                ) ||
+                ["listbox", "true"].includes(
+                  element.getAttribute("aria-haspopup") ?? "",
+                ) ||
+                element.hasAttribute("aria-controls") ||
+                element.hasAttribute("aria-owns"),
             };
           },
           undefined,
@@ -2676,7 +2718,19 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           rememberVerificationSecret(value);
           markPrivateTracePage(page);
         }
-        return await replaceFieldText(locator, value);
+        if (!metadata.lookup) return await replaceFieldText(locator, value);
+        // A field that presents a list answers what was typed with choices.
+        const requests = watchControlRequests(page, locator);
+        try {
+          return await withFieldLookup(
+            page,
+            locator,
+            requests,
+            await replaceFieldText(locator, value),
+          );
+        } finally {
+          requests.stop();
+        }
       } catch (error) {
         return {
           ok: false,
