@@ -833,6 +833,26 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     ).toBeTruthy();
   });
 
+  it("a step handed to the person after a send the site did not take still offers Apply again", async () => {
+    applyWrites(ids[1]!, "state = 'needs_you'");
+    receipt = {
+      outcome: "not_submitted",
+      attemptedAt: new Date().toISOString(),
+      verifiedAt: null,
+      evidence: [],
+    } as unknown as ApplicationDetails["receipt"];
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(
+      await within(detail).findByRole("button", { name: "Apply again" }),
+    ).toBeTruthy();
+  });
+
   it("the person says what the site shows after a send the app could not confirm", async () => {
     applyWrites(ids[1]!, "state = 'uncertain'");
     const reportApplicationSend = vi.fn(() => Promise.resolve(true));

@@ -251,6 +251,142 @@ it("an emailed step after Send stays waiting and hands off on its kept form inst
   );
 });
 
+it.each([
+  { outcome: "failed", recorded: "not_submitted" },
+  { outcome: "uncertain", recorded: "outcome_uncertain" },
+] as const)(
+  "a step handed to the person after a $outcome send reaches Needs you on its open page",
+  async ({ outcome, recorded }) => {
+    const f = await setup(1);
+    const guards = createSendGuards(f.jobs);
+    f.deps.authorityRepository = guards;
+    preparation.notReadyToSend = true;
+    const pageUrl = "https://replica.test/apply";
+    const handedOff = () =>
+      ApplyExecutionResultSchema.parse({
+        ...ready(),
+        state: "paused",
+        detail: "Please complete the Current location picker on this page.",
+        questions: [
+          {
+            id: "current_location",
+            prompt: "Current location",
+            kind: "location",
+            answerControlType: "text",
+            isRequired: true,
+            detectedAt: new Date().toISOString(),
+            currentFieldBinding: {
+              pageUrl,
+              targetHash: "a".repeat(64),
+              instructionsHash: "b".repeat(64),
+            },
+          },
+        ],
+      });
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    const row = f.applications.listApplications().rows[0]!;
+    expect(
+      await preparation.recordSendOutcome!({
+        sendCallId: "location-picker-send",
+        outcome,
+        evidence: "Submit left the form open on its required location field.",
+        pageUrl,
+      }),
+    ).toMatchObject({ recorded: true });
+    f.releases.shift()!(handedOff());
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+    );
+    const needs = f.applications.needsYou.list();
+    expect(needs.total).toBe(1);
+    expect(needs.rows[0]).toMatchObject({ prompt: "Current location" });
+    // The ledger keeps the one consumed call and its outcome; nothing replayed it.
+    expect(f.applications.getSubmissionReceipt(row.id)?.outcome).toBe(recorded);
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+    // The person's answer continues on the same open page.
+    f.applications.needsYou.answer({
+      id: needs.rows[0]!.id,
+      answer: "Prishtina, Kosovo",
+      remember: false,
+    });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+  },
+);
+
+it("a challenge handed to the person after an unconfirmed send reaches Needs you", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.notReadyToSend = true;
+  preparation.blocker = {
+    code: "security_challenge",
+    requiresPerson: true,
+    summary: "The challenge reset after each attempt.",
+    detail: "Solve the challenge on this open form and press Submit.",
+    nextActionLabel: "Open the application",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const row = f.applications.listApplications().rows[0]!;
+  await preparation.recordSendOutcome!({
+    sendCallId: "challenge-send",
+    outcome: "uncertain",
+    evidence: "A challenge covered the form after Submit.",
+    pageUrl: "https://replica.test/apply",
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.needsYou.list().rows[0]).toMatchObject({
+    kind: "captcha",
+  });
+  expect(f.applications.getSubmissionReceipt(row.id)?.outcome).toBe(
+    "outcome_uncertain",
+  );
+  expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+});
+
+it("a handed-off application whose send the site did not take can be retried", async () => {
+  const f = await setup(1);
+  f.deps.authorityRepository = createSendGuards(f.jobs);
+  preparation.notReadyToSend = true;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const row = f.applications.listApplications().rows[0]!;
+  await preparation.recordSendOutcome!({
+    sendCallId: "picker-send",
+    outcome: "failed",
+    evidence: "The form stayed open.",
+    pageUrl: "https://replica.test/apply",
+  });
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "location",
+          prompt: "Current location",
+          kind: "location",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.service.retryPreparation(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+});
+
 it("a waiting emailed step resolves its one consumed send call after verification", async () => {
   const f = await setup(1);
   const guards = createSendGuards(f.jobs);

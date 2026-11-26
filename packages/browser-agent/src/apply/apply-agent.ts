@@ -1021,8 +1021,13 @@ async function runApplyAgentPrivate(
     });
     const waitingForVerification =
       [...sendDecisions.values()].at(-1) === "waiting";
+    // A step the model handed to the person outranks a send the site did not
+    // confirm: the ledger keeps that send, and the run waits on the person.
     const outcome: ApplyAgentResult["outcome"] =
-      (sendOutcome === "waiting" ? null : sendOutcome) ??
+      (sendOutcome === "waiting" ||
+      (pauses.length > 0 && sendOutcome !== "submitted")
+        ? null
+        : sendOutcome) ??
       (applicationClosed
         ? "closed"
         : readyToSend
