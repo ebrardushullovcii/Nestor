@@ -293,9 +293,9 @@ export async function restorePreparedForm(input: {
           input.dispatchEvent(new Event("change", { bubbles: true }));
         }, field.checked);
       } else if (field.type.startsWith("select")) {
-        await control.selectOption(field.selected, { timeout: 0 });
+        await control.selectOption(field.selected, { timeout: 0, force: true });
       } else {
-        await control.fill(field.value, { timeout: 0 });
+        await control.fill(field.value, { timeout: 0, force: true });
       }
     }
     input.onProgress?.("verifying");

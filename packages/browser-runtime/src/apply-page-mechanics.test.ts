@@ -1030,9 +1030,6 @@ describe("reading the choices of lists the page draws itself", () => {
       ]) {
         await page.setContent(html);
         const input = page.locator("input");
-        const fallback = vi
-          .spyOn(input, "setChecked")
-          .mockRejectedValue(new Error("Not accepted"));
         const mechanics = createPlaywrightApplyPageMechanics({
           locator: () => ({ nth: () => input }),
           once: page.once.bind(page),
@@ -1044,7 +1041,6 @@ describe("reading the choices of lists the page draws itself", () => {
           ok: false,
         });
         expect(await input.isChecked()).toBe(false);
-        expect(fallback).toHaveBeenCalledOnce();
       }
     } finally {
       await page.close();

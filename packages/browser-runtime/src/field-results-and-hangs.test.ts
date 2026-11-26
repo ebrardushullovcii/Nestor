@@ -24,6 +24,13 @@ beforeAll(async () => {
     res.setHeader("Content-Type", "text/html");
     if (req.url === "/send" && req.method === "POST") {
       acceptFieldResultsSubmission(req, res, () => accepted++);
+    } else if (req.url === "/slow") {
+      // A challenge widget's polling: always one request in flight.
+      setTimeout(() => res.end("ok"), 2_000);
+    } else if (req.url === "/poll") {
+      res.end(
+        "<script>setInterval(() => fetch('/slow'), 400); fetch('/slow');</script>",
+      );
     } else if (req.url === "/board") {
       res.end(
         '<title>Listing replica</title><a target="_blank" href="/apply">Apply on company website</a>',
@@ -135,13 +142,105 @@ test("a checkbox reverted by the site reports its resulting unchecked state", as
     );
     const hands = createPlaywrightApplyPageMechanics(page);
     const control = (await hands.readPage()).controls[0]!;
-    expect(await hands.setToggle(control.ref!, true)).toMatchObject({
-      ok: true,
-      observedValue: "unchecked",
+    const result = await hands.setToggle(control.ref!, true);
+    expect(result).toMatchObject({
+      ok: false,
       controlState: { checked: false },
     });
+    if (!result.ok) expect(result.error).toMatch(/"Terms" stayed unchecked/u);
   });
 });
+
+test("a hidden radio is set at once, and one that will not change says so at once with its label", async () => {
+  await withPage(async (page) => {
+    // Workday draws its own radio and hides the input (R4 run 06: 180 s).
+    await page.setContent(
+      '<fieldset><label><input type="radio" name="heard" style="visibility:hidden"> LinkedIn Job Post</label>' +
+        '<label><input type="radio" name="heard" style="visibility:hidden" onclick="return false"> LinkedIn InMail</label></fieldset>',
+    );
+    const hands = createPlaywrightApplyPageMechanics(page);
+    const [post, inMail] = (await hands.readPage()).controls;
+    const started = Date.now();
+    expect(await hands.setToggle(post!.ref!, true)).toMatchObject({
+      ok: true,
+      observedValue: "checked",
+    });
+    const refused = await hands.setToggle(inMail!.ref!, true);
+    expect(refused).toMatchObject({
+      ok: false,
+      controlState: { checked: false },
+    });
+    if (!refused.ok)
+      expect(refused.error).toMatch(
+        /"LinkedIn InMail" stayed unchecked .*hidden or covered/u,
+      );
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+}, 10_000);
+
+test.each([
+  ["option button", '<button type="button" aria-pressed="false">Yes</button>'],
+  ["checkbox", '<label>Terms<input type="checkbox"></label>'],
+])(
+  "a vanished %s returns stale at once instead of waiting for it",
+  async (_kind, html) => {
+    await withPage(async (page) => {
+      // Built In redirected away from its form (R4 run 08: 30 s).
+      await page.setContent(html);
+      const hands = createPlaywrightApplyPageMechanics(page);
+      const read = await hands.readPage();
+      const ref = (read.actions[0] ?? read.controls[0])!.ref!;
+      await page.setContent("<p>Moved on</p>");
+      const started = Date.now();
+      const result = await hands.setToggle(ref, true);
+      expect(result.ok).toBe(false);
+      if (!result.ok)
+        expect(result.error).toMatch(/stale|missing|observe again/iu);
+      expect(Date.now() - started).toBeLessThan(3_000);
+    });
+  },
+  10_000,
+);
+
+test("another frame's endless polling does not keep a picker waiting", async () => {
+  await withPage(async (page) => {
+    // Lever's location field with an hCaptcha frame open (R4 run 09: 180 s).
+    await page.goto(`${origin}/board`);
+    await page.setContent(
+      `<label>Current location<input id="location"></label><iframe src="${origin}/poll"></iframe>`,
+    );
+    await page.waitForTimeout(500);
+    const started = Date.now();
+    const result = await choosePageOption(
+      page,
+      page.getByLabel("Current location"),
+      "Prishtina, Kosovo",
+    );
+    expect(result.ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+}, 20_000);
+
+test("a list without the wanted choice returns the choices it shows", async () => {
+  await withPage(async (page) => {
+    await page.setContent(
+      '<button role="combobox" aria-expanded="false" aria-controls="list" onclick="this.setAttribute(\'aria-expanded\',\'true\');list.hidden=false">Country</button>' +
+        '<div id="list" role="listbox" hidden><div role="option">Albania</div><div role="option">Kosovo</div></div>',
+    );
+    const started = Date.now();
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      "Prishtina",
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: ["Albania", "Kosovo"],
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+}, 10_000);
 
 test.each(["prepare_only", "autonomous_submit"] as const)(
   "%s returns every batch entry before one fresh page and preserves Send counts",

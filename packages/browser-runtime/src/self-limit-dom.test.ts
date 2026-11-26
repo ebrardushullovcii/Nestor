@@ -147,6 +147,13 @@ test.each(["options", "steps"] as const)(
             `(${read.toString()})(document.getElementById("choices"),${JSON.stringify(input)})`,
           ),
         ),
+      elementHandles: () =>
+        Promise.resolve([
+          {
+            evaluate: list.evaluate.bind(list),
+            dispose: () => Promise.resolve(),
+          },
+        ]),
     } as unknown as Locator;
     const pending = readWholeList(list, "Unlisted choice");
     await vi.advanceTimersByTimeAsync(20000);
@@ -183,6 +190,13 @@ test("a list that refuses scrolling returns its observed choices as incomplete",
           `(${read.toString()})(document.getElementById("choices"),${JSON.stringify(input)})`,
         ),
       ),
+    elementHandles: () =>
+      Promise.resolve([
+        {
+          evaluate: list.evaluate.bind(list),
+          dispose: () => Promise.resolve(),
+        },
+      ]),
   } as unknown as Locator;
   const pending = readWholeList(list, "Other choice");
   await vi.runAllTimersAsync();
@@ -240,6 +254,13 @@ test.each(["slot_text", "linked_label", "new_shadow"] as const)(
             `(${read.toString()})(document.getElementById('choices'),${JSON.stringify(input)})`,
           ),
         ),
+      elementHandles: () =>
+        Promise.resolve([
+          {
+            evaluate: list.evaluate.bind(list),
+            dispose: () => Promise.resolve(),
+          },
+        ]),
     } as unknown as Locator;
     const pending = readWholeList(list, "kosovo");
     await vi.advanceTimersByTimeAsync(20000);

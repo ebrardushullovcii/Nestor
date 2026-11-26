@@ -89,7 +89,10 @@ test("a changed wizard or unsupported page is closed without refilling anything"
 test("saved answers are accepted only after an exact readback", async () => {
   const h = setup(snapshot);
   expect(await restorePreparedForm({ ...h, snapshot, files: [] })).toBe(h.page);
-  expect(h.fill).toHaveBeenCalledWith("Synthetic answer", { timeout: 0 });
+  expect(h.fill).toHaveBeenCalledWith("Synthetic answer", {
+    timeout: 0,
+    force: true,
+  });
   expect(h.close).not.toHaveBeenCalled();
   const changed = setup(snapshot, {
     ...snapshot,
