@@ -173,6 +173,22 @@ export function createSearchSourcesStore(store: JobStore) {
         complete(): void {
           /* settle() acknowledges the complete source, including deferred browser reads. */
         },
+        drop(sourceId: string, urls: readonly string[]): string[] {
+          return store.transaction(() => {
+            const removed = urls.filter(
+              (url) =>
+                Number(
+                  sql(
+                    "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=? AND url=? AND leased=0",
+                  ).run(searchId, sourceId, url).changes,
+                ) > 0,
+            );
+            const left = (pending.get(sourceId) ?? 0) - removed.length;
+            if (left > 0) pending.set(sourceId, left);
+            else pending.delete(sourceId);
+            return removed;
+          });
+        },
       };
     },
     put(searchId: string, row: JobSearchSourceRow): void {

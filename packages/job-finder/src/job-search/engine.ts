@@ -67,6 +67,8 @@ export interface JobSearchEngine {
     seen: SeenListingCard[];
     skipped: number;
     failed?: { url: string; reason: string }[];
+    /** Listings the site answered as removed (HTTP 404 or 410). */
+    gone?: string[];
   }>;
   readListings(input: {
     lane?: "http" | "browser";

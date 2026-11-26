@@ -313,6 +313,12 @@ async function collectSourceObserved(
           page.finalUrl,
           input.source,
         );
+        if (parsed.unlinked) {
+          complete = false;
+          notes.push(
+            `${parsed.unlinked} published vacancies at ${page.finalUrl} have no address of their own; browser navigation can read them from the page.`,
+          );
+        }
         // Category and directory sections are indexes: their postings are
         // collected from their own pages, never read as one vacancy.
         for (const directory of parsed.directories)
@@ -459,7 +465,7 @@ export async function screenCards(
     lookupKnownUrls?: (urls: readonly string[]) => Promise<readonly string[]>;
     /** Saved postings whose own card/record evidence needs a fresh read. */
     refreshUrls?: readonly string[];
-    /** Verify a negative card verdict against its own full listing before remembering it. */
+    /** Reads a listing the model asks to check before its profession decision. */
     readPage?: ListingSearchReader["readPage"];
     /** Publish proven matches while other titles and negative verifications finish. */
     onRelated?: (cards: ListingCard[]) => Promise<void>;
@@ -469,6 +475,8 @@ export async function screenCards(
   seen: SeenListingCard[];
   skipped: number;
   failed: { url: string; reason: string }[];
+  /** Listings the site answered as removed (HTTP 404 or 410). */
+  gone: string[];
 }> {
   const key = roleGoalsKey(input.goals);
   const screeningFingerprint = (card: ListingCard) =>
@@ -533,6 +541,10 @@ export async function screenCards(
   // A repair read is not a new profession decision.
   for (const key of positive) unrelated.delete(key);
   const enriched = new Map<string, ListingCard>();
+  /** Listings the site itself answered as removed (HTTP 404 or 410). */
+  const gone = new Set<string>();
+  /** Titles the model asked to check against their full listings. */
+  const readRequests = new Set<string>();
   const published = new Set<ListingCard>();
   const publishRelated = async () => {
     if (!input.onRelated) return;
@@ -540,6 +552,7 @@ export async function screenCards(
     const ready = fresh.filter(
       (card) =>
         !published.has(card) &&
+        !gone.has(card.url) &&
         positive.has(titleKey(card)) &&
         !failedTitles.has(titleKey(card)),
     );
@@ -549,12 +562,21 @@ export async function screenCards(
         ready.map((card) => enriched.get(card.url) ?? card),
       );
   };
-  const judge = async (titles: string[], repair = true): Promise<void> => {
+  const judge = async (
+    titles: string[],
+    stage: "card" | "duties",
+    repair = true,
+  ): Promise<void> => {
     let remaining = titles;
+    const choices = stage === "card" ? [0, 1, 2] : [0, 1];
     try {
       const raw = await ask(
         input,
-        `${professionInstructions()} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Evidence fields are arrays of ids into evidenceBlocks: reconstruct each field by joining those exact block strings with a newline, preserving order and repeats. Null means not supplied. Published vacancy duties are identified separately from additional visible page evidence; site navigation and a read failure are not job duties. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
+        `${professionInstructions()} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Evidence fields are arrays of ids into evidenceBlocks: reconstruct each field by joining those exact block strings with a newline, preserving order and repeats. Null means not supplied. Published vacancy duties are identified separately from additional visible page evidence; site navigation and a read failure are not job duties. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving. ${
+          stage === "card"
+            ? "In this card stage you may also return 2 for a title whose card looks like a different profession but is too thin to be sure and has no full duties supplied: Nestor then reads its full listing from the site and asks you again with those duties. Each such read is a request to that site, so return 0 when the card already shows a clearly different profession."
+            : "These are the titles you asked to check. fullListingDutyEvidence now holds their full listings, or why a read did not finish. Return 1 when the duties rescue the title and 0 when they confirm a different profession."
+        }`,
         {
           goals: input.goals,
           ...encodeScreeningEvidence(
@@ -585,7 +607,7 @@ export async function screenCards(
                 properties: Object.fromEntries(
                   titles.map((_, index) => [
                     String(index),
-                    { type: "integer", enum: [0, 1] },
+                    { type: "integer", enum: choices },
                   ]),
                 ),
               },
@@ -625,6 +647,11 @@ export async function screenCards(
       remaining = [];
       for (const [index, key] of titles.entries()) {
         const keep = candidate[index];
+        if (keep === 2 && stage === "card") {
+          readRequests.add(key);
+          failedTitles.delete(key);
+          continue;
+        }
         if (keep !== 0 && keep !== 1) {
           remaining.push(key);
           continue;
@@ -650,7 +677,7 @@ export async function screenCards(
     await publishRelated();
     if (repair && remaining.length) {
       await mapConcurrent(batches(remaining, 20), 2, (batch) =>
-        judge(batch, false),
+        judge(batch, stage, false),
       );
     } else {
       for (const key of remaining)
@@ -661,129 +688,164 @@ export async function screenCards(
     }
   };
   await publishRelated();
-  // An uncertain card will need its full duties whether the title model says
-  // yes or no. Read once up front, then make one grounded profession decision
-  // instead of asking a title-only question followed by a second body question.
-  const unresolved = allTitles.filter((key) => !positive.has(key));
-  const prepared = new Set(
-    (
-      await mapConcurrent(unresolved, 6, async (key) => {
-        const group = groups.get(key)!;
-        if (!input.readPage && group.some((card) => !card.listingText))
-          return null;
-        const bodies: string[] = [];
-        try {
-          for (const card of group) {
-            if (card.listingText) {
-              bodies.push(card.listingText);
-              continue;
-            }
-            const sourceReadPage = input.readPage;
-            const readPage = sourceReadPage
-              ? (((url, options) =>
-                  withTraceScope(
-                    {
-                      sourceId: card.sourceId,
-                      sourceUrl: undefined,
-                      listingUrl: card.url,
-                    },
-                    () => sourceReadPage(url, options),
-                  )) as ListingSearchReader["readPage"])
-              : undefined;
-            if (!readPage)
-              throw new Error("The full listing could not be read.");
-            const render = () =>
-              readPage(card.url, {
-                signal: input.signal,
-                rendered: true,
-                ready: (html) => {
-                  const detail = readListingHtml(html, card.title);
-                  return (
-                    !blockedByCheck(html) &&
-                    detail.detailHeading &&
-                    Boolean(detail.text)
-                  );
+  const isGone = (error: unknown) =>
+    error instanceof DiscoveryPageReadError &&
+    (error.status === 404 || error.status === 410);
+  /**
+   * One title's full duties. A listing the site answers as removed is gone:
+   * it is recorded closed, never re-requested in a browser or judged.
+   */
+  const readDuties = async (key: string): Promise<void> => {
+    const group = groups.get(key)!;
+    const bodies: string[] = [];
+    try {
+      for (const card of group) {
+        if (card.listingText) {
+          bodies.push(card.listingText);
+          continue;
+        }
+        const sourceReadPage = input.readPage;
+        const readPage = sourceReadPage
+          ? (((url, options) =>
+              withTraceScope(
+                {
+                  sourceId: card.sourceId,
+                  sourceUrl: undefined,
+                  listingUrl: card.url,
                 },
-              });
-            let rendered = false;
-            let page: Awaited<ReturnType<ListingSearchReader["readPage"]>>;
-            try {
-              page =
-                card.listingPage ??
-                (await readPage(card.url, { signal: input.signal }));
-            } catch {
-              input.signal?.throwIfAborted();
-              rendered = true;
-              page = await render();
-            }
-            let body = readListingHtml(page.html, card.title);
-            // Profession judgments need the actual duties. HTTP cannot
-            // finish script rendering or a passive security redirect; use the
-            // same isolated browser reader as full listing reads, without
-            // clicking consent, authentication or security controls.
-            if (
-              !rendered &&
-              (blockedByCheck(page.html) || body.renderSuggested)
-            ) {
-              page = await render();
-              body = readListingHtml(page.html, card.title);
-            }
-            if (!body.text)
-              throw new Error(
-                "The listing needs browser interaction before its duties can be read.",
+                () => sourceReadPage(url, options),
+              )) as ListingSearchReader["readPage"])
+          : undefined;
+        if (!readPage && !card.listingPage)
+          throw new Error("The full listing could not be read.");
+        const render = () =>
+          readPage!(card.url, {
+            signal: input.signal,
+            rendered: true,
+            ready: (html) => {
+              const detail = readListingHtml(html, card.title);
+              return (
+                !blockedByCheck(html) &&
+                detail.detailHeading &&
+                Boolean(detail.text)
               );
-            enriched.set(card.url, {
-              ...card,
-              listingPage: page,
-              listingText: body.text,
-            });
-            const published = extractListingDetailFromHtml({
-              html: page.html,
-              url: page.finalUrl,
-              expectedTitle: card.title,
-            });
-            // The body fallback can include an unmarked site menu. Use this
-            // vacancy's published description for duties, keeping every visible
-            // page fact separately rather than presenting navigation as duties.
-            bodies.push(
-              published?.description
-                ? `Published vacancy duties:\n${published.description}\n\nAdditional visible page evidence:\n${body.text}`
-                : `Visible listing page evidence (may include site navigation):\n${body.text}`,
-            );
+            },
+          });
+        let page: Awaited<ReturnType<ListingSearchReader["readPage"]>>;
+        let body: ReturnType<typeof readListingHtml>;
+        try {
+          let rendered = false;
+          try {
+            page =
+              card.listingPage ??
+              (await readPage!(card.url, { signal: input.signal }));
+          } catch (error) {
+            input.signal?.throwIfAborted();
+            if (isGone(error)) throw error;
+            rendered = true;
+            page = await render();
           }
-          evidence.set(
-            key,
-            `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`,
-          );
-          return key;
+          body = readListingHtml(page.html, card.title);
+          // Profession judgments need the actual duties. HTTP cannot
+          // finish script rendering or a passive security redirect; use the
+          // same isolated browser reader as full listing reads, without
+          // clicking consent, authentication or security controls.
+          if (
+            !rendered &&
+            readPage &&
+            (blockedByCheck(page.html) || body.renderSuggested)
+          ) {
+            page = await render();
+            body = readListingHtml(page.html, card.title);
+          }
         } catch (error) {
           input.signal?.throwIfAborted();
-          // A read failure is evidence, not a profession verdict. Give the
-          // model the card and the failure; full reads can use the browser.
-          evidence.set(
-            key,
-            `${bodies.join("\n\n---\n\n")}\n${cardEvidence.get(key) ?? ""}\nFull listing read did not finish: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return key;
+          if (!isGone(error)) throw error;
+          gone.add(card.url);
+          continue;
         }
-      })
-    ).filter((key): key is string => key !== null),
-  );
-  const titles = unresolved.filter(
-    (key) =>
-      !failedTitles.has(key) && (prepared.has(key) || !decisions.has(key)),
+        if (!body.text)
+          throw new Error(
+            "The listing needs browser interaction before its duties can be read.",
+          );
+        enriched.set(card.url, {
+          ...card,
+          listingPage: page,
+          listingText: body.text,
+        });
+        const published = extractListingDetailFromHtml({
+          html: page.html,
+          url: page.finalUrl,
+          expectedTitle: card.title,
+        });
+        // The body fallback can include an unmarked site menu. Use this
+        // vacancy's published description for duties, keeping every visible
+        // page fact separately rather than presenting navigation as duties.
+        bodies.push(
+          published?.description
+            ? `Published vacancy duties:\n${published.description}\n\nAdditional visible page evidence:\n${body.text}`
+            : `Visible listing page evidence (may include site navigation):\n${body.text}`,
+        );
+      }
+      if (!bodies.length) return;
+      evidence.set(
+        key,
+        `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`,
+      );
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      // A read failure is evidence, not a profession verdict. Give the
+      // model the card and the failure; full reads can use the browser.
+      evidence.set(
+        key,
+        `${bodies.join("\n\n---\n\n")}\n${cardEvidence.get(key) ?? ""}\nFull listing read did not finish: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+  const allGone = (key: string) =>
+    groups.get(key)!.every((card) => gone.has(card.url));
+  const weight = (key: string) => evidence.get(key)?.length ?? 0;
+  // The model decides from each card first. Duties already in hand (a feed
+  // body or the source page itself) go with the card; a listing is fetched
+  // only when the model asks to check it, never for every new card.
+  const unresolved = allTitles.filter(
+    (key) => !positive.has(key) && !decisions.has(key),
   );
   await mapConcurrent(
-    batches(titles, 120, (key) => evidence.get(key)?.length ?? 0, 360000),
+    unresolved.filter((key) =>
+      groups.get(key)!.every((card) => card.listingText || card.listingPage),
+    ),
+    6,
+    readDuties,
+  );
+  await mapConcurrent(
+    batches(
+      unresolved.filter((key) => !allGone(key)),
+      120,
+      weight,
+      360000,
+    ),
     3,
-    (batch) => judge(batch),
+    (batch) => judge(batch, "card"),
+  );
+  const checks = [...readRequests].filter((key) => !failedTitles.has(key));
+  await mapConcurrent(checks, 6, readDuties);
+  await mapConcurrent(
+    batches(
+      checks.filter((key) => !allGone(key)),
+      120,
+      weight,
+      360000,
+    ),
+    3,
+    (batch) => judge(batch, "duties"),
   );
   for (const key of failedTitles.keys()) {
     decisions.delete(key);
     unrelated.delete(key);
   }
   const seen = fresh
-    .filter((card) => unrelated.has(titleKey(card)))
+    .filter((card) => !gone.has(card.url) && unrelated.has(titleKey(card)))
     .map((card) => ({
       url: card.url,
       cardFingerprint: screeningFingerprint(card),
@@ -794,11 +856,14 @@ export async function screenCards(
     related: fresh
       .filter(
         (card) =>
-          !unrelated.has(titleKey(card)) && !failedTitles.has(titleKey(card)),
+          !gone.has(card.url) &&
+          !unrelated.has(titleKey(card)) &&
+          !failedTitles.has(titleKey(card)),
       )
       .map((card) => enriched.get(card.url) ?? card),
+    gone: fresh.filter((card) => gone.has(card.url)).map((card) => card.url),
     failed: fresh
-      .filter((card) => failedTitles.has(titleKey(card)))
+      .filter((card) => !gone.has(card.url) && failedTitles.has(titleKey(card)))
       .map((card) => ({
         url: card.url,
         reason: failedTitles.get(titleKey(card))!,
@@ -835,6 +900,7 @@ export async function readListings(
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
   const indexes: string[] = [];
+  const closed: string[] = [];
   // Every URL owns its read, even when another source printed the same card.
   const reads = await mapConcurrent(input.cards, 6, (original) =>
     withTraceScope(
@@ -893,6 +959,15 @@ export async function readListings(
           return { card, page, body, structured, publishedOnly };
         } catch (error) {
           input.signal?.throwIfAborted();
+          // The site's own answer that the posting was removed: recorded
+          // closed, never re-requested in a browser or read by a model.
+          if (
+            error instanceof DiscoveryPageReadError &&
+            (error.status === 404 || error.status === 410)
+          ) {
+            closed.push(original.url);
+            return null;
+          }
           failures.push({
             url: original.url,
             reason: error instanceof Error ? error.message : String(error),
@@ -1064,7 +1139,12 @@ export async function readListings(
       }
     },
   );
-  return { jobs, failures, ...(indexes.length ? { indexes } : {}) };
+  return {
+    jobs,
+    failures,
+    ...(indexes.length ? { indexes } : {}),
+    ...(closed.length ? { closed } : {}),
+  };
 }
 
 const FIT_WORK_ELIGIBILITY = [

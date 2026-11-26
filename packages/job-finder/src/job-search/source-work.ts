@@ -7,6 +7,8 @@ export interface SourceWork {
   row: JobSearchSourceRow;
   urls: Set<string>;
   processed: number;
+  /** Listings the site answered as removed; recorded closed, never read. */
+  removed: number;
   screened: number;
   collected: boolean;
   accessBlocked: boolean;
@@ -34,6 +36,7 @@ export function sourceWork(
     full,
     urls: new Set(),
     processed: 0,
+    removed: 0,
     screened: 0,
     collected: false,
     accessBlocked: false,

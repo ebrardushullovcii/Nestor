@@ -147,8 +147,9 @@ export const moreSites = [
     style: "plain",
     groups: ["salary", "questions"],
     rateLimit: true,
+    removedGone: true,
     description:
-      "Short HTTP 429 cooldown with Retry-After and a single-page application.",
+      "Short HTTP 429 cooldown (Retry-After on listing pages, none on job pages), a removed job that answers HTTP 410, and a single-page application.",
   },
 ].map((site, index) => ({
   pagination: "page",

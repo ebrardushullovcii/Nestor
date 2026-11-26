@@ -142,11 +142,18 @@ export async function checkMore({ request, application, index }) {
       );
     assert.ok(!plain.includes("application/ld+json"));
     const closed = (
-      await get(`/${site.slug}/jobs/30`, site.count < 30 ? 404 : 200)
+      await get(
+        `/${site.slug}/jobs/30`,
+        site.count < 30 ? 404 : site.removedGone ? 410 : 200,
+      )
     ).body;
     if (site.count >= 30) {
       assert.ok(
-        closed.includes("This job is no longer accepting applications."),
+        closed.includes(
+          site.removedGone
+            ? "This job posting has been removed."
+            : "This job is no longer accepting applications.",
+        ),
       );
       await get(`/${site.slug}/apply/30`, 410);
     }
@@ -331,6 +338,12 @@ export async function checkMore({ request, application, index }) {
   assert.match(limited.response.headers.get("retry-after"), /^[12]$/);
   await delay(Number(limited.response.headers.get("retry-after")) * 1000 + 100);
   await request("/pacer/");
+  await delay(3100);
+  for (let index = 0; index < 8; index++) await request("/pacer/jobs/1");
+  const limitedJob = await request("/pacer/jobs/1", {}, 429);
+  assert.equal(limitedJob.response.headers.get("retry-after"), null);
+  await delay(2100);
+  await get("/pacer/jobs/1");
   new Script((await get("/replica-assets/client.js")).body);
   await get("/replica-assets/styles.css");
   return { postCount, receipts, jobCount, pageCount };

@@ -180,3 +180,55 @@ test("an unchanged disabled More without a loading indicator returns page facts"
   expect(result?.notes.join(" ")).toContain("1 listings; More is disabled");
   expect(wait).not.toHaveBeenCalled();
 });
+
+test("a rendered page with published vacancies that have no address of their own goes to the model", async () => {
+  const posting = (title: string) =>
+    `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title, description: `${title} duties` })}</script>`;
+  const page = {
+    content: () =>
+      Promise.resolve(
+        card(1) + posting("Backend Engineer") + posting("Product Designer"),
+      ),
+    url: () => "https://example.test/jobs",
+  };
+  const hands = {
+    observe: () =>
+      Promise.resolve(
+        buildApplyFormObservation(
+          {
+            url: page.url(),
+            title: "Jobs",
+            bodyText: "Open jobs",
+            headings: [],
+            links: [],
+            controls: [],
+            clickables: [],
+            openedTabs: [],
+            loading: false,
+            validationErrors: [],
+            stepLabel: null,
+            actions: [],
+          },
+          "2026-11-05T00:00:00Z",
+        ),
+      ),
+  } as unknown as ApplyPageHands;
+  const onPage = vi.fn<(cards: ListingCard[]) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  const result = await collectRenderedInventory({
+    page,
+    hands,
+    source: { id: "source", label: "Example" },
+    allowUrl: () => true,
+    onPage,
+  });
+  expect(onPage).toHaveBeenCalledOnce();
+  expect(result?.complete).toBe(false);
+  expect(result?.cards.map((row) => row.url)).toEqual([
+    "https://example.test/vacancy/1",
+  ]);
+  expect(result?.notes.join(" ")).toContain(
+    "2 published vacancies on https://example.test/jobs have no address of their own",
+  );
+});

@@ -99,10 +99,12 @@ export async function handleMoreSites(
         state.requests = [];
       }
       rateRequests.set(key, state);
-      res.setHeader(
-        "Retry-After",
-        String(Math.max(1, Math.ceil((state.until - now) / 1000))),
-      );
+      // Job pages answer like a CDN rate limit: 429 with no Retry-After.
+      if (kind !== "jobs")
+        res.setHeader(
+          "Retry-After",
+          String(Math.max(1, Math.ceil((state.until - now) / 1000))),
+        );
       send(
         429,
         page(
@@ -233,6 +235,11 @@ export async function handleMoreSites(
     !new RegExp(`^/${slug}/(jobs|apply)/[1-9]\\d*$`).test(url.pathname)
   )
     notFound();
+  else if (kind === "jobs" && site.removedGone && job.closed)
+    send(
+      410,
+      page(site, "Removed", "<h1>This job posting has been removed.</h1>"),
+    );
   else if (kind === "jobs")
     send(200, detail(site, job, `http://127.0.0.1:${res.socket.localPort}`));
   else if (job.closed || job.emailOnly)

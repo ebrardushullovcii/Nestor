@@ -286,7 +286,7 @@ test("one malformed metadata row never loses a complete sibling listing", async 
   ]);
 });
 
-test("an unusual title is judged with full duties once and its page is reused", async () => {
+test("an unusual title the model asks to read is judged with its full duties and its page is reused", async () => {
   const cards = [card("Trend Steward"), card("Metrics Caretaker")];
   const pages = new Map(
     cards.map((row) => [
@@ -308,6 +308,8 @@ test("an unusual title is judged with full duties once and its page is reused", 
       };
       if (data.titles) {
         calls++;
+        if (data.titles.every((row) => row[3] === null))
+          return Promise.resolve({ content: '{"keep":{"0":2,"1":2}}' });
         for (const row of data.titles)
           expect(
             (row[3] as number[])
@@ -354,7 +356,7 @@ test("an unusual title is judged with full duties once and its page is reused", 
   expect(result.seen).toEqual([]);
   expect(result.failed).toEqual([]);
   expect(readPage).toHaveBeenCalledTimes(2);
-  expect(calls).toBe(1);
+  expect(calls).toBe(2);
   expect(result.related[0].listingPage).toEqual(pages.get(cards[0].url));
   const downstream = vi.fn(() =>
     Promise.reject(new Error("The verified page should be reused")),
@@ -1834,5 +1836,108 @@ test("a page the reader calls an index of vacancies is returned for collection, 
   expect(result).toEqual({ jobs: [], failures: [], indexes: [index.url] });
   expect(chatWithTools.mock.calls[0]?.[0][0]?.content).toContain(
     "When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true",
+  );
+});
+
+test("the model screens new cards from the card; a listing is fetched only when it asks", async () => {
+  const cards = [card("Kfz-Sachverständiger"), card("Interface Steward")];
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html: "<main><h1>Interface Steward</h1><p>Build React and TypeScript interfaces for a design system.</p></main>",
+    }),
+  );
+  const inputs: { titles: unknown[][] }[] = [];
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {
+    const data = JSON.parse(String(messages[1].content)) as {
+      titles: unknown[][];
+    };
+    inputs.push(data);
+    return Promise.resolve({
+      content:
+        inputs.length === 1 ? '{"keep":{"0":0,"1":2}}' : '{"keep":{"0":1}}',
+    });
+  });
+  const result = await screenCards({
+    cards,
+    client: { chatWithTools },
+    readPage,
+    goals: {
+      targetRoles: ["Frontend Engineer"],
+      relatedRoles: [],
+      strategy: "wide_net",
+    },
+  });
+  expect(inputs[0].titles.every((row) => row[3] === null)).toBe(true);
+  expect(chatWithTools.mock.calls[0]?.[0][0]?.content).toContain(
+    "you may also return 2",
+  );
+  expect(readPage).toHaveBeenCalledTimes(1);
+  expect(readPage.mock.calls[0]?.[0]).toBe(cards[1].url);
+  expect(inputs[1].titles).toHaveLength(1);
+  expect(result.related.map((row) => row.url)).toEqual([cards[1].url]);
+  expect(result.seen.map((row) => row.url)).toEqual([cards[0].url]);
+  expect(result.gone).toEqual([]);
+});
+
+test.each([404, 410])(
+  "a listing the site answers HTTP %s for is gone: no browser read and no profession judgment",
+  async (status) => {
+    const removed = card("Interface Steward");
+    const readPage = vi.fn(() =>
+      Promise.reject(new DiscoveryPageReadError(status)),
+    );
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+      Promise.resolve({ content: '{"keep":{"0":2}}' }),
+    );
+    const result = await screenCards({
+      cards: [removed],
+      client: { chatWithTools },
+      readPage,
+      goals: {
+        targetRoles: ["Frontend Engineer"],
+        relatedRoles: [],
+        strategy: "wide_net",
+      },
+    });
+    expect(readPage).toHaveBeenCalledOnce();
+    expect(readPage.mock.calls[0]).not.toContainEqual(
+      expect.objectContaining({ rendered: true }),
+    );
+    expect(chatWithTools).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      related: [],
+      seen: [],
+      failed: [],
+      gone: [removed.url],
+    });
+
+    const read = await readListings({
+      cards: [removed],
+      client: { chatWithTools },
+      readPage,
+    });
+    expect(read).toEqual({ jobs: [], failures: [], closed: [removed.url] });
+    expect(chatWithTools).toHaveBeenCalledOnce();
+  },
+);
+
+test("hidden promotional markup is not a vacancy card, and unlinked published vacancies leave coverage incomplete", async () => {
+  const posting = (title: string) =>
+    `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title, description: `${title} duties` })}</script>`;
+  const html = `<main><table><tr class="placeholder job"><td></td></tr></table>${posting("Backend Engineer")}${posting("Product Designer")}</main><div style="display:none;position:fixed"><a href="/premium"><h2>Unlock remote jobs with Premium</h2><p>Be the first to apply to 100,000+ remote jobs.</p></a></div>`;
+  expect(
+    readInventoryHtml(html, source.url, source).cards.map((row) => row.url),
+  ).toEqual([]);
+  const result = await collectSource({
+    source,
+    lane: "http",
+    readPage: (url) => Promise.resolve({ html, finalUrl: url }),
+  });
+  expect(result.cards).toEqual([]);
+  expect(result.complete).toBe(false);
+  expect(result.requiresBrowser).toBe(true);
+  expect(result.notes.join(" ")).toContain(
+    "2 published vacancies at https://board.example/ have no address of their own",
   );
 });

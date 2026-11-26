@@ -1670,7 +1670,7 @@ describe("playwright browser runtime", () => {
   });
 
   test.each([false, true])(
-    "a missing source fails; a missing listing reaches the model (listingRead=%s)",
+    "a starting page that answers 404 reaches the model, for a source or a listing (listingRead=%s)",
     async (listingRead) => {
       const userDataDir = await mkdtemp(
         join(tmpdir(), "nestor-browser-runtime-agent-missing-start-"),
@@ -1681,11 +1681,10 @@ describe("playwright browser runtime", () => {
         transcriptMessageCount: 1,
         incomplete: false,
       });
-      if (listingRead)
-        vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
-          ...(await importOriginal<typeof browserAgent>()),
-          runJobSearchAgent: readListing,
-        }));
+      vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
+        ...(await importOriginal<typeof browserAgent>()),
+        runJobSearchAgent: readListing,
+      }));
 
       try {
         const chromeExecutablePath = join(userDataDir, "chrome.exe");
@@ -1735,6 +1734,21 @@ describe("playwright browser runtime", () => {
           chromeExecutablePath,
           debugPort,
           jobExtractor,
+          aiClient: {
+            chatWithTools: vi.fn(),
+            getStatus: () => ({
+              kind: "deterministic",
+              role: "chat",
+              ready: true,
+              label: "Test AI client ready",
+              model: null,
+              baseUrl: null,
+              modelContextWindowTokens: null,
+              reservedHeadroomTokens: null,
+              requestTimeoutMs: null,
+              detail: null,
+            }),
+          } as unknown as JobFinderAiClient,
         });
 
         const result = await runtime.runAgentDiscovery!("target_site", {
@@ -1758,11 +1772,8 @@ describe("playwright browser runtime", () => {
         });
 
         expect(result.jobs).toEqual([]);
-        if (listingRead) {
-          expect(readListing).toHaveBeenCalledOnce();
-          expect(result.warning).toBeNull();
-        } else
-          expect(result.warning).toContain("Starting page returned HTTP 404");
+        expect(readListing).toHaveBeenCalledOnce();
+        expect(result.warning).toBeNull();
         expect(jobExtractor).not.toHaveBeenCalled();
         expect(page.close).toHaveBeenCalledOnce();
       } finally {
@@ -2231,21 +2242,6 @@ describe("playwright browser runtime", () => {
       expect(backgroundTargetPage.close).toHaveBeenCalledOnce();
       expect(backgroundTargetPage.bringToFront).not.toHaveBeenCalled();
       expect(blankPage.bringToFront).not.toHaveBeenCalled();
-
-      // An already-open starting page can be an HTTP error. Reuse must
-      // preserve the same 404 guard as a fresh navigation.
-      backgroundTargetPage.evaluate.mockResolvedValue(404);
-      const missing = await runtime.runAgentDiscovery!("target_site", {
-        maxSteps: 1,
-        targetJobCount: 1,
-        userProfile: createTestProfile(),
-        searchPreferences: { targetRoles: [], locations: [] },
-        startingUrls: ["https://example.com/jobs"],
-        navigationHostnames: ["example.com"],
-        siteLabel: "Example Jobs",
-      });
-      expect(missing.warning).toContain("Starting page returned HTTP 404");
-      expect(backgroundTargetPage.goto).not.toHaveBeenCalled();
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
     }
@@ -3702,7 +3698,7 @@ describe("managed context active service worker gate", () => {
       occupied = 6;
       forms.splice(0, 1);
       const result = await run;
-      expect(result.warning).not.toContain("Target.createTarget");
+      expect(result.warning ?? "").not.toContain("Target.createTarget");
       expect(harness.fakeContext.newPage).toHaveBeenCalledOnce();
       expect(forms.every((page) => page.close.mock.calls.length === 0)).toBe(
         true,

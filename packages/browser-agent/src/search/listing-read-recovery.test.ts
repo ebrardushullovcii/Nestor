@@ -118,7 +118,7 @@ test("Stop during a truncated model turn prevents the output retry", async () =>
   expect(chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("profession screening waits for a rendered listing through an interstitial and overlays", async () => {
+test("a listing the profession model asks to read waits for its rendered page through an interstitial and overlays", async () => {
   const signal = new AbortController().signal;
   const readPage = vi.fn<
     NonNullable<Parameters<typeof screenCards>[0]["readPage"]>
@@ -135,6 +135,7 @@ test("profession screening waits for a rendered listing through an interstitial 
   });
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
     .mockResolvedValueOnce({ content: '{"keep":{"0":1}}' });
   const result = await screenCards({
     cards: [card],
@@ -165,10 +166,13 @@ test("the profession model sees a persistent check with the full card and choose
   const readPage = vi.fn(() =>
     Promise.resolve({ html: interstitial, finalUrl: card.url }),
   );
-  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {
-    expect(messages[1].content).toContain("Performing security verification");
-    return Promise.resolve({ content: '{"keep":{"0":1}}' });
-  });
+  const chatWithTools = vi
+    .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
+    .mockImplementationOnce((messages) => {
+      expect(messages[1].content).toContain("Performing security verification");
+      return Promise.resolve({ content: '{"keep":{"0":1}}' });
+    });
   const result = await screenCards({
     cards: [card],
     goals,
@@ -177,7 +181,7 @@ test("the profession model sees a persistent check with the full card and choose
   });
   expect(result.related).toHaveLength(1);
   expect(result.failed).toEqual([]);
-  expect(chatWithTools).toHaveBeenCalledOnce();
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("listing metadata also retries truncation and accounts for both model turns", async () => {

@@ -10,6 +10,7 @@ import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 import { concurrency } from "./async";
 import { createSearchSourcesStore } from "@nestor/db/job-store";
+import { traceEvent } from "@nestor/core/run-trace";
 
 /** Quick gathers smaller screening waves; acceptance never waits on screening. */
 const QUICK_REVIEW_INTERVAL = 100;
@@ -119,11 +120,14 @@ export function createSearchPipeline(input: {
     const failures = new Map(
       result.failures.map((failure) => [failure.url, failure]),
     );
+    const closed = new Set(result.closed ?? []);
+    if (closed.size) deps.store.closeFoundUrls([...closed]);
     for (const [id, group] of bySource) {
       const source = sources.get(id)!;
       source.processed += group.length;
       source.row.found += jobs.get(id) ?? 0;
       for (const card of group) {
+        if (closed.has(card.url)) source.removed++;
         const failure = failures.get(card.url);
         if (failure) {
           source.row.failedReads++;
@@ -194,6 +198,7 @@ export function createSearchPipeline(input: {
           failures: result.failures.filter(
             (failure) => !deferredUrls.has(failure.url),
           ),
+          ...(result.closed ? { closed: result.closed } : {}),
         });
         // The reader found an index, not a vacancy: collect its postings
         // through the source's inventory path instead of a vacancy read.
@@ -280,6 +285,9 @@ export function createSearchPipeline(input: {
       const failed = new Map(
         screened.failed?.map((row) => [row.url, row.reason]),
       );
+      // The site answered these as removed: close any saved copy, read none.
+      const gone = new Set(screened.gone ?? []);
+      if (gone.size) deps.store.closeFoundUrls([...gone]);
       const failedSources = new Map<string, string>();
       for (const card of cards) {
         const source = sources.get(card.sourceId)!;
@@ -289,7 +297,8 @@ export function createSearchPipeline(input: {
           if (!streamed) source.row.related++;
         } else {
           source.processed++;
-          if (failed.has(card.url)) {
+          if (gone.has(card.url)) source.removed++;
+          else if (failed.has(card.url)) {
             source.row.failedReads++;
             failedSources.set(card.sourceId, failed.get(card.url)!);
           } else if (rejected.has(card.url)) source.row.unrelated++;
@@ -390,12 +399,38 @@ export function createSearchPipeline(input: {
       // tool's silent connection, in either search depth.
     }
   };
+  /** Cards an interrupted run queued, per source, until its fresh inventory. */
+  const restored = new Map<string, string[]>();
   return {
     start: () => waves.push([]),
     restore(source: SourceWork) {
-      for (const url of durable.cardUrls(input.searchId, source.target.id))
-        source.urls.add(url);
+      const urls = durable.cardUrls(input.searchId, source.target.id);
+      for (const url of urls) source.urls.add(url);
+      if (urls.length) restored.set(source.target.id, urls);
       source.row.cards = source.urls.size;
+    },
+    /**
+     * A complete fresh inventory is the site's current list. Cards an
+     * interrupted run queued that it no longer lists are gone from the site:
+     * drop those still waiting instead of reading each one.
+     */
+    refresh(source: SourceWork, live: ReadonlySet<string>) {
+      const urls = restored.get(source.target.id);
+      if (!urls) return;
+      restored.delete(source.target.id);
+      const dropped = waves.drop(
+        source.target.id,
+        urls.filter((url) => !live.has(url)),
+      );
+      if (!dropped.length) return;
+      for (const url of dropped) source.urls.delete(url);
+      source.row.cards -= dropped.length;
+      traceEvent("search_queue_refreshed", {
+        sourceId: source.target.id,
+        restored: urls.length,
+        dropped: dropped.length,
+      });
+      input.write(source);
     },
     accept,
     drain: () => waves.drain(),

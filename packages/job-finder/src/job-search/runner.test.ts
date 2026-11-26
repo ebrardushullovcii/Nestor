@@ -447,7 +447,7 @@ test("a crash after durable planning and before any source starts loses no queue
   });
 });
 
-test("a crash recovers accepted card facts even when their source no longer returns them", async () => {
+test("a crash recovers accepted card facts when the source's fresh inventory is incomplete", async () => {
   const { store, engine, context } = setup();
   context.sources = context.sources.slice(0, 1);
   const search = store.searches.start(
@@ -463,8 +463,8 @@ test("a crash recovers accepted card facts even when their source no longer retu
   engine.collectSource.mockResolvedValue({
     cards: [],
     pagesRead: 1,
-    complete: true,
-    notes: [],
+    complete: false,
+    notes: ["Coverage incomplete."],
   });
   const restarted = createJobSearchRunner({
     store,
@@ -486,6 +486,92 @@ test("a crash recovers accepted card facts even when their source no longer retu
   });
 });
 
+test("a resumed source's complete fresh inventory drops queued cards the site no longer lists", async () => {
+  const { store, engine, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough", postedWithin: "any" }),
+    1,
+  );
+  const rows = createSearchSourcesStore(store);
+  rows.plan(search.id, context.sources[0]!, false);
+  const listed = card("one", "Backend Engineer");
+  const removed = {
+    ...card("one", "Platform Engineer"),
+    url: "https://one.example/removed",
+  };
+  rows.cardQueue(search.id).push([listed, removed]);
+  engine.collectSource.mockResolvedValue({
+    cards: [listed],
+    pagesRead: 1,
+    complete: true,
+    notes: ["All observed pages covered."],
+  });
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await finished(restarted);
+  const screened = engine.screenCards.mock.calls.flatMap(([input]) =>
+    input.cards.map((card) => card.url),
+  );
+  expect(screened).toContain(listed.url);
+  expect(screened).not.toContain(removed.url);
+  expect(store.stageCounts().found).toBe(1);
+  expect(rows.list({ searchId: search.id }).rows[0]).toMatchObject({
+    state: "done",
+    cards: 1,
+  });
+});
+
+test("a listing the site answers as removed is closed and counted without a read", async () => {
+  const { runner, engine, store, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  const removedOnScreen = {
+    ...card("one", "Data Engineer"),
+    url: "https://one.example/gone-1",
+  };
+  const removedOnRead = {
+    ...card("one", "Platform Engineer"),
+    url: "https://one.example/gone-2",
+  };
+  engine.collectSource.mockResolvedValue({
+    cards: [card("one"), removedOnScreen, removedOnRead],
+    pagesRead: 1,
+    complete: true,
+    notes: ["All observed pages covered."],
+  });
+  engine.screenCards.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      related: cards.filter((row) => row.url !== removedOnScreen.url),
+      seen: [],
+      skipped: 0,
+      gone: [removedOnScreen.url],
+    }),
+  );
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.filter((row) => row.url !== removedOnRead.url).map(found),
+      failures: [],
+      closed: [removedOnRead.url],
+    }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(
+    engine.readListings.mock.calls.some(([input]) => input.lane === "browser"),
+  ).toBe(false);
+  expect(store.stageCounts().found).toBe(1);
+  const row = createSearchSourcesStore(store).list({}).rows[0];
+  expect(row?.state).toBe("done");
+  expect(row?.failedReads).toBe(0);
+  expect(row?.message).toContain(
+    "2 removed by the site (HTTP 404 or 410), recorded closed without a read.",
+  );
+});
+
 test("recovered card processing starts while another source is still collecting", async () => {
   const { store, engine, context } = setup();
   const search = store.searches.start(
@@ -498,7 +584,12 @@ test("recovered card processing starts while another source is still collecting"
   const gate = deferred<void>();
   engine.collectSource.mockImplementation(async ({ target }) => {
     if (target.id === "two") await gate.promise;
-    return { cards: [], pagesRead: 1, complete: true, notes: [] };
+    return {
+      cards: target.id === "one" ? [card("one")] : [],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    };
   });
   const restarted = createJobSearchRunner({
     store,

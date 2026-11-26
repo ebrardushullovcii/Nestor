@@ -45,7 +45,12 @@ test("published vacancy duties are supplied separately from an unmarked menu wit
     client: {
       chatWithTools: (messages) => {
         calls.push(messages);
-        return Promise.resolve({ content: '{"keep":{"0":1,"1":1}}' });
+        return Promise.resolve({
+          content:
+            calls.length === 1
+              ? '{"keep":{"0":2,"1":2}}'
+              : '{"keep":{"0":1,"1":1}}',
+        });
       },
     },
     readPage: (url) =>
@@ -54,7 +59,7 @@ test("published vacancy duties are supplied separately from an unmarked menu wit
         html: `<body><div>Menu</div><div>Locations</div><h1>${listing.title}</h1><div>Build accessible interfaces</div><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: listing.title, description: "Build accessible interfaces", hiringOrganization: { name: "Synthetic Employer" } })}</script></body>`,
       }),
   });
-  const input = JSON.parse(calls[0][1].content) as {
+  const input = JSON.parse(calls[1][1].content) as {
     evidenceBlocks: string[];
     titles: [number, string, number[], number[]][];
   };
@@ -148,7 +153,7 @@ test("completed model batches stream while another batch is still pending", asyn
   expect(onRelated).toHaveBeenCalledTimes(2);
 });
 
-test("an ambiguous title streams after one full-text judgment with its captured page", async () => {
+test("an ambiguous title the model asks to read streams after its full-text judgment with its captured page", async () => {
   const listing = card("Interface Specialist");
   const body =
     "Build frontend components with React and TypeScript, collaborating with designers on accessible interfaces.";
@@ -157,6 +162,7 @@ test("an ambiguous title streams after one full-text judgment with its captured 
   >(() => Promise.resolve());
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
     .mockResolvedValueOnce({ content: '{"keep":{"0":1}}' });
   await screenCards({
     cards: [listing],
@@ -170,7 +176,7 @@ test("an ambiguous title streams after one full-text judgment with its captured 
       }),
   });
   expect(onRelated).toHaveBeenCalledTimes(1);
-  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
   expect(onRelated.mock.calls[0]?.[0]?.[0]?.listingText).toContain(body);
 });
 
@@ -199,7 +205,8 @@ test("a proven match does not wait for another listing's full read", async () =>
   >(() => Promise.resolve());
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
-    .mockImplementation((messages) => {
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
+    .mockImplementationOnce((messages) => {
       expect(messages[1].content).toContain("Care for landscape gardens");
       return Promise.resolve({ content: '{"keep":{"0":0}}' });
     });
@@ -214,16 +221,16 @@ test("a proven match does not wait for another listing's full read", async () =>
     readPage: () => detail.promise,
   });
   await vi.waitFor(() => expect(onRelated).toHaveBeenCalledWith([match]));
-  expect(chatWithTools).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(chatWithTools).toHaveBeenCalledTimes(1));
   detail.resolve({
     html: `<main><h1>${uncertain.title}</h1><p>Care for landscape gardens and maintain outdoor planting.</p></main>`,
     finalUrl: uncertain.url,
   });
   expect((await work).related).toEqual([match]);
-  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 
-test("an authenticated uncertain title is read through the browser before its one grounded judgment", async () => {
+test("an authenticated title the model asks to read is read through the browser before its grounded judgment", async () => {
   const listing = card("Interface Specialist");
   const readPage = vi.fn<
     NonNullable<Parameters<typeof screenCards>[0]["readPage"]>
@@ -237,6 +244,7 @@ test("an authenticated uncertain title is read through the browser before its on
   );
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValueOnce({ content: '{"keep":{"0":2}}' })
     .mockResolvedValue({ content: '{"keep":{"0":1}}' });
   const result = await screenCards({
     cards: [listing],
@@ -247,7 +255,7 @@ test("an authenticated uncertain title is read through the browser before its on
   expect(result.failed).toEqual([]);
   expect(result.related[0]?.listingText).toContain("Build accessible frontend");
   expect(readPage).toHaveBeenCalledTimes(2);
-  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("old policy rejections are reconsidered rather than hiding newly ambiguous professions", async () => {

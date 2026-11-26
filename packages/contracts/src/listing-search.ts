@@ -89,6 +89,11 @@ export interface ReadListingResult {
    * from the index; the index itself is neither a vacancy nor a failed read.
    */
   indexes?: string[];
+  /**
+   * Supplied addresses the site answered as removed (HTTP 404 or 410). They
+   * are recorded closed without a model read; they are not failed reads.
+   */
+  closed?: string[];
 }
 
 /** One answer the person gave to an earlier application question. */

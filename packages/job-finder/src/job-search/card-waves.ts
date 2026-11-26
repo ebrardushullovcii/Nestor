@@ -7,6 +7,8 @@ export interface CardWaveQueue {
   counts(): [string, number][];
   take(sourceId: string, size: number): ListingCard[];
   complete(cards: readonly ListingCard[]): void;
+  /** Removes these waiting cards of one source; returns the URLs removed. */
+  drop(sourceId: string, urls: readonly string[]): string[];
 }
 
 /** Bounded, serial waves per source; a slow source must not hold healthy ones. */
@@ -37,6 +39,18 @@ export function createCardWaves(
       return batch;
     },
     complete() {},
+    drop(sourceId, urls) {
+      const remove = new Set(urls);
+      const removed: string[] = [];
+      for (let index = pending.length - 1; index >= 0; index--) {
+        const card = pending[index]!;
+        if (card.sourceId === sourceId && remove.has(card.url)) {
+          pending.splice(index, 1);
+          removed.push(card.url);
+        }
+      }
+      return removed;
+    },
   };
   const pendingCount = () =>
     queue.counts().reduce((n, [, count]) => n + count, 0);
@@ -144,6 +158,16 @@ export function createCardWaves(
         pump();
       }
       pump(); // Also starts durable work restored after a crash.
+    },
+    /** Removes waiting cards of one source; cards already in a wave finish. */
+    drop(sourceId: string, urls: readonly string[]): string[] {
+      const removed = queue.drop(sourceId, urls);
+      if (removed.length) {
+        queued.set(sourceId, (queued.get(sourceId) ?? 0) - removed.length);
+        releaseCheckpoints();
+        pump();
+      }
+      return removed;
     },
     /** Snapshot accepted work. Quick waits only for its own source's cards. */
     async checkpoint(sourceId?: string) {

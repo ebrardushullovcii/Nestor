@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { DiscoveryPageReadError } from "@nestor/contracts";
 import { createHttpPageReader } from "./http-page-reader";
 
 test("waits for Retry-After and reads only with GET", async () => {
@@ -152,3 +153,84 @@ test("Stop interrupts a server-requested queue pause", async () => {
     vi.useRealTimers();
   }
 });
+
+test("a 429 without Retry-After waits on the host, doubles while refused, and is never handed to a browser", async () => {
+  vi.useFakeTimers();
+  try {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
+      .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
+      .mockImplementation(() => Promise.resolve(new Response("listing")));
+    const readRendered = vi.fn();
+    const read = createHttpPageReader({ fetch: request, readRendered });
+    const waiting = read("https://busy.example/job", {});
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(request).toHaveBeenCalledTimes(2);
+    // The second refusal doubles the wait.
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(request).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await waiting).toMatchObject({ html: "listing" });
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(readRendered).not.toHaveBeenCalled();
+    // An answer resets the wait: the next refusal waits one second again.
+    request.mockResolvedValueOnce(new Response("slow down", { status: 429 }));
+    const again = read("https://busy.example/other", {});
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await again).toMatchObject({ html: "listing" });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a browser read that the site refuses with 429 paces the host for browser and HTTP reads", async () => {
+  vi.useFakeTimers();
+  try {
+    const request = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response("listing")),
+    );
+    const readRendered = vi
+      .fn<
+        NonNullable<
+          Parameters<typeof createHttpPageReader>[0]
+        >["readRendered"] & {}
+      >()
+      .mockRejectedValueOnce(new DiscoveryPageReadError(429))
+      .mockResolvedValue({
+        html: "rendered",
+        finalUrl: "https://busy.example/job",
+      });
+    const read = createHttpPageReader({ fetch: request, readRendered });
+    const rendered = read("https://busy.example/job", { rendered: true });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(readRendered).toHaveBeenCalledTimes(1);
+    const plain = read("https://busy.example/other", {});
+    await vi.advanceTimersByTimeAsync(500);
+    expect(request).not.toHaveBeenCalled();
+    expect(readRendered).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await rendered).toMatchObject({ html: "rendered" });
+    expect(await plain).toMatchObject({ html: "listing" });
+    expect(readRendered).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each([404, 410])(
+  "HTTP %s is returned to the caller as the site's answer without a retry",
+  async (status) => {
+    const request = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response("gone", { status })),
+    );
+    await expect(
+      createHttpPageReader({ fetch: request })("https://example.test/job", {}),
+    ).rejects.toMatchObject({ status });
+    expect(request).toHaveBeenCalledOnce();
+  },
+);

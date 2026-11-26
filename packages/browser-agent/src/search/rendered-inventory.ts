@@ -57,6 +57,10 @@ export async function collectRenderedInventory(input: {
     // The callback persists through the ordinary screen/read pipeline on its
     // own search signal. A later browser deadline cannot erase this batch.
     if (fresh.length) await input.onPage(fresh);
+    if (inventory.unlinked)
+      return partial(
+        `${inventory.unlinked} published vacancies on ${url} have no address of their own; read them from the page.`,
+      );
     if (inventory.needsInteraction) {
       const action = observation.actions.find(
         (action) =>
