@@ -577,7 +577,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       const older = sourceAttempt < row.attempt - 1;
       if (
         receipt?.outcome === "submitted" ||
-        receipt?.outcome === "outcome_uncertain" ||
         previous?.execution.state === "submitted" ||
         (older &&
           !(
@@ -1101,11 +1100,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 };
               retainSend(receipt);
               if (decision.outcome === "waiting")
-                applications.recordVerificationWait(
-                  row.id,
-                  row.attempt,
-                  receipt,
-                );
+                applications.recordUnsettledSend(row.id, row.attempt, receipt);
               return {
                 recorded: true,
                 content: `Recorded ${decision.outcome}: ${decision.evidence}. No browser action was issued; the original send had no prior intent.`,
@@ -1184,7 +1179,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               };
             retainSend(receipt);
             if (decision.outcome === "waiting")
-              applications.recordVerificationWait(row.id, row.attempt, receipt);
+              applications.recordUnsettledSend(row.id, row.attempt, receipt);
             return {
               recorded: true,
               content: `Recorded ${decision.outcome} for sendCallId=${decision.sendCallId}: ${decision.evidence}. The form remains bound. This call ID remains consumed and will never be replayed.`,
@@ -1243,7 +1238,20 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     const recordedSend =
       sentDuringPreparation as SubmissionOutcomeRecord | null;
-    if (
+    // A send the site did not confirm, followed by a step the model handed
+    // to the person, waits on that step: the ledger keeps the send's outcome
+    // and the handoff goes to Needs you on the open page.
+    const handedToPerson =
+      result.questions.some(
+        (question) =>
+          question.status === "detected" && !question.submittedAnswer,
+      ) ||
+      ((agent as ApplyAgentResult | null)?.pauses ?? []).some(
+        (pause) => accessKind(pause.blocker) !== null,
+      );
+    if (recordedSend && recordedSend.outcome !== "submitted" && handedToPerson)
+      applications.recordUnsettledSend(row.id, row.attempt, recordedSend);
+    else if (
       recordedSend &&
       recordedSend.browserAction?.reason !== "awaiting_email_verification"
     ) {

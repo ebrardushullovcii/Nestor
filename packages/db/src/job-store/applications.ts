@@ -636,8 +636,12 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
-    /** A consumed send waiting on its email step stays live, never failed. */
-    recordVerificationWait(
+    /**
+     * A consumed send that is not settled yet stays on its live row: one
+     * waiting on its email step, or one the model followed with a step it
+     * handed to the person on the open page. Never failed.
+     */
+    recordUnsettledSend(
       id: number,
       attempt: number,
       receipt: SubmissionOutcomeRecord,
@@ -655,15 +659,15 @@ export function createApplicationStore(store: JobStore) {
           receipt.applicationRecordId !== `application_${id}` ||
           receipt.jobId !== String(current.jobId)
         )
-          throw new Error(
-            "The verification receipt belongs to another application.",
-          );
+          throw new Error("The send receipt belongs to another application.");
         sql(
           `UPDATE applications SET submission_outcome_id=?, submission_outcome_json=?, error=?, updated_at=? WHERE id=? AND attempt=?`,
         ).run(
           receipt.id,
           JSON.stringify(receipt),
-          "Waiting for the emailed verification step on the open form.",
+          receipt.browserAction?.reason === "awaiting_email_verification"
+            ? "Waiting for the emailed verification step on the open form."
+            : current.error,
           Date.now(),
           id,
           attempt,

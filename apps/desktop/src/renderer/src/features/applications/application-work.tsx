@@ -269,13 +269,12 @@ function ApplyActions(props: {
     application.state,
   );
   const canStop = props.showStop && canStopApply(props.details);
-  // A failed attempt can start a new run; its old send stays in the ledger.
+  // Any attempt whose send the site did not take can start a new run; its
+  // old send stays in the ledger. An unsettled send is settled first.
   const canRetry =
     ["ready", "needs_you", "failed", "stopped"].includes(application.state) &&
     !confirmedSent &&
-    (application.state === "failed" ||
-      receipt === null ||
-      (application.state === "stopped" && receipt.outcome === "not_submitted"));
+    (receipt === null || receipt.outcome === "not_submitted");
   const canSettle = !confirmedSent;
   const canSend = !confirmedSent && application.state === "ready";
   // A failed run offers both ways on, as its row says ("Try again or apply

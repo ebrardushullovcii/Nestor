@@ -863,6 +863,52 @@ test("submit returns page and ledger facts, then the model records its observed 
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
   ).toContain("POST employer.example.test/api/apply 200");
 });
+test.each(["failed", "uncertain"] as const)(
+  "a step handed to the person after a %s send waits on the person",
+  async (outcome) => {
+    const source = page({
+      controls: [{ ...nameControl(), value: "", label: "Current location" }],
+    });
+    const input = config(source);
+    input.authority.mode = "autonomous_submit";
+    input.submitApplication = vi.fn(() =>
+      Promise.resolve({
+        outcome: "outcome_uncertain" as const,
+        content: "sendCallId=call_send; no requests after the click",
+      }),
+    );
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.resolve({ recorded: true, content: `Recorded ${outcome}` }),
+    );
+    const result = await runApplyAgent(
+      input,
+      model([
+        { name: "submit_application", id: "call_send", args: { ref: "a0" } },
+        {
+          name: "record_send_outcome",
+          args: {
+            sendCallId: "call_send",
+            outcome,
+            evidence: "The form stayed open on its location field.",
+          },
+        },
+        {
+          name: "finish",
+          args: {
+            reason: "Please complete the Current location picker on this page.",
+            needsPerson: true,
+            forPerson: ["c0"],
+          },
+        },
+      ]),
+    );
+    expect(input.submitApplication).toHaveBeenCalledOnce();
+    expect(result.outcome).toBe("paused");
+    expect(result.pauses[0]?.question?.currentFieldBinding?.pageUrl).toBe(
+      source.url,
+    );
+  },
+);
 test.each([
   {
     args: { sendCallId: "send", evidence: "The form stayed open" },
