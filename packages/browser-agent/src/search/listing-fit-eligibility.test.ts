@@ -160,6 +160,88 @@ test("fit gets explicit residence and saved country-list rules, without changing
   );
 });
 
+test("fit gets where the person lives, may work and would move, and the remote setting in both states", async () => {
+  const relocating = CandidateProfileSchema.parse({
+    ...profile,
+    workEligibility: {
+      authorizedWorkCountries: ["Kosovo", "United States"],
+      requiresVisaSponsorship: false,
+      willingToRelocate: true,
+      preferredRelocationRegions: ["Spain", "Portugal"],
+      remoteEligible: true,
+    },
+  });
+  const prompts: string[] = [];
+  const people: unknown[] = [];
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      prompts.push(messages[0].content);
+      people.push(
+        (JSON.parse(messages[1].content) as { person: unknown }).person,
+      );
+      return Promise.resolve({
+        content: JSON.stringify({
+          fits: [
+            {
+              id: 1,
+              s: 40,
+              why: "The work matches, but the role needs US residence and you would not move there.",
+              w: "Stack fits; US residence required",
+              r: ["strong", "Requested work"],
+              p: ["conflict", "US residence"],
+              c: ["strong", "Direct evidence"],
+              e: [
+                "blocked",
+                "must reside in the United States",
+                "country_remote",
+                "US",
+              ],
+            },
+          ],
+        }),
+      });
+    },
+  };
+  for (const remoteCountsAsAnyLocation of [true, false]) {
+    const [fit] = await fitJobs({
+      client,
+      profile: relocating,
+      jobs: [job],
+      goals: {
+        targetRoles: [],
+        locations: ["Europe"],
+        remoteCountsAsAnyLocation,
+      },
+    });
+    // The model's own few words stay, even past the length it aims for.
+    expect(fit).toMatchObject({
+      score: 40,
+      short: "Stack fits; US residence required",
+    });
+  }
+  expect(people[0]).toMatchObject({
+    currentCountry: "Kosovo",
+    workEligibility: {
+      authorizedWorkCountries: ["Kosovo", "United States"],
+      willingToRelocate: true,
+      preferredRelocationRegions: ["Spain", "Portugal"],
+    },
+  });
+  expect(prompts[0]).toContain(
+    "Permission to work in a country does not place the person there",
+  );
+  expect(prompts[0]).toContain(
+    "When preferredRelocationRegions is non-empty, relocation covers only those places",
+  );
+  expect(prompts[0]).toContain(
+    "it never removes a listing's residency or hiring-region rule",
+  );
+  expect(prompts[0]).not.toContain("may still be Good or Strong");
+  expect(prompts[1]).toContain(
+    "The person turned off counting remote jobs as any location",
+  );
+});
+
 test("fit gets the person's saved eligibility answers as facts and reads preferences as preferences", async () => {
   const savedAnswers = [
     {

@@ -17,7 +17,6 @@ import {
   type SeenListingCard,
   type ListingCard,
   type TriageStage,
-  FIT_SHORT_MAX,
 } from "@nestor/contracts";
 import { chmodSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -445,10 +444,8 @@ export function openJobStore(
           setRow.run(
             fit.score,
             fit.summary || null,
-            // Only beside its own summary, and only within the cap.
-            fit.summary && fit.short && fit.short.length <= FIT_SHORT_MAX
-              ? fit.short
-              : null,
+            // Only beside its own summary.
+            fit.summary && fit.short ? fit.short : null,
             id,
           );
           setDetail.run(

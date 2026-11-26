@@ -754,7 +754,7 @@ it("numeric floors share assessed-only paging, counts and filtered bulk selectio
   const store = open();
   const { added } = store.saveFoundJobs({
     searchId: "s",
-    jobs: [found(1), found(2), found(3)],
+    jobs: [found(1), found(2), found(3), found(4)],
   });
   store.setFit([
     { id: added[0]!, score: 80, summary: "Strong", reasons: [], gaps: [] },
@@ -800,6 +800,15 @@ it("keeps a fit's short reason beside its summary, for narrow rows", () => {
       reasons: [],
       gaps: [],
     },
+    // A short form over the length the model aims for stays as written.
+    {
+      id: added[3]!,
+      score: 62,
+      summary: "Java architecture is required and your background is .NET.",
+      short: "Java architecture required; .NET background only",
+      reasons: [],
+      gaps: [],
+    },
   ]);
   const rows = new Map(
     store.listJobs({ stage: "found" }).rows.map((row) => [row.id, row]),
@@ -807,6 +816,9 @@ it("keeps a fit's short reason beside its summary, for narrow rows", () => {
   expect(rows.get(added[0]!)?.fitShort).toBe("Less frontend than you want");
   expect(rows.get(added[1]!)?.fitShort).toBeNull();
   expect(rows.get(added[2]!)?.fitShort).toBeNull();
+  expect(rows.get(added[3]!)?.fitShort).toBe(
+    "Java architecture required; .NET background only",
+  );
 });
 
 it("age restoration leaves person hides and closed listings hidden and clears obsolete notes", () => {
