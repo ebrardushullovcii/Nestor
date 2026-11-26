@@ -389,10 +389,14 @@ describe("resumes on the store", () => {
     );
   });
 
-  it("does not write a resume toward a different role the read landed on", async () => {
+  it("does not write a resume when the reading model says the page is another role", async () => {
     const browserRuntime = browserReads({
       title: "Intern Operations Planner",
       description: "Support the planning team as an intern.",
+      requestedListingMatch: {
+        same: false,
+        reason: "This page is the intern vacancy, not the lead role.",
+      },
     });
     const base = createDeterministicJobFinderAiClient();
     const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
@@ -415,7 +419,48 @@ describe("resumes on the store", () => {
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
+    expect(service.get(id!).resume?.error).toContain(
+      "This page is the intern vacancy, not the lead role.",
+    );
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it("writes from a reworded posting title the reading model says is the same posting", async () => {
+    const browserRuntime = browserReads({
+      title: "Operations Planning Lead (m/w/d)",
+      description:
+        "Lead the operations planning team, own the quarterly plan and coach two planners.",
+      requestedListingMatch: {
+        same: true,
+        reason: "The same lead planning vacancy at this employer, reworded.",
+      },
+    });
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: { ...base, createResumeDraft: write },
+      browserRuntime,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [
+        {
+          ...found(2),
+          title: "Lead Operations Planner",
+          description: "Lead Operations Planner",
+          facts: {},
+        },
+      ],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(service.get(id!).resume?.state).not.toBe("failed");
+    expect(
+      browserRuntime.runAgentDiscovery.mock.calls[0]?.[1].requestedListing,
+    ).toMatchObject({ title: "Lead Operations Planner" });
+    expect(store.getJob(id!)?.description).toContain("own the quarterly plan");
   });
 
   it("reads and paginates the whole Shortlisted screen, with approved as a subset", () => {

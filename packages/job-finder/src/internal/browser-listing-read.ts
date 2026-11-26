@@ -129,9 +129,16 @@ export function createBrowserPostingReader(
       signal,
     });
     signal.throwIfAborted();
-    const posting = discovery.jobs.find(
+    const read = discovery.jobs.filter(
       (candidate) => candidate.listingDetailFetch?.outcome === "enriched",
     );
+    // The reading model says which vacancy it read is the requested one.
+    const posting =
+      read.find((candidate) => candidate.requestedListingMatch?.same) ??
+      read.find(
+        (candidate) => candidate.requestedListingMatch?.same !== false,
+      ) ??
+      read[0];
     if (!posting)
       throw new Error(
         discovery.warning ??

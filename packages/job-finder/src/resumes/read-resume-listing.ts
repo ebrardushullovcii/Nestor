@@ -1,27 +1,9 @@
 import type { JobDetail } from "@nestor/contracts";
 import type { ResumeStore } from "@nestor/db/job-store";
 import type { PostingReader } from "../internal/browser-listing-read";
-import { normalizeText } from "../internal/shared";
 
 const words = (value: string) =>
   value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-
-/**
- * The listing page names another role, not the same role worded differently.
- * One title containing the other ("Data Analyst (m/w/d)", "Designer, Growth")
- * is the same role; a different level or mostly different words is not.
- */
-export function namesDifferentRole(saved: string, observed: string): boolean {
-  const left = normalizeText(saved);
-  const right = normalizeText(observed);
-  if (!left || !right || left.includes(right) || right.includes(left)) {
-    return false;
-  }
-  const leftWords = left.split(" ");
-  const rightWords = new Set(right.split(" "));
-  const shared = new Set(leftWords.filter((word) => rightWords.has(word)));
-  return shared.size / Math.min(leftWords.length, rightWords.size) < 0.75;
-}
 
 /**
  * Whether saved text says anything beyond the posting's own heading: its
@@ -89,9 +71,11 @@ export function createResumeListingReader(deps: {
         "The full listing could not be read. Try writing the resume again when the posting is available.",
       );
     }
-    if (posting.title && namesDifferentRole(job.title, posting.title))
+    // The reading model was given this job's saved title and text and
+    // answered whether the page is the same posting; its answer stands.
+    if (posting.requestedListingMatch?.same === false)
       throw new Error(
-        "The listing opened a different role. Check the job link before writing its resume.",
+        `The listing opened a different role: ${posting.requestedListingMatch.reason} Check the job link before writing its resume.`,
       );
     const fromPosting = (value: string[], fallback: string[]) =>
       value.length > 0 ? value : fallback;
