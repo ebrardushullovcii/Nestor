@@ -713,7 +713,9 @@ async function runJobSearchAgentPrivate(
         : null,
       isSourceCheck
         ? `${savedCount()} sampled so far. Samples prove how the site works; they are not saved as results.`
-        : `${savedCount()} saved so far.`,
+        : config.inventoryOnly
+          ? `${savedCount()} saved so far from ${inspectedPageUrls.length} results ${inspectedPageUrls.length === 1 ? "view" : "views"} read in this run.`
+          : `${savedCount()} saved so far.`,
     ];
     return lines.filter((line): line is string => line !== null).join("\n");
   };
@@ -1322,7 +1324,7 @@ async function runJobSearchAgentPrivate(
             coverageComplete: {
               type: "boolean",
               description:
-                "Your coverage judgment: false when relevant result pages, cards or API pages remain unread. Finishing a run does not mean exhausting its source.",
+                "Your coverage judgment: false when relevant result pages, cards or API pages remain unread.",
             },
             remainingWork: {
               type: "array",

@@ -50,6 +50,10 @@ export interface JobSearchEngine {
       onCards?: (cards: ListingCard[]) => Promise<void>;
       message(text: string): void;
       knownUrls(urls: readonly string[]): readonly string[];
+      /** Index page addresses this search has read on the site; pages read here are added. */
+      indexPages?: Set<string>;
+      /** Pages in indexPages are not read again: their cards are already collected. */
+      skipReadIndexPages?: boolean;
     },
   ): Promise<SourceInventory>;
   screenCards(
@@ -264,6 +268,8 @@ export function createListingSearchEngine(deps: {
         browserAccessAuthorized,
         source: { id: target.id, label: target.label, url: target.startingUrl },
         lane: input.lane,
+        ...(input.indexPages ? { indexPages: input.indexPages } : {}),
+        ...(input.skipReadIndexPages ? { skipReadIndexPages: true } : {}),
         readPage:
           input.lane === "http"
             ? readPage
@@ -333,6 +339,7 @@ export function createListingSearchEngine(deps: {
                     searchRequest: {
                       intent: settings.note,
                       breadth: "wide",
+                      depth: settings.depth,
                       freshness: "any",
                       sourceIds: [target.id],
                     },

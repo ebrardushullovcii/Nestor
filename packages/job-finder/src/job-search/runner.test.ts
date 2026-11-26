@@ -2238,4 +2238,15 @@ test("an index the listing reader finds is collected for its postings, in the br
   ).toEqual(["Backend Engineer a", "Backend Engineer b"]);
   const [row] = createSearchSourcesStore(store).list({}).rows;
   expect(row).toMatchObject({ state: "done", failedReads: 0, cards: 3 });
+  // The site's own collection and every index read share one record of the
+  // index pages this search has read; only index reads skip them.
+  const [main, ...indexReads] = engine.collectSource.mock.calls.map(
+    ([input]) => input,
+  );
+  expect(main?.indexPages).toBeInstanceOf(Set);
+  expect(main?.skipReadIndexPages).toBeUndefined();
+  for (const input of indexReads) {
+    expect(input.indexPages).toBe(main?.indexPages);
+    expect(input.skipReadIndexPages).toBe(true);
+  }
 });

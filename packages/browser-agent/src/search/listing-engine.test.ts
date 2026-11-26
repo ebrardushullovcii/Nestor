@@ -649,6 +649,53 @@ test("reads a category section's own page for its postings and never keeps the c
   expect(inventory.complete).toBe(true);
 });
 
+test("an expired listing that redirects to an index this search already read collects nothing again", async () => {
+  const job = (slug: string, title: string) =>
+    `<li class="job"><a href="/remote-jobs/${slug}"><h3>${title}</h3><p class="company">Acme</p><span>Remote</span></a></li>`;
+  const pages: Record<string, string> = {
+    "https://board.example/": `<ul><li class="category"><h2><a href="/categories/design">Design Jobs</a></h2><ul>${job("acme-designer", "Product Designer")}</ul><a href="/categories/design">View all 2 jobs</a></li></ul>`,
+    "https://board.example/categories/design": `<ul>${job("acme-designer", "Product Designer")}${job("beta-ux", "UX Designer")}</ul>`,
+  };
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve(
+      url === "https://board.example/remote-jobs/expired"
+        ? {
+            finalUrl: "https://board.example/categories/design",
+            html: pages["https://board.example/categories/design"],
+          }
+        : { finalUrl: url, html: pages[url] ?? "" },
+    ),
+  );
+  const indexPages = new Set<string>();
+  const first = await collectSource({ source, readPage, indexPages });
+  expect(first.cards).toHaveLength(2);
+  expect([...indexPages].sort()).toEqual([
+    "https://board.example/",
+    "https://board.example/categories/design",
+  ]);
+  readPage.mockClear();
+  const redirected = await collectSource({
+    source: { ...source, url: "https://board.example/remote-jobs/expired" },
+    readPage,
+    indexPages,
+    skipReadIndexPages: true,
+  });
+  expect(readPage.mock.calls.map(([url]) => url)).toEqual([
+    "https://board.example/remote-jobs/expired",
+  ]);
+  expect(redirected).toMatchObject({ cards: [], complete: true });
+  expect(redirected.requiresBrowser).toBe(false);
+  readPage.mockClear();
+  const category = await collectSource({
+    source: { ...source, url: "https://board.example/categories/design" },
+    readPage,
+    indexPages,
+    skipReadIndexPages: true,
+  });
+  expect(readPage).not.toHaveBeenCalled();
+  expect(category).toMatchObject({ cards: [], complete: true });
+});
+
 test("screens titles once, refreshes only named saved postings and skips unchanged saved cards", async () => {
   const cards = [
     card("Data Analyst"),

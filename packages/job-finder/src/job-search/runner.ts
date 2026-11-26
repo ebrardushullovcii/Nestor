@@ -22,7 +22,12 @@ import { abortable, concurrency, errorMessage } from "./async";
 import { createFitQueue } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
-import { settledState, sourceWork, type SourceWork } from "./source-work";
+import {
+  settledState,
+  sourceSettings,
+  sourceWork,
+  type SourceWork,
+} from "./source-work";
 import type {
   JobSearchContext,
   JobSearchRunner,
@@ -421,8 +426,9 @@ export function createJobSearchRunner(
           target: source.target,
           lane,
           context,
-          settings,
+          settings: sourceSettings(settings, source),
           signal: readSignal,
+          indexPages: source.indexPages,
           knownUrls: (urls) => deps.store.findKnownUrls(urls),
           onCards: async (cards) => {
             await pipeline.accept(source, cards);

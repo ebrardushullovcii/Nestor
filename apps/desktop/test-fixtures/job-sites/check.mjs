@@ -276,6 +276,51 @@ try {
   );
   assert.ok(signIn.response.headers.get("set-cookie"));
 
+  // Longboard: six result pages signed out, eight after signing in.
+  assert.ok(!(await request("/longboard/")).body.includes("/longboard/job/"));
+  const walkLongboard = async (headers) => {
+    let next = "/longboard/jobs";
+    const seen = new Set();
+    let pages = 0;
+    while (next) {
+      const response = await fetch(base + next, {
+        headers,
+        signal: AbortSignal.timeout(10000),
+      });
+      assert.equal(response.status, 200, next);
+      const body = await response.text();
+      requestCount++;
+      pages++;
+      for (const [, id] of body.matchAll(/href="\/longboard\/job\/(\d+)"/g))
+        seen.add(id);
+      next = /rel="next" href="([^"]+)"/
+        .exec(body)?.[1]
+        ?.replace(/&amp;/g, "&");
+    }
+    return { pages, jobs: seen.size };
+  };
+  assert.deepEqual(await walkLongboard({}), { pages: 6, jobs: 60 });
+  await request("/longboard/job/61", {}, 401);
+  const longboardSignIn = await request(
+    "/longboard/signin",
+    {
+      method: "POST",
+      body: new URLSearchParams({
+        email: "candidate@example.invalid",
+        password: "made-up",
+      }),
+      redirect: "manual",
+    },
+    303,
+  );
+  const memberCookie = longboardSignIn.response.headers
+    .get("set-cookie")
+    .split(";")[0];
+  assert.deepEqual(await walkLongboard({ Cookie: memberCookie }), {
+    pages: 8,
+    jobs: 80,
+  });
+
   const autosave = await request("/gatekeeper/api/autosave", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

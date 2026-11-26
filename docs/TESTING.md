@@ -107,6 +107,8 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/gatekeeper/` exercises a cookie overlay, chat bubble, eight-second security interstitial, new-tab application, per-field autosaves and in-page confirmation after fetch submission.
 
+`http://127.0.0.1:47950/longboard/` is a long board for reading a whole inventory: the landing page is a search form with no cards, `/longboard/jobs` has 60 jobs on six pages with a Next link, and signing in (any made-up email and password) adds 20 members-only jobs on two more pages. Members-only postings answer 401 until then.
+
 `http://127.0.0.1:47950/atlas/` has 300 jobs and exercises page numbers, query filters, sorting, duplicate jobs, sponsored cards and discovery decoys.
 
 `http://127.0.0.1:47950/ripple/` has 300 jobs and exercises load more, query filters, duplicate jobs, initials-only companies and a local ATS redirect.
