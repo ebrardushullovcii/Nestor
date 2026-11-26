@@ -70,11 +70,22 @@ export function writeState(state) {
   writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
 }
 
+/** A driver line as steps.log and the run trace keep it: no secret fills or env values. */
+export function stepText(line) {
+  return redact(
+    /\b(?:password|mfa|otp|one.time.code)\b/i.test(line) &&
+      /\bfill\b/i.test(line)
+      ? "[secret fill omitted]"
+      : line,
+    process.env,
+  );
+}
+
 export function step(line) {
   mkdirSync(evidenceDir, { recursive: true });
   appendFileSync(
     path.join(evidenceDir, "steps.log"),
-    `${new Date().toISOString()}  ${redact(/\b(?:password|mfa|otp|one.time.code)\b/i.test(line) && /\bfill\b/i.test(line) ? "[secret fill omitted]" : line, process.env)}\n`,
+    `${new Date().toISOString()}  ${stepText(line)}\n`,
   );
 }
 

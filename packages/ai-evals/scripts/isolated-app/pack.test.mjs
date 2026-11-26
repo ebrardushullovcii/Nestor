@@ -420,3 +420,145 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an interrupted run's pack holds both attempts and every operator action with its start time", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "nestor-pack-operator-"));
+  try {
+    const at = (s) => `2026-11-26T20:33:${s}Z`;
+    const data = path.join(root, "profile");
+    mkdirSync(data);
+    writeFileSync(
+      path.join(data, "nestor-profile-provenance.json"),
+      JSON.stringify({ kind: "synthetic" }),
+    );
+    const db = new DatabaseSync(path.join(data, "job-finder.sqlite"));
+    db.exec(`CREATE TABLE applications(id INTEGER,job_id INTEGER,attempt INTEGER,mode TEXT,state TEXT,error TEXT,submission_outcome_json TEXT,queued_at INTEGER,updated_at INTEGER);
+      INSERT INTO applications VALUES(40,713,2,'autonomous_submit','submitted',NULL,NULL,${Date.parse(at("22.580"))},${Date.parse("2026-11-26T20:35:33.009Z")});`);
+    db.close();
+    const header = (s, appStart) => ({
+      event: "run_header",
+      at: at(s),
+      network: "replica",
+      ai: "live",
+      ...(appStart ? { appStart } : {}),
+    });
+    const events = (driverRecords) => [
+      header("00.000"),
+      ...(driverRecords
+        ? [
+            {
+              event: "operator_action",
+              source: "driver",
+              from: "drive",
+              command: "click",
+              detail: 'click "Apply" {}',
+              target: "app",
+              // Started before the run was queued: it starts the run.
+              startedAt: at("22.554"),
+              at: at("22.635"),
+              outcome: "ok",
+            },
+          ]
+        : []),
+      {
+        event: "tool_call",
+        at: at("45.000"),
+        applicationKey: "application_40_attempt_1",
+        name: "fill_fields",
+        result: "filled",
+      },
+      header("49.398", driverRecords ? { generation: 2, by: "restart" } : null),
+      ...(driverRecords
+        ? [
+            {
+              event: "operator_action",
+              source: "driver",
+              from: "drive",
+              command: "restart",
+              detail: "restart ",
+              target: "app",
+              startedAt: at("48.200"),
+              at: at("50.066"),
+              outcome: "ok",
+              // A stale screenshot binding does not move it to another run.
+              applicationKey: "application_999_attempt_1",
+            },
+          ]
+        : []),
+      {
+        event: "tool_call",
+        at: at("52.000"),
+        applicationKey: "application_40_attempt_2",
+        name: "fill_fields",
+        result: "filled",
+      },
+      {
+        event: "tool_call",
+        at: at("53.000"),
+        applicationKey: "application_999_attempt_1",
+        name: "fill_fields",
+        result: "other run",
+      },
+    ];
+    const evidence = path.join(root, "evidence");
+    mkdirSync(evidence);
+    writeFileSync(
+      path.join(evidence, "steps.log"),
+      [
+        `${at("22.635")}  click "Apply" {}  ok 81ms  [Find jobs]`,
+        `${at("30.000")}  see   ok 3ms  [Find jobs]`,
+        `${at("50.066")}  restart   ok 1866ms  [Home]`,
+        `2026-11-26T20:36:44.478Z  fill "Your answer" "Later" {}  ok 7ms  [Needs you]`,
+      ].join("\n"),
+    );
+    for (const driverRecords of [true, false]) {
+      const trace = path.join(root, `trace-${driverRecords}`);
+      mkdirSync(trace);
+      writeFileSync(
+        path.join(trace, "events-1.jsonl"),
+        events(driverRecords)
+          .map((e) => JSON.stringify(e))
+          .join("\n"),
+      );
+      const out = path.join(root, `pack-${driverRecords}`);
+      const manifest = await generatePack({
+        out,
+        trace,
+        data,
+        application: "40",
+        evidence,
+        state: {},
+      });
+      assert.equal(manifest.header.operatorActed, true);
+      assert.deepEqual(
+        manifest.attempts.map((a) => [a.applicationKey, a.first]),
+        [
+          ["application_40_attempt_1", at("45.000")],
+          ["application_40_attempt_2", at("52.000")],
+        ],
+      );
+      // The Apply click started the run and is not inside it; looks are not acts.
+      assert.deepEqual(
+        manifest.header.operatorActions.map((a) => [a.at, a.action]),
+        [
+          [at(driverRecords ? "48.200" : "48.200"), "restart"],
+          [at("49.398"), "app launched"],
+        ],
+      );
+      assert.equal(
+        manifest.header.operatorActions[0].by,
+        driverRecords ? "driver drive" : "driver drive (steps.log)",
+      );
+      const pack = readFileSync(path.join(out, "pack.md"), "utf8");
+      assert.match(pack, /OPERATOR ACTED: 2 operator actions/);
+      assert.match(
+        pack,
+        /\| 2026-11-26T20:33:48\.200Z \| operator: restart \|/,
+      );
+      assert.match(pack, /application_40_attempt_1 first event/);
+      assert.doesNotMatch(pack, /other run/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

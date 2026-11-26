@@ -232,6 +232,16 @@ const INDEX_FIELDS = [
   "target",
   "url",
   "durationMs",
+  // Operator records: what was done, when it started and how it went.
+  "source",
+  "from",
+  "command",
+  "detail",
+  "note",
+  "startedAt",
+  "outcome",
+  "needId",
+  "tabId",
 ];
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 
@@ -376,6 +386,91 @@ function eventDetail(event, file, link) {
   return JSON.stringify(event);
 }
 
+// Driver commands that only look at the app; every other one acts on it.
+const LOOKING = new Set([
+  "status",
+  "see",
+  "shot",
+  "wait",
+  "browser",
+  "identity",
+]);
+
+/**
+ * Operator commands from the driver's steps.log, for traces recorded before
+ * the driver wrote them to the trace. A line is written when its command ends;
+ * it started its duration earlier.
+ */
+export function operatorStepLines(text, inRun) {
+  const actions = [];
+  for (const line of text.split("\n")) {
+    const at = Date.parse(line.slice(0, 24));
+    if (!Number.isFinite(at)) continue;
+    const rest = line.slice(26);
+    const session = /^=== (up|down)\b/.exec(rest);
+    const command =
+      /^( *)([a-z]+) (.*?)  (ok|FAILED) (\d+)ms(?::\s*(.*)|\s.*)?$/.exec(rest);
+    if (session) {
+      if (inRun(at))
+        actions.push({
+          at: new Date(at).toISOString(),
+          by: "driver (steps.log)",
+          action: session[1],
+          detail: rest.slice(4, 204),
+          outcome: "ok",
+        });
+      continue;
+    }
+    if (!command || LOOKING.has(command[2])) continue;
+    const started = at - Number(command[5]);
+    if (!inRun(started)) continue;
+    actions.push({
+      at: new Date(started).toISOString(),
+      by: `driver ${command[1] ? "journey" : "drive"} (steps.log)`,
+      action: command[2],
+      detail: `${command[2]} ${command[3]}`.trim().slice(0, 200),
+      outcome: command[4] === "ok" ? "ok" : "failed",
+      ...(command[6] ? { error: command[6] } : {}),
+    });
+  }
+  return actions;
+}
+
+/** One operator record, from the driver or the app, as the pack shows it. */
+function operatorRow(e) {
+  if (e.event === "run_header")
+    return {
+      at: e.at,
+      by: "driver",
+      action: "app launched",
+      detail: e.header?.appStart
+        ? `app launch ${e.header.appStart.generation}, by ${e.header.appStart.by}`
+        : "app launch (up or drive restart)",
+      outcome: "ok",
+    };
+  return {
+    at: e.startedAt ?? e.at,
+    by:
+      e.source === "driver"
+        ? `driver ${e.from ?? "drive"}`
+        : (e.source ?? (e.action ? "app" : "driver")),
+    action: e.command ?? e.action ?? "operator",
+    detail:
+      e.detail ??
+      e.note ??
+      (e.needId != null
+        ? `Needs you ${e.needId} answered`
+        : e.tabId
+          ? `input on tab ${e.tabId}`
+          : ""),
+    ...(e.target ? { target: e.target } : {}),
+    ...(e.outcome ? { outcome: e.outcome } : {}),
+    ...(e.applicationKeys?.length
+      ? { applicationKeys: e.applicationKeys }
+      : {}),
+  };
+}
+
 async function sha256File(file) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk);
@@ -454,15 +549,22 @@ export async function generatePack(options) {
       ? Infinity
       : Math.max(...searches.map((s) => Number(s.finished_at)));
   }
+  // Every attempt of this application belongs to it: an interrupted run
+  // resumes as the next attempt, and both are the run.
+  const ownKey = (key) =>
+    app
+      ? String(key).startsWith(`application_${app.id}_attempt_`)
+      : key === applicationKey;
+  const inRun = (at) =>
+    (!Number.isFinite(startMs) || at >= startMs) &&
+    (!Number.isFinite(endMs) || at <= endMs);
   const isRelevant = (e) => {
     if (e.event === "run_header") return true;
-    if (
-      e.event === "operator_action" &&
-      app &&
-      e.applicationKeys?.some((key) =>
-        key.startsWith(`application_${app.id}_attempt_`),
-      )
-    )
+    // A driver command belongs to the run it started in; its bound key is
+    // only the last one bound for screenshots.
+    if (e.event === "operator_action" && e.source === "driver")
+      return inRun(Date.parse(e.startedAt ?? e.at));
+    if (e.event === "operator_action" && app && e.applicationKeys?.some(ownKey))
       return !Number.isFinite(endMs) || Date.parse(e.at) <= endMs;
     if (
       e.event === "application_requested" &&
@@ -470,10 +572,9 @@ export async function generatePack(options) {
       e.sel?.includes(app.job_id)
     )
       return true;
-    if (e.applicationKey && applicationKey)
-      return e.applicationKey === applicationKey;
+    if (e.applicationKey && applicationKey) return ownKey(e.applicationKey);
     if (e.applicationKeys && applicationKey)
-      return e.applicationKeys.includes(applicationKey);
+      return e.applicationKeys.some(ownKey);
     // Retain settings history and header facts; unscoped activity belongs only
     // to this run's persisted time interval, never the whole session.
     if (e.event.startsWith("settings_"))
@@ -673,6 +774,59 @@ export async function generatePack(options) {
       : (headerEvent?.profile ?? { kind: "unknown" });
     const reported = relevant.filter((e) => e.event === "provider_reported");
     const ours = relevant.filter((e) => e.event === "ours");
+    // What the operator did during the run: driver commands, app-recorded
+    // person input and Needs you answers, and app launches (`up` or `drive
+    // restart`) inside the run. Traces from before the driver recorded its
+    // commands get them from the driver's steps.log.
+    const stepFile = path.join(
+      options.evidence ?? state?.evidenceDir ?? evidenceDir,
+      "steps.log",
+    );
+    const traceCommands = relevant.some(
+      (e) => e.event === "operator_action" && e.source === "driver",
+    );
+    // A launch is known to be inside the run only when the run has a window.
+    const launches = Number.isFinite(startMs)
+      ? relevant.filter(
+          (e) => e.event === "run_header" && inRun(Date.parse(e.at)),
+        )
+      : [];
+    const operatorActions = [
+      ...relevant.filter((e) => e.event === "operator_action"),
+      ...launches,
+    ].map(operatorRow);
+    if (
+      !traceCommands &&
+      existsSync(stepFile) &&
+      (Number.isFinite(startMs) || tracedTimes.length)
+    )
+      operatorActions.push(
+        ...operatorStepLines(
+          readFileSync(stepFile, "utf8"),
+          // Without a stored run, the recorded trace is the window.
+          Number.isFinite(startMs)
+            ? inRun
+            : (at) => at >= tracedTimes[0] && at <= tracedTimes.at(-1),
+        ),
+      );
+    operatorActions.sort((a, b) => a.at.localeCompare(b.at));
+    // Attempt boundaries: the first and last recorded event of each attempt.
+    const attempts = [];
+    for (const e of relevant) {
+      const key = e.applicationKey;
+      if (!key || !app || !ownKey(key) || !e.at) continue;
+      const known = attempts.find((a) => a.applicationKey === key);
+      if (known) {
+        known.last = e.at;
+        known.events++;
+      } else
+        attempts.push({
+          applicationKey: key,
+          first: e.at,
+          last: e.at,
+          events: 1,
+        });
+    }
     const build = headerEvent?.build ?? null;
     const warnings = [];
     if (databaseOnly)
@@ -708,6 +862,10 @@ export async function generatePack(options) {
         `AI: ${headerEvent?.ai ?? "unknown"}; does not prove live-model quality`,
       );
     if (!requests.length) warnings.push("No provider requests recorded");
+    if (operatorActions.length)
+      warnings.push(
+        `OPERATOR ACTED: ${operatorActions.length} operator actions during this run (${[...new Set(operatorActions.map((a) => a.action))].join(", ")}); see Operator and timeline`,
+      );
     if (!finalShot && kind === "application")
       warnings.push("Final application screenshot is missing");
     const shotErrors = relevant.filter((e) =>
@@ -822,10 +980,13 @@ export async function generatePack(options) {
         // One row per distinct model and effort; every call is in model/.
         requested: grouped(requests, (r) => [r.endpoint, r.model, r.effort]),
         reported: grouped(reported, (r) => [r.model, r.effort]),
-        operatorActed: relevant.some((e) => e.event === "operator_action"),
-        operatorEvidence:
-          "Native user-input ledger and explicit driver operator records; no input contents are captured",
+        operatorActed: operatorActions.length > 0,
+        operatorEvidence: traceCommands
+          ? "Driver commands, app launches, native user-input ledger and Needs you answers recorded in the run trace"
+          : `App launches, native user-input ledger and Needs you answers from the run trace; driver commands from ${existsSync(stepFile) ? stepFile : "no steps.log (none found)"}`,
+        operatorActions,
       },
+      attempts,
       trace: {
         dir: trace,
         databaseOnly,
@@ -1078,10 +1239,6 @@ export async function generatePack(options) {
         note: "Cookie import counts do not prove a working sign-in; consult the observed site state",
       });
 
-    const stepFile = path.join(
-      options.evidence ?? state?.evidenceDir ?? evidenceDir,
-      "steps.log",
-    );
     if (existsSync(stepFile)) {
       const stepText = readFileSync(stepFile, "utf8")
         .split("\n")
@@ -1113,6 +1270,62 @@ export async function generatePack(options) {
       "```json",
       json(manifest.header),
       "```",
+      "",
+      "## Operator and timeline",
+      "",
+      operatorActions.length
+        ? `The operator acted ${operatorActions.length} times during this run. Times are when each action started.`
+        : "No operator action was recorded during this run.",
+      "",
+      "| Time | What | By | Detail |",
+      "| --- | --- | --- | --- |",
+      ...[
+        ...(Number.isFinite(startMs)
+          ? [
+              {
+                at: new Date(startMs).toISOString(),
+                what: kind === "search" ? "search started" : "run queued",
+                by: "app",
+                detail: "",
+              },
+            ]
+          : []),
+        ...attempts.flatMap((a) => [
+          {
+            at: a.first,
+            what: `${a.applicationKey} first event`,
+            by: "app",
+            detail: `${a.events} events`,
+          },
+          {
+            at: a.last,
+            what: `${a.applicationKey} last event`,
+            by: "app",
+            detail: "",
+          },
+        ]),
+        ...operatorActions.map((a) => ({
+          at: a.at,
+          what: `operator: ${a.action}`,
+          by: a.by,
+          detail: `${a.detail ?? ""}${a.outcome === "failed" ? ` (failed${a.error ? `: ${a.error}` : ""})` : ""}`,
+        })),
+        ...(Number.isFinite(endMs)
+          ? [
+              {
+                at: new Date(endMs).toISOString(),
+                what: `run ended: ${manifest.outcome}`,
+                by: "app",
+                detail: "",
+              },
+            ]
+          : []),
+      ]
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .map(
+          (r) =>
+            `| ${cell(r.at)} | ${cell(r.what)} | ${cell(r.by)} | ${cell(r.detail)} |`,
+        ),
       "",
     ];
     const tail = [
