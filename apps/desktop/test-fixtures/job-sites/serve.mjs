@@ -13,6 +13,7 @@ import { handleUploadRecovery } from "./upload-recovery.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
 import { handleRemoteSearch } from "./remote-search.mjs";
+import { handleRenderedPostings } from "./rendered-postings.mjs";
 import { handleImageChallenge } from "./image-challenge.mjs";
 import { handleVerificationReplica } from "./verification-replica.mjs";
 
@@ -494,6 +495,7 @@ const server = http.createServer(async (req, res) => {
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )
       return;
+    if (await handleRenderedPostings(req, res, url, { send })) return;
     if (await handleFillChores(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleStepsShape(req, res, url, { send, readPost, logPost }))

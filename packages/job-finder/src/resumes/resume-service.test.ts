@@ -7,8 +7,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   createFreshStartCandidateProfile,
+  DiscoveryRunResultSchema,
   type FoundJob,
+  type JobPosting,
 } from "@nestor/contracts";
+import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
 import {
   createResumeStore,
   createProfileStore,
@@ -56,6 +59,46 @@ function found(n: number): FoundJob {
   };
 }
 
+/**
+ * Nestor's browser, where the model reads a requested vacancy: each read
+ * returns the next of these postings, read in full (or nothing at all).
+ */
+function browserReads(...reads: Array<Partial<JobPosting> | Error | null>) {
+  const seed = createSeed();
+  const runAgentDiscovery = vi.fn(
+    (_source: string, options: AgentDiscoveryOptions) => {
+      const read = reads.shift();
+      if (read instanceof Error) return Promise.reject(read);
+      return Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: "2026-11-07T03:47:11.000Z",
+          completedAt: "2026-11-07T03:47:40.000Z",
+          querySummary: "Requested listing",
+          warning: read ? null : "The vacancy page did not show its text.",
+          jobs: read
+            ? [
+                {
+                  ...seed.savedJobs[0]!,
+                  canonicalUrl: options.requestedListing!.url,
+                  title: options.requestedListing!.title,
+                  listingDetailFetch: {
+                    attemptedAt: "2026-11-07T03:47:40.000Z",
+                    outcome: "enriched",
+                    method: "page_text",
+                    detail: "Read this listing page in full.",
+                  },
+                  ...read,
+                },
+              ]
+            : [],
+        }),
+      );
+    },
+  );
+  return { runAgentDiscovery };
+}
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
@@ -91,7 +134,7 @@ function setup(
         searchPreferences: seed.searchPreferences,
         settings: seed.settings,
       }),
-    fetchListingHtml: () => Promise.reject(new Error("offline")),
+    browserRuntime: browserReads(new Error("offline")),
     ...overrides,
   });
   let closed = false;
@@ -113,62 +156,53 @@ const waitFor = (assertion: () => void) =>
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
-  it("Write again recovers an empty URL-added listing through rendered DOM text", async () => {
-    const seed = createSeed();
+  it("reads a title-only job's script-rendered posting in Nestor's browser, then reuses it", async () => {
+    // Teambase on Workable: the saved text is the title, and the posting
+    // exists only once the site's script has rendered it.
     const body =
-      "Rendered role duties and qualifications, including the final essential requirement.";
+      "Deliver features end-to-end across API, UI, database and tests in ASP.NET MVC 5 and .NET 10 with Vue 3 on Azure.";
+    const browserRuntime = browserReads({
+      description: body,
+      keySkills: ["C#", "Vue 3"],
+    });
     const base = createDeterministicJobFinderAiClient();
-    const extractJobsFromPage = vi
-      .fn<typeof base.extractJobsFromPage>()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          ...seed.savedJobs[0]!,
-          title: found(2).title,
-          company: found(2).company,
-          description: body,
-        },
-      ]);
     const createResumeDraft = vi.fn(
       (input: Parameters<typeof base.createResumeDraft>[0]) =>
         base.createResumeDraft(input),
     );
-    const readRenderedPage = vi.fn(() =>
-      Promise.resolve({
-        html: "<div id='app'>Loading</div>",
-        finalUrl: found(2).url,
-        visibleText: body,
-      }),
-    );
     const { store, service } = setup({
-      aiClient: { ...base, extractJobsFromPage, createResumeDraft },
-      fetchListingHtml: () =>
-        Promise.resolve({
-          html: "<div id='app'>Loading</div>",
-          finalUrl: found(2).url,
-          status: 200,
-        }),
-      readRenderedPage,
+      aiClient: { ...base, createResumeDraft },
+      browserRuntime,
     });
     const [id] = store.saveFoundJobs({
       searchId: null,
       jobs: [
-        { ...found(2), description: "", facts: { fullListingRead: true } },
+        {
+          ...found(2),
+          url: "https://apply.workable.com/teambase-dmcc/j/667853CDEF/",
+          description: found(2).title,
+          facts: {},
+        },
       ],
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
-    service.rewrite(id!);
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(readRenderedPage).toHaveBeenCalledOnce();
-    expect(extractJobsFromPage.mock.calls[1]?.[0].pageText).toContain(body);
+    expect(browserRuntime.runAgentDiscovery).toHaveBeenCalledOnce();
+    const [, options] = browserRuntime.runAgentDiscovery.mock.calls[0]!;
+    expect(options.requestedListing).toMatchObject({
+      url: "https://apply.workable.com/teambase-dmcc/j/667853CDEF/",
+      title: found(2).title,
+    });
+    expect(options.dedicatedPage).toBe(true);
     expect(createResumeDraft.mock.calls[0]?.[0].job.description).toBe(body);
     expect(store.getJob(id!)?.description).toBe(body);
-    expect(store.getJob(id!)?.facts.fullListingRead).toBe(true);
+    expect(store.getJob(id!)?.facts).toMatchObject({
+      fullListingRead: true,
+      keySkills: ["C#", "Vue 3"],
+    });
     service.rewrite(id!);
-    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(createResumeDraft).toHaveBeenCalledTimes(2);
-    expect(readRenderedPage).toHaveBeenCalledOnce();
-    expect(extractJobsFromPage).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(createResumeDraft).toHaveBeenCalledTimes(2));
+    expect(browserRuntime.runAgentDiscovery).toHaveBeenCalledOnce();
   });
   it.each(["light", "tailored", "aggressive"] as const)(
     "%s writes a fresh replica draft without turning listing customers into skills",
@@ -262,34 +296,11 @@ describe("resumes on the store", () => {
       expect(skills).not.toContain("Cedar Shipping");
     },
   );
-  it("reads a long card once before writing, then reuses the saved complete posting", async () => {
-    const seed = createSeed();
+  it("reads a partial card's posting before writing, then reuses it", async () => {
     const body =
       "Actual complete requirements, including accessibility and design systems.";
-    const read = vi.fn(() =>
-      Promise.resolve([
-        {
-          ...seed.savedJobs[0]!,
-          title: found(2).title,
-          company: found(2).company,
-          description: body,
-        },
-      ]),
-    );
-    const fetchListingHtml = vi.fn((url: string) =>
-      Promise.resolve({
-        html: "<main>The complete posting</main>",
-        status: 200,
-        finalUrl: url,
-      }),
-    );
-    const { store, service } = setup({
-      aiClient: {
-        ...createDeterministicJobFinderAiClient(),
-        extractJobsFromPage: read,
-      },
-      fetchListingHtml,
-    });
+    const browserRuntime = browserReads({ description: body });
+    const { store, service } = setup({ browserRuntime });
     const [id] = store.saveFoundJobs({
       searchId: null,
       jobs: [{ ...found(2), facts: { fullListingRead: false } }],
@@ -301,21 +312,18 @@ describe("resumes on the store", () => {
     expect(store.getJob(id!)?.facts.fullListingRead).toBe(true);
     service.rewrite(id!);
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(fetchListingHtml).toHaveBeenCalledTimes(1);
-    expect(read).toHaveBeenCalledTimes(1);
+    expect(browserRuntime.runAgentDiscovery).toHaveBeenCalledOnce();
   });
 
   it("writes from the saved card when its posting cannot be read", async () => {
-    const fetchListingHtml = vi.fn(() =>
-      Promise.reject(new Error("Posting unavailable")),
-    );
+    const browserRuntime = browserReads(new Error("Posting unavailable"));
     const base = createDeterministicJobFinderAiClient();
     const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
       base.createResumeDraft(input),
     );
     const { store, service } = setup({
       aiClient: { ...base, createResumeDraft: write },
-      fetchListingHtml,
+      browserRuntime,
     });
     const [id] = store.saveFoundJobs({
       searchId: null,
@@ -323,7 +331,7 @@ describe("resumes on the store", () => {
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(fetchListingHtml).toHaveBeenCalledOnce();
+    expect(browserRuntime.runAgentDiscovery).toHaveBeenCalledOnce();
     expect(write.mock.calls[0]?.[0].job.description).toBe(
       found(2).description.trim(),
     );
@@ -333,16 +341,14 @@ describe("resumes on the store", () => {
 
   it("writes from a saved posting body without reading the site again", async () => {
     // Teambase: a URL add stored the rendered body but no read flag.
-    const fetchListingHtml = vi.fn(() =>
-      Promise.reject(new Error("must not be read")),
-    );
+    const browserRuntime = browserReads(new Error("must not be read"));
     const base = createDeterministicJobFinderAiClient();
     const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
       base.createResumeDraft(input),
     );
     const { store, service } = setup({
       aiClient: { ...base, createResumeDraft: write },
-      fetchListingHtml,
+      browserRuntime,
     });
     const [id] = store.saveFoundJobs({
       searchId: null,
@@ -350,76 +356,22 @@ describe("resumes on the store", () => {
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(fetchListingHtml).not.toHaveBeenCalled();
+    expect(browserRuntime.runAgentDiscovery).not.toHaveBeenCalled();
     expect(write.mock.calls[0]?.[0].job.description).toBe(
       found(2).description.trim(),
     );
     expect(write.mock.calls[0]?.[0].job.detailQuality).toBe("detail_enriched");
   });
 
-  it("reads the posting of a record whose saved text is only its title", async () => {
-    // TeamSystem: a results card stored the title as its description and
-    // was marked as read.
-    const seed = createSeed();
-    const body =
-      "Lead the DevOps team: Kubernetes, Terraform, AWS, CI/CD pipelines and on-call ownership.";
-    const read = vi.fn(() =>
-      Promise.resolve([
-        {
-          ...seed.savedJobs[0]!,
-          title: found(2).title,
-          company: found(2).company,
-          description: body,
-        },
-      ]),
-    );
-    const fetchListingHtml = vi.fn((url: string) =>
-      Promise.resolve({
-        html: "<main>Posting</main>",
-        status: 200,
-        finalUrl: url,
-      }),
-    );
-    const base = createDeterministicJobFinderAiClient();
-    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
-      base.createResumeDraft(input),
-    );
-    const { store, service } = setup({
-      aiClient: {
-        ...base,
-        extractJobsFromPage: read,
-        createResumeDraft: write,
-      },
-      fetchListingHtml,
-    });
-    const [id] = store.saveFoundJobs({
-      searchId: null,
-      jobs: [
-        {
-          ...found(2),
-          description: found(2).title,
-          facts: { fullListingRead: true },
-        },
-      ],
-    }).added;
-    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
-    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
-    expect(fetchListingHtml).toHaveBeenCalledOnce();
-    expect(write.mock.calls[0]?.[0].job.description).toBe(body);
-    expect(store.getJob(id!)?.description).toBe(body);
-  });
-
   it("keeps a title-only job retryable when its posting cannot be read", async () => {
-    const fetchListingHtml = vi.fn(() =>
-      Promise.reject(new Error("Posting unavailable")),
-    );
+    const browserRuntime = browserReads(null, null);
     const base = createDeterministicJobFinderAiClient();
     const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
       base.createResumeDraft(input),
     );
     const { store, service } = setup({
       aiClient: { ...base, createResumeDraft: write },
-      fetchListingHtml,
+      browserRuntime,
     });
     const [id] = store.saveFoundJobs({
       searchId: null,
@@ -427,9 +379,43 @@ describe("resumes on the store", () => {
     }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
+    expect(service.get(id!).resume?.error).toContain(
+      "The vacancy page did not show its text.",
+    );
     expect(write).not.toHaveBeenCalled();
     service.rewrite(id!);
-    await waitFor(() => expect(fetchListingHtml).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(browserRuntime.runAgentDiscovery).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  it("does not write a resume toward a different role the read landed on", async () => {
+    const browserRuntime = browserReads({
+      title: "Intern Operations Planner",
+      description: "Support the planning team as an intern.",
+    });
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: { ...base, createResumeDraft: write },
+      browserRuntime,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [
+        {
+          ...found(2),
+          title: "Lead Operations Planner",
+          description: "Lead Operations Planner",
+          facts: {},
+        },
+      ],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("reads and paginates the whole Shortlisted screen, with approved as a subset", () => {

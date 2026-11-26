@@ -31,6 +31,7 @@ import {
   type JobPosting,
 } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
+import { readListingInBrowser } from "../internal/browser-listing-read";
 import { coalesceScreening } from "./coalesce-screening";
 
 interface SearchInput {
@@ -437,17 +438,7 @@ export function createListingSearchEngine(deps: {
       const result: ReadListingResult = { jobs: [], failures: [] };
       for (const card of input.cards) {
         input.signal.throwIfAborted();
-        if (!deps.browserRuntime.runAgentDiscovery) {
-          result.failures.push({
-            url: card.url,
-            reason: "Browser navigation is unavailable.",
-          });
-          continue;
-        }
         try {
-          const browserPermissions = context.readBrowserPermissions
-            ? await context.readBrowserPermissions()
-            : context.browserPermissions;
           const discovery = await withTraceScope(
             {
               sourceId: card.sourceId,
@@ -455,46 +446,23 @@ export function createListingSearchEngine(deps: {
               listingUrl: card.url,
             },
             () =>
-              deps.browserRuntime.runAgentDiscovery!("target_site", {
-                ...(browserPermissions ? { browserPermissions } : {}),
-                ...(context.readBrowserPermissions
-                  ? { readBrowserPermissions: context.readBrowserPermissions }
-                  : {}),
-                ...(context.readIntendedAccountEmail
-                  ? {
-                      readIntendedAccountEmail:
-                        context.readIntendedAccountEmail,
-                    }
-                  : {}),
-                dedicatedPage: true,
-                requestedListing: {
-                  url: card.url,
-                  title: card.title,
-                  text: card.text,
+              readListingInBrowser(
+                {
+                  browserRuntime: deps.browserRuntime,
+                  aiClient: deps.aiClient,
                 },
-                retainAllFound: true,
-                userProfile: context.profile,
-                searchPreferences: toJobSearchGoals(context.searchPreferences),
-                startingUrls: [card.url],
-                searchRequest: {
-                  intent:
-                    "Read this supplied vacancy in full and keep its complete text. This is a listing read, not a fit decision; do not reject it for preferences or expected fit.",
-                  breadth: "wide",
-                  freshness: "any",
-                  sourceIds: [card.sourceId],
+                {
+                  listing: {
+                    url: card.url,
+                    title: card.title,
+                    text: card.text,
+                  },
+                  sourceId: card.sourceId,
+                  sourceLabel: card.sourceLabel,
+                  context,
+                  signal: input.signal,
                 },
-                navigationHostnames: [new URL(card.url).hostname],
-                siteLabel: card.sourceLabel,
-                siteInstructions: [
-                  "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
-                  "If the supplied URL is actually an index, collect its vacancy cards under their own URLs using extract_jobs or save_jobs_from_data and follow pagination. An index is not a vacancy; do not ask the person for links already on it.",
-                  "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
-                ],
-                targetJobCount: 1,
-                maxSteps: Number.MAX_SAFE_INTEGER,
-                signal: input.signal,
-                aiClient: deps.aiClient,
-              }),
+              ),
           );
           for (const job of discovery.jobs)
             result.jobs.push({

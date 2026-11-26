@@ -94,6 +94,7 @@ import {
   writeResume,
 } from "../resumes/write-resume";
 import { createResumeListingReader } from "../resumes/read-resume-listing";
+import { createBrowserPostingReader } from "../internal/browser-listing-read";
 import {
   applicationAnswerDependencies,
   applicationAnswersUnchanged,
@@ -433,14 +434,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       resume.draft?.writerVersion !== RESUME_WRITER_VERSION
     ) {
       job = await createResumeListingReader({
-        aiClient: deps.aiClient,
         resumes,
-        ...(browser.readRenderedPage
-          ? {
-              readRenderedPage: (url, options) =>
-                browser.readRenderedPage!(url, options),
-            }
-          : {}),
+        readPosting: createBrowserPostingReader({
+          browserRuntime: browser,
+          aiClient: deps.aiClient,
+          readInputs: () => deps.readInputs(),
+        }),
       })(job, signal);
       const draft = await writeResume(deps, {
         profile,
