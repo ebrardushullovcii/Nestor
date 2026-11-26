@@ -17,7 +17,6 @@ import type { BrowserSessionState } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import type { ApplicationService } from "@nestor/job-finder/applications";
 import {
-  createDefaultListingHtmlFetcher,
   createJobSearchRunner,
   createListingSearchEngine,
   createProfileService,
@@ -77,10 +76,6 @@ import {
 } from "./reset-workspace";
 import { getCandidateAssetLibrary } from "./candidate-asset-library-instance";
 import { currentSpeedLimits } from "./speed-level";
-import {
-  createSessionListingHtmlFetcher,
-  withBrowserSignInRetry,
-} from "./listing-html-with-browser-session";
 
 const deterministicTestTimestamp = "2026-03-20T10:00:00.000Z";
 
@@ -502,26 +497,12 @@ async function createJobFinderRuntime(
   void documentManager.pruneGeneratedResumeFiles?.();
 
   installDiscoveryFeedWorkers();
-  // Listing bodies are read over plain HTTP from the main process; the
-  // package only reads when a host hands it a reader, so tests stay offline.
-  // A source the person signed in to in the Job Finder browser is read
-  // again with that sign-in when the plain read meets its sign-in page.
-  const fetchListingHtml = withBrowserSignInRetry(
-    createDefaultListingHtmlFetcher(),
-    usesEmbeddedBrowser
-      ? createSessionListingHtmlFetcher(() => getEmbeddedBrowser().getSession())
-      : null,
-  );
+  // A posting a job lacks is read by the model in this browser, with its
+  // sign-ins, the way search reads the listings it keeps.
   startResumeService({
     aiClient,
     documentManager,
-    fetchListingHtml,
-    ...(browserRuntime.readRenderedPage
-      ? {
-          readRenderedPage: (url: string, options: { signal?: AbortSignal }) =>
-            browserRuntime.readRenderedPage!(url, options),
-        }
-      : {}),
+    browserRuntime,
     repository,
   });
   const applicationService = await startApplicationService({

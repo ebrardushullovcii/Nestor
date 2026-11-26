@@ -956,8 +956,6 @@ export async function createAssistantLaneWorld(
       searchPreferences: await repository.getSearchPreferences(),
       settings: await repository.getSettings(),
     }),
-    fetchListingHtml: () =>
-      Promise.reject(new Error("No network in the assistant lane.")),
   });
   resumes.start();
   const ports = recordingPorts(

@@ -22,10 +22,8 @@ import {
   type ResumeStore,
 } from "@nestor/db/job-store";
 
-import {
-  type ListingHtmlFetcher,
-  type RenderedListingPageReader,
-} from "../internal/listing-detail-enrichment";
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
+import { createBrowserPostingReader } from "../internal/browser-listing-read";
 import { normalizeResumeDraftEntryOrdering } from "../internal/resume-entry-ordering";
 import { buildResumeRenderDocument } from "../internal/resume-workspace-helpers";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
@@ -74,8 +72,8 @@ export interface ResumeServiceDeps extends ResumeWriterDeps {
     Pick<JobFinderDocumentManager, "renderResumePreview">;
   /** The person's profile and settings, read fresh for each write. */
   readInputs(): Promise<ResumeWriterInputs>;
-  fetchListingHtml?: ListingHtmlFetcher;
-  readRenderedPage?: RenderedListingPageReader;
+  /** Nestor's browser, where the model reads a posting the job lacks. */
+  browserRuntime?: Pick<BrowserSessionRuntime, "runAgentDiscovery">;
 }
 
 export type ResumeView = ResumeCommandOutputs["get_resume"];
@@ -96,7 +94,18 @@ export function createResumeService(deps: ResumeServiceDeps) {
   });
   const running = new Map<number, AbortController>();
   const scheduled = new Map<number, ReturnType<typeof setTimeout>>();
-  const withListing = createResumeListingReader({ ...deps, resumes });
+  const withListing = createResumeListingReader({
+    resumes,
+    ...(deps.browserRuntime
+      ? {
+          readPosting: createBrowserPostingReader({
+            browserRuntime: deps.browserRuntime,
+            aiClient: deps.aiClient,
+            readInputs: () => deps.readInputs(),
+          }),
+        }
+      : {}),
+  });
   let stopped = true;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribe: (() => void) | null = null;

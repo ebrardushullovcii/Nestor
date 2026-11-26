@@ -8,6 +8,8 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/remote-search/apply/1` exercises City and Degree comboboxes fetched from a delayed local endpoint. Clearing exposes no inventory. "Cloud Harbour" needs a shorter query to reveal "Cloud Harbor"; "BSc Computer Science" needs "BSc" to reveal "Bachelor's Degree". Only clicking an offered row commits an answer; blur clears uncommitted searches.
 
+`http://127.0.0.1:47950/rendered-postings/workable/j/1/` and `/rendered-postings/workday/job/1` are postings in Workable's and Workday's shape: the served HTML is the page title and an empty app root, and the site's script renders the posting from a local endpoint that answers 1.5 seconds later. `/rendered-postings/board/jobs/view/1` is a board card for the Workday posting with no description, only "Apply on company website".
+
 `http://127.0.0.1:47950/greenhouse/` exercises resume attachments and a drop zone, optional cover-letter upload, custom questions, radio buttons and optional EEO selects.
 
 `http://127.0.0.1:47950/workday/` exercises application choices, account creation and sign-in, four steps, repeatable work experience, a simulated autofill spinner, review and required terms. Use made-up credentials; accounts and saved steps live only in server memory. Restarting clears them. Saved steps do not restore after a page reload.

@@ -1,10 +1,15 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type { JobPosting } from "@nestor/contracts";
-import type { RenderedListingPageReader } from "./internal/listing-detail-enrichment";
 import {
   listingPageLinks,
   listingPageText,
 } from "@nestor/browser-agent/listing-detail-extraction";
+
+/** The page read again in its own browser tab. */
+export type RenderedListingPageReader = (
+  url: string,
+  options: { signal?: AbortSignal },
+) => Promise<{ html: string; finalUrl: string; visibleText?: string }>;
 
 /**
  * Reads the one job listing on a page the person has open in the app's

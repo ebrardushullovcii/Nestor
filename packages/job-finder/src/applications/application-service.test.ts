@@ -7,6 +7,7 @@ import {
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
   CandidateProfileSchema,
+  DiscoveryRunResultSchema,
   ResumeDraftSectionSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SourceInstructionArtifactSchema,
@@ -3674,6 +3675,69 @@ it.each(["light", "tailored", "aggressive"] as const)(
     expect(f.onError).not.toHaveBeenCalled();
   },
 );
+
+it("a legacy rewrite of a title-only job reads its posting in Nestor's browser first", async () => {
+  const f = await setup(1, undefined, {
+    draft: { level: "aggressive", approve: true },
+  });
+  const id = f.ids[0]!;
+  const legacy = f.resumes.get(id)!;
+  f.jobs
+    .sql("UPDATE resumes SET draft_json=? WHERE job_id=?")
+    .run(JSON.stringify({ ...legacy.draft, writerVersion: undefined }), id);
+  f.jobs
+    .sql("UPDATE job_details SET description=?, facts_json=? WHERE job_id=?")
+    .run("Engineer 0", JSON.stringify({ fullListingRead: true }), id);
+  const body =
+    "Build the replica's Workday integration in TypeScript and own its release pipeline.";
+  const runAgentDiscovery = vi.fn(
+    (_source: string, options: { requestedListing?: { url: string } }) =>
+      Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: "2026-11-07T03:47:11.000Z",
+          completedAt: "2026-11-07T03:47:40.000Z",
+          querySummary: "Requested listing",
+          warning: null,
+          jobs: [
+            {
+              ...f.seed.savedJobs[0]!,
+              canonicalUrl: options.requestedListing!.url,
+              title: "Engineer 0",
+              description: body,
+              listingDetailFetch: {
+                attemptedAt: "2026-11-07T03:47:40.000Z",
+                outcome: "enriched",
+                method: "page_text",
+                detail: "Read this listing page in full.",
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  Object.assign(f.browser, { runAgentDiscovery });
+  const base = createDeterministicJobFinderAiClient();
+  const createResumeDraft = vi.fn(
+    (input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+  );
+  f.deps.aiClient = { ...base, createResumeDraft };
+  f.deps.documentManager.listResumeTemplates = () => [];
+  f.applications.applyJobs(
+    { selection: { ids: [id] } },
+    "confirm_before_submit",
+  );
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(runAgentDiscovery).toHaveBeenCalledOnce();
+  expect(runAgentDiscovery.mock.calls[0]?.[1].requestedListing?.url).toBe(
+    "https://replica.test/jobs/0",
+  );
+  expect(createResumeDraft.mock.calls[0]?.[0].job.description).toBe(body);
+  expect(f.jobs.getJob(id)?.description).toBe(body);
+  f.releases[0]?.();
+});
 
 it("a failed legacy rewrite reports our error and never opens the browser with the old file", async () => {
   const f = await setup(1, undefined, {

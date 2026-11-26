@@ -1,17 +1,27 @@
-import type { JobFinderAiClient } from "@nestor/ai-providers";
 import type { JobDetail } from "@nestor/contracts";
 import type { ResumeStore } from "@nestor/db/job-store";
-import {
-  createDefaultListingHtmlFetcher,
-  createModelListingPageReader,
-  readListingDetail,
-  namesDifferentRole,
-  type ListingHtmlFetcher,
-  type RenderedListingPageReader,
-} from "../internal/listing-detail-enrichment";
+import type { PostingReader } from "../internal/browser-listing-read";
+import { normalizeText } from "../internal/shared";
 
 const words = (value: string) =>
   value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+
+/**
+ * The listing page names another role, not the same role worded differently.
+ * One title containing the other ("Data Analyst (m/w/d)", "Designer, Growth")
+ * is the same role; a different level or mostly different words is not.
+ */
+export function namesDifferentRole(saved: string, observed: string): boolean {
+  const left = normalizeText(saved);
+  const right = normalizeText(observed);
+  if (!left || !right || left.includes(right) || right.includes(left)) {
+    return false;
+  }
+  const leftWords = left.split(" ");
+  const rightWords = new Set(right.split(" "));
+  const shared = new Set(leftWords.filter((word) => rightWords.has(word)));
+  return shared.size / Math.min(leftWords.length, rightWords.size) < 0.75;
+}
 
 /**
  * Whether saved text says anything beyond the posting's own heading: its
@@ -28,17 +38,14 @@ export function hasPostingText(
 /**
  * Queued writing and a retired draft on Apply both write from the posting.
  * Saved posting text is used as it is. Only a job whose saved text is its
- * heading alone, or a card marked as partial, has its posting read first.
+ * heading alone, or a card marked as partial, has its posting read first, by
+ * the model in Nestor's browser, the way search reads the listings it keeps.
  */
 export function createResumeListingReader(deps: {
-  aiClient: JobFinderAiClient;
   resumes: Pick<ResumeStore, "saveListing">;
-  fetchListingHtml?: ListingHtmlFetcher;
-  readRenderedPage?: RenderedListingPageReader;
+  readPosting?: PostingReader;
 }) {
   const resumes = deps.resumes;
-  const fetchHtml = deps.fetchListingHtml ?? createDefaultListingHtmlFetcher();
-  const readPage = createModelListingPageReader(deps.aiClient);
   return async function withListing(job: JobDetail, signal: AbortSignal) {
     const saved = hasPostingText(job, job.description);
     if (saved && job.facts.fullListingRead !== false) return job;
@@ -54,49 +61,38 @@ export function createResumeListingReader(deps: {
   };
 
   async function readListing(job: JobDetail, signal: AbortSignal) {
-    const page = await fetchHtml(job.url, {
-      signal,
-    });
+    if (!deps.readPosting) throw new Error("Browser reading is unavailable.");
+    const posting = await deps.readPosting(job, signal);
     signal.throwIfAborted();
-    if (page.status >= 400)
-      throw new Error(
-        `The full listing could not be read (HTTP ${page.status}). Try writing the resume again when the posting is available.`,
-      );
-    const detail =
-      (await readListingDetail({
-        html: page.html,
-        url: page.finalUrl,
-        expectedTitle: job.title,
-        readPage,
-        ...(deps.readRenderedPage
-          ? { readRenderedPage: deps.readRenderedPage }
-          : {}),
-        signal,
-      })) ?? null;
-    if (
-      !detail ||
-      detail.descriptionLikelyTruncated ||
-      !hasPostingText(job, detail.description)
-    ) {
+    if (!hasPostingText(job, posting.description)) {
       throw new Error(
         "The full listing could not be read. Try writing the resume again when the posting is available.",
       );
     }
-    if (detail.title && namesDifferentRole(job.title, detail.title))
+    if (posting.title && namesDifferentRole(job.title, posting.title))
       throw new Error(
         "The listing opened a different role. Check the job link before writing its resume.",
       );
+    const fromPosting = (value: string[], fallback: string[]) =>
+      value.length > 0 ? value : fallback;
     const facts = {
       ...job.facts,
       fullListingRead: true,
-      keySkills: detail.keySkills ?? job.facts.keySkills,
-      responsibilities: detail.responsibilities ?? job.facts.responsibilities,
-      minimumQualifications:
-        detail.minimumQualifications ?? job.facts.minimumQualifications,
-      preferredQualifications:
-        detail.preferredQualifications ?? job.facts.preferredQualifications,
+      keySkills: fromPosting(posting.keySkills, job.facts.keySkills),
+      responsibilities: fromPosting(
+        posting.responsibilities,
+        job.facts.responsibilities,
+      ),
+      minimumQualifications: fromPosting(
+        posting.minimumQualifications,
+        job.facts.minimumQualifications,
+      ),
+      preferredQualifications: fromPosting(
+        posting.preferredQualifications,
+        job.facts.preferredQualifications,
+      ),
     };
-    resumes.saveListing(job.id, detail.description, facts);
-    return { ...job, description: detail.description, facts };
+    resumes.saveListing(job.id, posting.description, facts);
+    return { ...job, description: posting.description, facts };
   }
 }

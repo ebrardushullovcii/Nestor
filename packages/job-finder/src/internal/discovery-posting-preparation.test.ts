@@ -17,7 +17,6 @@ import {
   prepareBodySalaryRange,
 } from "./discovery-posting-preparation";
 import { enrichDiscoveredPosting, mergeDiscoveredPostings } from "./matching";
-import { applyListingDetailToJob } from "./listing-detail-enrichment";
 import {
   createDiscoveryListingFingerprints,
   createDiscoveryProvenance,
@@ -215,37 +214,11 @@ const paths = {
     );
     return result.newJobs[0] ?? result.mergedJobs[0]!;
   },
-  listing: async (job: SavedJob) =>
-    (
-      await applyListingDetailToJob({
-        job,
-        attemptedAt: "2026-10-24T00:00:00.000Z",
-        assess: () => job.matchAssessment,
-        detail: {
-          method: "page_text",
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          description: job.description,
-          salaryText: job.salaryText,
-          employmentType: job.employmentType,
-          postedAt: job.postedAt,
-          validThrough: null,
-          workModeHints: job.workMode,
-          directApplyUrl: job.applicationUrl,
-          keySkills: job.keySkills,
-          responsibilities: job.responsibilities,
-          minimumQualifications: job.minimumQualifications,
-          preferredQualifications: job.preferredQualifications,
-          seniority: job.seniority,
-        },
-      })
-    ).job,
 };
 
 for (const [path, apply] of Object.entries(paths))
   for (const [field, mutate] of Object.entries(mutations)) {
-    test(`${path} prepares changed ${field} facts`, async () => {
+    test(`${path} prepares changed ${field} facts`, () => {
       const original = preparedJob();
       const changed = { ...original };
       mutate(changed);
@@ -254,8 +227,8 @@ for (const [path, apply] of Object.entries(paths))
       if (field !== "canonicalUrl")
         expect(readPreparedDiscoveryFingerprints(changed)).toBeNull();
       const fresh = structuredClone(changed);
-      const actual = await apply(changed);
-      const control = await apply(fresh);
+      const actual = apply(changed);
+      const control = apply(fresh);
       expect(readDiscoveryPreparation(actual)).toBeDefined();
       expect(readPreparedDiscoveryFingerprints(actual)).not.toBeNull();
       expect(createDiscoveryListingFingerprints(actual)).toEqual(
