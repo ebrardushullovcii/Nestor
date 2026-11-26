@@ -272,6 +272,29 @@ test.each([
   "confirm_before_submit",
   "autonomous_submit",
 ] as const)(
+  "%s is told a source answer is this posting's and an unknown personal fact stays empty",
+  (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    const prompt = createApplySystemPrompt(input);
+    expect(prompt).toContain(
+      "A saved answer belongs to the question and employer it was saved for",
+    );
+    expect(prompt).toContain(
+      "answer from listingDiscovery, the job board or site where Nestor found it",
+    );
+    expect(prompt).toContain("never a source saved for another employer");
+    expect(prompt).toContain(
+      "Leave an optional field you have no fact for empty",
+    );
+  },
+);
+
+test.each([
+  "prepare_only",
+  "confirm_before_submit",
+  "autonomous_submit",
+] as const)(
   "%s receives mailbox facts, required agreement instructions and the vault account tool",
   async (mode) => {
     const input = config(page());

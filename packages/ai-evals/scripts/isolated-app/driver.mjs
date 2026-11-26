@@ -28,6 +28,7 @@ import {
   startTime,
   stateDir,
   step,
+  stepText,
   writeState,
 } from "./common.mjs";
 import { rows, saveRows, tables } from "./sqlite.mjs";
@@ -74,6 +75,40 @@ let app = null;
 let sites = null;
 let generation = 0;
 let applicationKey = process.env.NESTOR_TRACE_APPLICATION_KEY || null;
+let startedBy = "up";
+
+// Commands that only look at the app. Every other command acts on it, and the
+// run trace records it as an operator action so a pack shows what the operator
+// did and when (restarts, clicks on the app's own controls, Needs you answers,
+// scripts). Recording never changes what the app or the model does.
+const LOOKS = new Set([
+  "status",
+  "see",
+  "shot",
+  "wait",
+  "browser",
+  "identity",
+  "bind",
+  "operator",
+]);
+const targetOf = (args) =>
+  args.some((a) => a && typeof a === "object" && a.page === "browser")
+    ? "browser"
+    : "app";
+function recordOperator(command, args, detail, started, error, from) {
+  record("operator_action", {
+    applicationKey,
+    source: "driver",
+    from,
+    command,
+    target: ["eval", "run"].includes(command) ? "script" : targetOf(args),
+    detail: stepText(detail),
+    startedAt: new Date(started).toISOString(),
+    durationMs: Date.now() - started,
+    outcome: error ? "failed" : "ok",
+    ...(error ? { error: String(error.message ?? error).split("\n")[0] } : {}),
+  });
+}
 
 function update(values) {
   writeState({ ...readState(), ...values });
@@ -203,6 +238,8 @@ async function startApp() {
     liveApplyAuthorized: process.env.NESTOR_LIVE_APPLY_AUTHORIZED === "1",
     testApi: launch.testApi,
     applicationKey,
+    // An app launch inside a run is an interruption: `up` or `drive restart`.
+    appStart: { generation: generation + 1, by: startedBy },
   });
   generation += 1;
   let lastError;
@@ -656,22 +693,12 @@ async function find(
 }
 
 async function click(text, opts = {}) {
-  if (opts.page === "browser")
-    record("operator_action", {
-      applicationKey,
-      source: "driver browser click",
-    });
   const { locator, count } = await find(text, opts);
   await locator.click({ timeout: opts.timeout ?? 10000 });
   return count > 1 ? `clicked the first of ${count} matches` : "clicked";
 }
 
 async function fill(label, value, opts = {}) {
-  if (opts.page === "browser")
-    record("operator_action", {
-      applicationKey,
-      source: "driver browser fill",
-    });
   const page = await pageFor(opts);
   const name = toName(label);
   const tries = [
@@ -711,14 +738,26 @@ const logged =
   (name, fn) =>
   async (...args) => {
     const started = Date.now();
+    const acted = (error) =>
+      LOOKS.has(name) ||
+      recordOperator(
+        name,
+        args,
+        `${name} ${show(args)}`,
+        started,
+        error,
+        "journey",
+      );
     try {
       const result = await fn(...args);
       step(`  ${name} ${show(args)}  ok ${Date.now() - started}ms`);
+      acted();
       return result;
     } catch (error) {
       step(
         `  ${name} ${show(args)}  FAILED ${Date.now() - started}ms: ${String(error.message).split("\n")[0]}`,
       );
+      acted(error);
       throw error;
     }
   };
@@ -879,6 +918,7 @@ const commands = {
       throw new Error(
         `App processes survived the stop: ${survivors.join(", ")}`,
       );
+    startedBy = "restart";
     await startApp();
     return "restarted with the same data";
   },
@@ -915,9 +955,10 @@ const token = randomBytes(16).toString("hex");
 let queue = Promise.resolve();
 let stopping = false;
 
-async function shutdown(code = 0) {
+async function shutdown(code = 0, why = "signal") {
   if (stopping) return;
   stopping = true;
+  const started = Date.now();
   const survivors = await stopApp().catch((error) => {
     update({
       cleanupError: "Owned app cleanup failed; state retained for down.",
@@ -929,6 +970,7 @@ async function shutdown(code = 0) {
     await sleep(300);
   }
   update({ driverStopped: new Date().toISOString(), survivors });
+  recordOperator("stop", [], `stop (${why})`, started, null, "driver");
   step(
     `driver stopped${survivors.length ? `; survivors ${survivors.join(", ")}` : ""}`,
   );
@@ -947,7 +989,7 @@ const server = http.createServer(async (req, res) => {
   const { cmd, args = [] } = JSON.parse(body || "{}");
   if (cmd === "stop") {
     res.end(JSON.stringify({ ok: true, result: "stopping" }));
-    return shutdown();
+    return shutdown(0, "down");
   }
   const run = async () => {
     const started = Date.now();
@@ -966,12 +1008,16 @@ const server = http.createServer(async (req, res) => {
           "The app is not running. Run `drive restart` or `down` then `up`.",
         );
       const result = await commands[cmd](...args);
+      if (!LOOKS.has(cmd))
+        recordOperator(cmd, args, `${cmd} ${shown}`, started, null, "drive");
       if (cmd !== "status" && cmd !== "see")
         step(
           `${cmd} ${shown}  ok ${Date.now() - started}ms  [${await heading()}]`,
         );
       return { ok: true, result };
     } catch (error) {
+      if (commands[cmd] && !LOOKS.has(cmd))
+        recordOperator(cmd, args, `${cmd} ${shown}`, started, error, "drive");
       const failure = await failureShot(cmd);
       step(
         `${cmd} ${shown}  FAILED ${Date.now() - started}ms: ${String(error.message).split("\n")[0]}`,
@@ -1057,5 +1103,5 @@ try {
 } catch (error) {
   update({ startError: String(error.stack ?? error) });
   step(`up  FAILED: ${String(error.message).split("\n")[0]}`);
-  await shutdown(1);
+  await shutdown(1, "startup failed");
 }
