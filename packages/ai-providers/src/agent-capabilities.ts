@@ -1148,10 +1148,10 @@ export async function runResumeGenerationAgentTask(input: {
         }),
       }),
     ...(input.request.signal ? { signal: input.request.signal } : {}),
-    // A clean proposal still finishes immediately. Let useful repairs finish.
-
-    // workingProposal above is the proposal; the replayed call is a note.
-    draftShownInContext: true,
+    // A proposal that fits still finishes immediately. Earlier proposals stay
+    // in the history as the writer sent them: replaced by a placeholder note,
+    // the writer concluded its proposals were never sent and kept resending
+    // the same length instead of cutting from workingProposal.
   });
 
   // A stopped agent task is not model output. Keep the last draft that
