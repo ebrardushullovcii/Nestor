@@ -140,6 +140,7 @@ function pickerLocator(
             .fn()
             .mockResolvedValueOnce(true)
             .mockImplementation(evaluate),
+          selectOption,
           dispose: () => Promise.resolve(),
         },
       ]),
@@ -212,9 +213,9 @@ test.each(["state", "connection"])(
       evaluate.mockResolvedValue("Wanted");
       return Promise.resolve();
     });
-    const listeners = new Map<string, () => void>();
+    const listeners = new Map<string, (event?: unknown) => void>();
     const page = {
-      on: (name: string, listener: () => void) => {
+      on: (name: string, listener: (event?: unknown) => void) => {
         listeners.set(name, listener);
       },
       off: (name: string) => listeners.delete(name),
@@ -222,7 +223,8 @@ test.each(["state", "connection"])(
     const pending = choosePageOption(page, input, "Wanted");
     for (let i = 0; i < 3; i++) {
       await vi.advanceTimersByTimeAsync(4_000);
-      if (kind === "connection") listeners.get("response")?.();
+      if (kind === "connection")
+        listeners.get("response")?.({ request: () => ({ frame: () => null }) });
     }
     expect(selected).not.toHaveBeenCalled();
     evaluate.mockResolvedValue({
@@ -232,6 +234,6 @@ test.each(["state", "connection"])(
     });
     await vi.advanceTimersByTimeAsync(500);
     expect(await pending).toMatchObject({ ok: true, observedValue: "Wanted" });
-    expect(selected).toHaveBeenCalledWith({ index: 0 }, { timeout: 0 });
+    expect(selected).toHaveBeenCalledWith({ index: 0 }, { force: true });
   },
 );

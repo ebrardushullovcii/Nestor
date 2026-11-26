@@ -11,6 +11,7 @@ import {
 } from "@nestor/contracts";
 import type { Page } from "playwright";
 import { watchPagePress } from "./page-press-facts";
+import { clickPresent, evaluatePresent } from "./present-control";
 import { readVisibleText } from "./visible-page-text";
 import {
   actionLocator,
@@ -376,18 +377,18 @@ async function readRawApplicationFormSnapshot(
       continue;
     }
     const locator = actionLocator(page, target.ref);
-    const ordinal = await locator
-      ?.evaluate(
-        (element, selector) => {
-          if (window !== window.top) return -1;
-          return Array.from(document.querySelectorAll(selector)).indexOf(
-            element,
-          );
-        },
-        APPLICATION_FINAL_CONTROL_SELECTOR,
-        { timeout: 0 },
-      )
-      .catch(() => -1);
+    const ordinal = locator
+      ? await evaluatePresent(
+          locator,
+          (element, selector) => {
+            if (window !== window.top) return -1;
+            return Array.from(document.querySelectorAll(selector)).indexOf(
+              element,
+            );
+          },
+          APPLICATION_FINAL_CONTROL_SELECTOR,
+        ).catch(() => -1)
+      : undefined;
     if (
       ordinal === undefined ||
       ordinal < 0 ||
@@ -747,10 +748,9 @@ export async function executeExactlyOneFinalAction(
         ).clickElement(control.identity.ref);
         if (!result.ok) throw new Error(result.error);
       } else {
-        await page
-          .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
-          .nth(control.ordinal)
-          .click({ timeout: 0 });
+        await clickPresent(
+          page.locator(APPLICATION_FINAL_CONTROL_SELECTOR).nth(control.ordinal),
+        );
       }
       actionCompleted = true;
     } catch (error) {

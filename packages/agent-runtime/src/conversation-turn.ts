@@ -1,4 +1,4 @@
-import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { traceEvent, traceOurs, withTraceScope } from "@nestor/core/run-trace";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
@@ -11,6 +11,7 @@ import {
   isModelOutputLimit,
 } from "./model-output-error";
 import {
+  DEFAULT_MODEL_IDLE_TIMEOUT_MS,
   ModelTurnTimeoutError,
   runModelTurn,
   type ModelTurnStreamEvent,
@@ -539,6 +540,14 @@ export async function runConversationTurn(
             });
             return result("aborted");
           }
+          if (error instanceof ModelTurnTimeoutError)
+            withTraceScope({ toolCallId: toolCall.id }, () =>
+              traceOurs(
+                "packages/agent-runtime/src/conversation-turn.ts:runConversationTurn/tool",
+                "timed_out",
+                `${toolCall.function.name} stopped reporting progress (idle=${options.ceilings?.toolIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS})`,
+              ),
+            );
           const text =
             error instanceof ModelTurnTimeoutError
               ? "That step stopped reporting progress. Look again before deciding what to do next."

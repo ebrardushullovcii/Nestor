@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -546,6 +549,9 @@ describe("runAgentLoop", () => {
   );
 
   test("a silent tool returns an idle failure to the model and the run carries on", async () => {
+    const traceDir = mkdtempSync(path.join(tmpdir(), "agent-loop-idle-"));
+    const previousTraceDir = process.env.NESTOR_RUN_TRACE_DIR;
+    process.env.NESTOR_RUN_TRACE_DIR = traceDir;
     let calls = 0;
     const hang = tool(
       "read",
@@ -567,8 +573,26 @@ describe("runAgentLoop", () => {
       tools: [hang, finishTool],
       subjectLabel: "the site",
       ceilings: { toolIdleTimeoutMs: 1_000 },
+    }).finally(() => {
+      if (previousTraceDir === undefined)
+        delete process.env.NESTOR_RUN_TRACE_DIR;
+      else process.env.NESTOR_RUN_TRACE_DIR = previousTraceDir;
     });
     expect(result.ending).toBe("finished");
+    // The give-up is ours, and the trace and pack say so for that call.
+    const events = readdirSync(traceDir)
+      .flatMap((file) =>
+        readFileSync(path.join(traceDir, file), "utf8").trim().split("\n"),
+      )
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.filter((event) => event.event === "ours")).toEqual([
+      expect.objectContaining({
+        toolCallId: "call_read_1_0",
+        by: "packages/agent-runtime/src/agent-loop.ts:runAgentLoop/tool",
+        kind: "timed_out",
+        reason: "read stopped reporting progress (idle=1000)",
+      }),
+    ]);
     const gaveUp = result.messages.find(
       (message) =>
         message.role === "tool" &&

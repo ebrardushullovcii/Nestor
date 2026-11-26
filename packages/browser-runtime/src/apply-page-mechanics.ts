@@ -26,6 +26,7 @@ import {
   clickPresent,
   evaluatePresent,
   presentControl,
+  setPresentToggle,
 } from "./present-control";
 import { controlResultState } from "./control-result-state";
 import { replaceFieldText } from "./replace-field-text";
@@ -2377,28 +2378,36 @@ async function pressToggleButton(
   checked: boolean,
 ): Promise<ApplyWriteResult> {
   const pressed = () =>
-    locator.evaluate(
+    evaluatePresent(
+      locator,
       (element) => element.getAttribute("aria-pressed") === "true",
+      undefined,
     );
   try {
     // Only an option button is pressed here, never the form's own buttons:
     // a ref that went stale must not turn Submit into a plain button.
     if (
-      !(await locator.evaluate((element) =>
-        element.hasAttribute("aria-pressed"),
+      !(await evaluatePresent(
+        locator,
+        (element) => element.hasAttribute("aria-pressed"),
+        undefined,
       ))
     )
       return { ok: false, error: "That is not an option button." };
     if ((await pressed()) !== checked) {
-      await locator.evaluate((element) => {
-        if (
-          element instanceof HTMLButtonElement &&
-          element.form &&
-          !element.hasAttribute("type")
-        )
-          element.type = "button";
-      });
-      await locator.click({ timeout: 0 });
+      await evaluatePresent(
+        locator,
+        (element) => {
+          if (
+            element instanceof HTMLButtonElement &&
+            element.form &&
+            !element.hasAttribute("type")
+          )
+            element.type = "button";
+        },
+        undefined,
+      );
+      await clickPresent(locator);
     }
     return (await pressed()) === checked
       ? { ok: true, observedValue: checked ? "pressed" : "not pressed" }
@@ -2537,7 +2546,8 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
       if (!locator)
         return { ok: false, error: `No action named ${ref} on this page.` };
       try {
-        return await locator.evaluate(
+        return await evaluatePresent(
+          locator,
           (element): ApplyWriteResult => {
             if (
               !(element instanceof HTMLElement) ||
@@ -2582,7 +2592,6 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             };
           },
           undefined,
-          { timeout: 0 },
         );
       } catch (error) {
         return {
@@ -2718,55 +2727,7 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         };
       }
       try {
-        // A covered native input used to spend five seconds failing the
-        // pointer check before DOM activation. Detect that geometry up front;
-        // reachable controls still use Playwright's normal pointer events.
-        const activateNative = (coveredOnly: boolean) =>
-          locator
-            .evaluate(
-              (element, input) => {
-                if (
-                  !(element instanceof HTMLInputElement) ||
-                  (element.type !== "checkbox" && element.type !== "radio") ||
-                  element.matches(":disabled")
-                ) {
-                  return false;
-                }
-                if (element.checked === input.checked) return true;
-                if (input.coveredOnly) {
-                  // setChecked scrolls for its pointer action. The hit test
-                  // only needs current geometry, without a separate wait for
-                  // animation-frame stability on a hidden page.
-                  element.scrollIntoView({
-                    block: "center",
-                    inline: "center",
-                    behavior: "instant",
-                  });
-                  const rect = element.getBoundingClientRect();
-                  const root = element.getRootNode();
-                  const hit = (
-                    root instanceof ShadowRoot ? root : document
-                  ).elementFromPoint(
-                    rect.x + rect.width / 2,
-                    rect.y + rect.height / 2,
-                  );
-                  if (hit === element || (hit && element.contains(hit)))
-                    return false;
-                }
-                element.click();
-                return element.checked === input.checked;
-              },
-              { checked, coveredOnly },
-            )
-            .catch(() => false);
-        if (!(await activateNative(true))) {
-          try {
-            await locator.setChecked(checked, { timeout: 0 });
-          } catch (actionabilityError) {
-            // Preserve the fallback if the page changed after the hit test.
-            if (!(await activateNative(false))) throw actionabilityError;
-          }
-        }
+        await setPresentToggle(locator, checked);
         const controlState = await controlResultState(locator);
         return {
           ok: true,

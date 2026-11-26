@@ -150,7 +150,9 @@ export async function attachFile(
       page.on("filechooser", receive);
       try {
         await withNavigationLiveness(page, async () => {
-          await element.click({ timeout: 0 });
+          // The label or button was found shown; a click that waited for it
+          // to stop moving or be uncovered would never end on a still page.
+          await element.click({ timeout: 0, force: true });
           const chooser = await choosing;
           if (
             !(await chooser

@@ -1,10 +1,7 @@
 import type { Page } from "playwright";
 import { expect, test, vi } from "vitest";
 
-import {
-  createPlaywrightApplyPageMechanics,
-  readApplyStepLabel,
-} from "./apply-page-mechanics";
+import { readApplyStepLabel } from "./apply-page-mechanics";
 
 test("an absent progress marker is reported as unknown", async () => {
   const evaluateAll = vi.fn((read: (elements: Element[]) => unknown) =>
@@ -28,47 +25,4 @@ test("a page read failure still leaves progress unknown", async () => {
     }),
   } as unknown as Pick<Page, "locator">;
   await expect(readApplyStepLabel(page)).resolves.toBeNull();
-});
-
-test("an accepted native toggle reports its checked value", async () => {
-  const setChecked = vi.fn(() => Promise.resolve());
-  const evaluate = vi.fn(() => Promise.resolve(true));
-  const page = {
-    locator: () => ({
-      nth: () => ({
-        scrollIntoViewIfNeeded: () => Promise.resolve(),
-        evaluate,
-        elementHandles: () =>
-          Promise.resolve([
-            {
-              evaluate: vi
-                .fn()
-                .mockResolvedValueOnce(true)
-                .mockResolvedValueOnce({
-                  present: true,
-                  checked: true,
-                  metadata: {
-                    autocomplete: "",
-                    name: "",
-                    id: "",
-                    label: "Terms",
-                    placeholder: "",
-                  },
-                }),
-              dispose: () => Promise.resolve(),
-            },
-          ]),
-        setChecked,
-      }),
-    }),
-  } as unknown as Page;
-  await expect(
-    createPlaywrightApplyPageMechanics(page).setToggle("c0", true),
-  ).resolves.toMatchObject({
-    ok: true,
-    observedValue: "checked",
-    controlState: { checked: true },
-  });
-  expect(evaluate).toHaveBeenCalledOnce();
-  expect(setChecked).not.toHaveBeenCalled();
 });

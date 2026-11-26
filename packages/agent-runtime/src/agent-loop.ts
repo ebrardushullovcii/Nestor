@@ -25,6 +25,7 @@ import { createContextParts, isModelInputLimit } from "./context-parts";
  */
 
 import {
+  DEFAULT_MODEL_IDLE_TIMEOUT_MS,
   ModelTurnTimeoutError,
   runModelTurn,
   type ModelTurnStreamEvent,
@@ -705,6 +706,13 @@ export async function runAgentLoop(
           if (error instanceof ToolIdleError) {
             const failure =
               "That step stopped reporting progress and was given up.";
+            withTraceScope({ toolCallId: toolCall.id }, () =>
+              traceOurs(
+                "packages/agent-runtime/src/agent-loop.ts:runAgentLoop/tool",
+                "timed_out",
+                `${toolCall.function.name} stopped reporting progress (idle=${options.ceilings?.toolIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS})`,
+              ),
+            );
             await note(`${toolCall.function.name} → took too long`);
             messages.push({
               role: "tool",
@@ -840,11 +848,17 @@ export async function runAgentLoop(
           options.ceilings?.toolIdleTimeoutMs,
           options.signal,
         );
-      } catch {
+      } catch (error) {
         if (options.signal?.aborted)
           return result(
             "aborted",
             `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
+          );
+        if (error instanceof ToolIdleError)
+          traceOurs(
+            "packages/agent-runtime/src/agent-loop.ts:runAgentLoop/afterToolBatch",
+            "timed_out",
+            `observe_after_batch stopped reporting progress (idle=${options.ceilings?.toolIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS})`,
           );
         observation =
           "The page could not be read after the batch. Observe again before any write.";

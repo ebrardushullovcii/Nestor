@@ -1,7 +1,7 @@
 import { reportSelfLimitHit } from "@nestor/core";
 import type { ApplyWriteResult } from "@nestor/contracts";
 import { describeBrowserError } from "@nestor/contracts";
-import type { Frame, Locator, Page, Request } from "playwright";
+import type { Frame, Locator, Page, Request, Response } from "playwright";
 import { pressableLabel } from "./pressable-label";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 
@@ -64,16 +64,29 @@ export async function choosePageOption(
   watchPageSelfLimits(page);
   let lastNetworkProgress = Date.now();
   const pending = new Set<Request>();
+  // Only the control's own document fetches its choices. Another frame's
+  // traffic, such as a challenge widget that keeps polling, is not the
+  // list loading and would otherwise keep it "busy" without end.
+  let frame: Frame | null = null;
+  const fromControl = (request: Request) => {
+    if (!frame) return true;
+    try {
+      return request.frame() === frame;
+    } catch {
+      return false;
+    }
+  };
   const requestStarted = (request: Request) => {
+    if (!fromControl(request)) return;
     pending.add(request);
     lastNetworkProgress = Date.now();
   };
-  const networkProgress = (request?: Request) => {
-    if (request) pending.delete(request);
+  const networkProgress = (request: Request) => {
+    if (!pending.delete(request) && !fromControl(request)) return;
     lastNetworkProgress = Date.now();
   };
-  const response = () => {
-    lastNetworkProgress = Date.now();
+  const response = (answer: Response) => {
+    if (fromControl(answer.request())) lastNetworkProgress = Date.now();
   };
   const progressAt = () => (pending.size ? Date.now() : lastNetworkProgress);
   page.on?.("request", requestStarted);
@@ -95,6 +108,7 @@ export async function choosePageOption(
       seen.set(normalizeOptionLabel(option), option);
   };
   try {
+    frame = await controlFrame(locator).catch(() => null);
     const native = await evaluatePresent(
       locator,
       (element) => element.tagName === "SELECT",
@@ -107,7 +121,7 @@ export async function choosePageOption(
       const scope = (await controlFrame(locator)) ?? page;
       const list = await boundList(scope, locator);
       const state = list ? await readList(list) : null;
-      const expanded = await locator.getAttribute("aria-expanded");
+      const expanded = await attribute(locator, "aria-expanded");
       if (state)
         report(
           {
@@ -115,7 +129,7 @@ export async function choosePageOption(
             visible: expanded === "false" ? false : state.visible,
             loading:
               state.loading ||
-              (await locator.getAttribute("aria-busy")) === "true",
+              (await attribute(locator, "aria-busy")) === "true",
           },
           complete,
         );
@@ -123,7 +137,7 @@ export async function choosePageOption(
         latest = {
           ...latest,
           visible: expanded === "true",
-          loading: (await locator.getAttribute("aria-busy")) === "true",
+          loading: (await attribute(locator, "aria-busy")) === "true",
         };
     }
     return {
@@ -214,10 +228,17 @@ async function chooseNativeOption(
         !option.disabled && normalizeOptionLabel(option.text) === wanted,
     );
     if (index >= 0 && !state.disabled) {
-      await locator.selectOption({ index }, { timeout: 0 });
-      const chosen = await locator.evaluate(
+      const select = await presentControl(locator);
+      try {
+        await select.selectOption({ index }, { force: true });
+      } finally {
+        await select.dispose();
+      }
+      const chosen = await evaluatePresent(
+        locator,
         (element) =>
           (element as HTMLSelectElement).selectedOptions[0]?.text ?? "",
+        undefined,
       );
       return normalizeOptionLabel(chosen) === wanted
         ? { ok: true, observedValue: chosen.replace(/\s+/gu, " ").trim() }
@@ -362,7 +383,8 @@ export async function readWholeList(
   list: Locator,
   wanted: string,
 ): Promise<{ options: string[]; complete: boolean; found: string | null }> {
-  return list.evaluate(
+  return evaluatePresent(
+    list,
     withOptionReaders(
       async (
         element,
@@ -545,14 +567,23 @@ async function controlFrame(locator: Locator): Promise<Frame | null> {
   return frame;
 }
 
+/** One attribute of the observed control, never a wait for it to reappear. */
+function attribute(locator: Locator, name: string): Promise<string | null> {
+  return evaluatePresent(
+    locator,
+    (element, attribute) => element.getAttribute(attribute),
+    name,
+  );
+}
+
 /** The list this control names as its own, or the only list open beside it. */
 async function boundList(
   scope: Frame | Page,
   locator: Locator,
 ): Promise<Locator | null> {
   const ids = (
-    (await locator.getAttribute("aria-controls")) ??
-    (await locator.getAttribute("aria-owns")) ??
+    (await attribute(locator, "aria-controls")) ??
+    (await attribute(locator, "aria-owns")) ??
     ""
   )
     .trim()
@@ -611,9 +642,11 @@ async function selectRow(
   const selected = (
     await locator.evaluateAll(collectCustomComboboxStates, [0])
   )[0]?.[1];
-  const retained = await locator.evaluate(
+  const retained = await evaluatePresent(
+    locator,
     (element) =>
       (element as HTMLInputElement).value ?? element.textContent ?? "",
+    undefined,
   );
   return { ok: true, observedValue: selected?.selectedOptionLabel || retained };
 }
@@ -651,14 +684,14 @@ async function settle(
       report({
         ...state,
         loading:
-          state.loading || (await locator.getAttribute("aria-busy")) === "true",
+          state.loading || (await attribute(locator, "aria-busy")) === "true",
       });
       const text = state.options.find(
         (option) => normalizeOptionLabel(option) === wanted,
       );
       if (text && state.visible) return { kind: "found", list, text };
       const busy =
-        state.loading || (await locator.getAttribute("aria-busy")) === "true";
+        state.loading || (await attribute(locator, "aria-busy")) === "true";
       const key = JSON.stringify({ state, busy });
       if (key !== lastKey) {
         lastKey = key;
@@ -724,11 +757,13 @@ async function chooseCustomOption(
     normalizeOptionLabel(selected) === normalizeOptionLabel(label)
   )
     return { ok: true, observedValue: selected };
-  const searchable =
-    (await locator.isEditable().catch(() => false)) &&
-    (await locator.evaluate((element) =>
-      element.matches("input, textarea, [contenteditable='true']"),
-    ));
+  const searchable = await evaluatePresent(
+    locator,
+    (element) =>
+      element.matches("input, textarea, [contenteditable='true']") &&
+      !element.matches(":disabled, [readonly], [aria-readonly='true']"),
+    undefined,
+  );
   return chooseFromList(
     page,
     locator,
@@ -752,7 +787,7 @@ async function chooseFromList(
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
   const scope = (await controlFrame(locator)) ?? page;
-  const expanded = await locator.getAttribute("aria-expanded");
+  const expanded = await attribute(locator, "aria-expanded");
   const list = await boundList(scope, locator);
   const open = list ? await readList(list) : null;
   // Selecting an already-open picker must not toggle it closed.
@@ -761,8 +796,16 @@ async function chooseFromList(
   if (searchable) {
     // Replacing identical search text otherwise produces no React change.
     // Clear this element first, without dismissing its list or parent modal.
-    if ((await locator.inputValue({ timeout: 0 })) === label)
-      await replaceFieldText(locator, "");
+    const typed = await evaluatePresent(
+      locator,
+      (element) =>
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+          ? element.value
+          : (element.textContent ?? ""),
+      undefined,
+    );
+    if (typed === label) await replaceFieldText(locator, "");
     await replaceFieldText(locator, label);
   }
   const first = await settle(
