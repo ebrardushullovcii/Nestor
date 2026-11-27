@@ -2532,6 +2532,87 @@ it("a press older than the application's own state is not the person's send", as
   expect(f.applications.listApplications().rows[0]?.state).toBe("ready");
 });
 
+it("a run that fails after the ledger recorded its send shows the send, and a row stored Failed that way heals at start", async () => {
+  const f = await setup(2);
+  const at = new Date().toISOString();
+  const receipt = (row: { id: number; jobId: number; attempt: number }) =>
+    SubmissionOutcomeRecordSchema.parse({
+      id: `receipt_${row.id}`,
+      preflightId: `preflight_${row.id}`,
+      idempotencyKey: `send_${row.id}`,
+      authorityEnvelopeId: "permission",
+      authorityRevision: 1,
+      jobId: String(row.jobId),
+      applicationRecordId: `application_${row.id}`,
+      runId: `application_run_${row.id}`,
+      resultId: `application_${row.id}_attempt_${row.attempt}`,
+      outcome: "submitted",
+      attemptedAt: at,
+      verifiedAt: at,
+      evidence: [
+        {
+          id: "employer",
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: { origin: "https://replica.test", safePath: "/thanks" },
+          artifactRefId: null,
+          summary: "Thank you for your interest.",
+        },
+      ],
+      retry: { eligible: false, blockReason: "submission_confirmed" },
+    });
+  const ledger = new Map<string, ReturnType<typeof receipt>>();
+  vi.mocked(
+    f.deps.authorityRepository.listSubmissionOutcomeRecords,
+  ).mockImplementation(({ jobId } = {}) =>
+    Promise.resolve([...ledger.values()].filter((r) => r.jobId === jobId)),
+  );
+  Object.assign(f.deps.authorityRepository, {
+    getSubmissionIdempotencyRecord: (key: string) =>
+      Promise.resolve({ outcomeId: key.replace("send_", "receipt_") }),
+  });
+  // R8 application 51: the site took the send, then the run's result could
+  // not be saved and the row was stored Failed with that error.
+  f.applications.applyJobs({ selection: { ids: [f.ids[0]!] } });
+  const stored = f.applications.claimNext()!;
+  ledger.set(String(stored.id), receipt(stored));
+  f.applications.finishPreparation({
+    id: stored.id,
+    attempt: stored.attempt,
+    state: "failed",
+    error: '[{"code":"too_big","path":["questionContexts",1,"prompt"]}]',
+  });
+  await f.service.start();
+  expect(f.applications.getApplication(stored.id)).toMatchObject({
+    state: "submitted",
+    error: null,
+  });
+  expect(f.jobs.getJob(stored.jobId)?.stage).toBe("applied");
+  // A live run: the send is in the ledger, then saving its result fails.
+  vi.spyOn(f.applications, "saveWork").mockImplementationOnce(() => {
+    const live = f.applications
+      .listApplications()
+      .rows.find((row) => row.jobId === f.ids[1])!;
+    ledger.set(String(live.id), receipt(live));
+    throw new Error("The run's result could not be saved.");
+  });
+  f.applications.applyJobs({ selection: { ids: [f.ids[1]!] } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(
+      f.applications
+        .listApplications()
+        .rows.find((row) => row.jobId === f.ids[1])?.state,
+    ).toBe("submitted"),
+  );
+  expect(f.onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "The run's result could not be saved.",
+    }),
+  );
+});
+
 it("recovers interrupted preparation, settles an interrupted send from its saved outcome or holds it for confirmation, and a restart from disk resends nothing", async () => {
   const f = await setup(3, undefined, { onDisk: true });
   f.applications.applyJobs({ selection: { ids: f.ids } });

@@ -678,7 +678,8 @@ export function createApplicationStore(store: JobStore) {
           AND submitted_at IS NULL
           AND COALESCE(json_extract(submission_outcome_json,'$.outcome'),'not_submitted')='not_submitted'
           RETURNING job_id`).get(Date.now(), Date.now(), id, attempt) as
-            { job_id: number } | undefined;
+            | { job_id: number }
+            | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
@@ -836,6 +837,56 @@ export function createApplicationStore(store: JobStore) {
           id,
         );
         if (state === "submitted") store.setStage([current.jobId], "applied");
+        changed([current.jobId]);
+        return true;
+      });
+    },
+
+    /**
+     * The send ledger recorded this attempt's send as submitted or
+     * uncertain, but the run stopped before its row said so (a result it
+     * could not save, an error after the send). The row follows the ledger:
+     * Applied or Uncertain, never Failed with Apply again on offer.
+     */
+    followSendLedger(
+      id: number,
+      attempt: number,
+      receipt: SubmissionOutcomeRecord,
+    ): boolean {
+      receipt = SubmissionOutcomeRecordSchema.parse(receipt);
+      if (!["submitted", "outcome_uncertain"].includes(receipt.outcome))
+        return false;
+      return store.transaction(() => {
+        const current = getApplication(id);
+        if (
+          !current ||
+          current.attempt !== attempt ||
+          current.submittedAt !== null ||
+          ["submitted", "uncertain"].includes(current.state)
+        )
+          return false;
+        if (
+          receipt.jobId !== String(current.jobId) ||
+          receipt.applicationRecordId !== `application_${id}` ||
+          receipt.runId !== `application_run_${id}` ||
+          receipt.resultId !== `application_${id}_attempt_${attempt}`
+        )
+          throw new Error(
+            "The submission receipt belongs to another application attempt.",
+          );
+        const submitted = receipt.outcome === "submitted";
+        sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
+          submission_outcome_id = ?, submission_outcome_json = ?, error = NULL WHERE id = ?`).run(
+          submitted ? "submitted" : "uncertain",
+          submitted
+            ? Date.parse(receipt.verifiedAt ?? receipt.attemptedAt)
+            : null,
+          Date.now(),
+          receipt.id,
+          JSON.stringify(receipt),
+          id,
+        );
+        if (submitted) store.setStage([current.jobId], "applied");
         changed([current.jobId]);
         return true;
       });
@@ -1076,7 +1127,8 @@ export function createApplicationStore(store: JobStore) {
         const row = sql(
           "UPDATE applications SET state='stopped', disposition='skipped', error=?, updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
         ).get(reason, Date.now(), id, attempt) as
-          { job_id: number } | undefined;
+          | { job_id: number }
+          | undefined;
         if (row) {
           const detached = sql(
             "DELETE FROM application_needs_you WHERE application_id=? RETURNING task_id",
@@ -1099,7 +1151,8 @@ export function createApplicationStore(store: JobStore) {
         const row = sql(
           "UPDATE applications SET state='needs_you',disposition='blocked',error=?,updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
         ).get(reason, Date.now(), id, attempt) as
-          { job_id: number } | undefined;
+          | { job_id: number }
+          | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });

@@ -737,3 +737,79 @@ test("a pack beside a concurrent search keeps its own run, masks one-time links 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a stored validation error reads as the stop reason, and a pack that stopped partway can run again into its folder", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "nestor-pack-rerun-"));
+  try {
+    const data = path.join(root, "profile");
+    mkdirSync(data);
+    writeFileSync(
+      path.join(data, "nestor-profile-provenance.json"),
+      JSON.stringify({ kind: "synthetic" }),
+    );
+    // R8 application 51: a schema error stored as the row's error, a JSON
+    // issue list the row reader parses into an array.
+    const issues = JSON.stringify([
+      {
+        code: "too_big",
+        maximum: 2000,
+        path: ["questionContexts", 1, "prompt"],
+        message: "String must contain at most 2000 character(s)",
+      },
+    ]);
+    const db = new DatabaseSync(path.join(data, "job-finder.sqlite"));
+    db.exec(
+      `CREATE TABLE applications(id INTEGER,job_id INTEGER,attempt INTEGER,mode TEXT,state TEXT,error TEXT,submission_outcome_json TEXT,queued_at INTEGER,updated_at INTEGER);`,
+    );
+    db.prepare(
+      "INSERT INTO applications VALUES(51,4378,1,'autonomous_submit','failed',?,NULL,1000,2000)",
+    ).run(issues);
+    db.close();
+    const trace = path.join(root, "trace");
+    mkdirSync(trace);
+    const line = (shot) =>
+      JSON.stringify({
+        event: "page_snapshot",
+        at: new Date(1500).toISOString(),
+        applicationKey: "application_51_attempt_1",
+        action: "final_outcome",
+        shot,
+        url: "https://jobs.ashbyhq.com/workos/application",
+      });
+    // A screenshot path outside the trace stops the pack partway.
+    writeFileSync(path.join(trace, "events-1.jsonl"), line("../outside.png"));
+    const out = path.join(root, "pack");
+    await assert.rejects(
+      generatePack({ out, trace, data, application: "51", state: {} }),
+      /escapes trace directory/,
+    );
+    assert.deepEqual(
+      readdirSync(root).filter((f) => f.startsWith("pack")),
+      [],
+    );
+    writeFileSync(path.join(trace, "events-1.jsonl"), line(undefined));
+    const manifest = await generatePack({
+      out,
+      trace,
+      data,
+      application: "51",
+      state: {},
+    });
+    assert.equal(manifest.firstStopReason, issues);
+    assert.match(
+      readFileSync(path.join(out, "pack.md"), "utf8"),
+      /# Run evidence/,
+    );
+    // A folder holding other files is named, not overwritten.
+    const busy = path.join(root, "busy");
+    mkdirSync(busy);
+    writeFileSync(path.join(busy, "note.txt"), "keep");
+    await assert.rejects(
+      generatePack({ out: busy, trace, data, application: "51", state: {} }),
+      /already holds files but no finished pack/,
+    );
+    assert.equal(readFileSync(path.join(busy, "note.txt"), "utf8"), "keep");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -8,6 +8,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -477,7 +478,38 @@ async function sha256File(file) {
   return hash.digest("hex");
 }
 
+/**
+ * Writes a pack into a new or empty folder. It is built beside that folder
+ * and moved into place when complete, so a pack that stops partway leaves
+ * nothing behind and the same command can run again.
+ */
 export async function generatePack(options) {
+  const out = path.resolve(options.out);
+  if (
+    existsSync(path.join(out, "manifest.json")) ||
+    existsSync(path.join(out, "pack.md"))
+  )
+    throw Error(
+      "Generated packs are immutable; choose a new output directory.",
+    );
+  if (existsSync(out) && readdirSync(out).length)
+    throw Error(
+      `${out} already holds files but no finished pack. A pack is written into a new or empty folder: empty it or choose another.`,
+    );
+  const building = `${out}.partial-${process.pid}`;
+  rmSync(building, { recursive: true, force: true });
+  try {
+    const manifest = await writePack({ ...options, out: building });
+    rmSync(out, { recursive: true, force: true });
+    renameSync(building, out);
+    return manifest;
+  } catch (error) {
+    rmSync(building, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function writePack(options) {
   const state = options.state ?? readState();
   const out = path.resolve(options.out);
   const traceOption = options.trace ?? process.env.NESTOR_RUN_TRACE_DIR;
@@ -915,15 +947,22 @@ export async function generatePack(options) {
     const stopEvent = ours.find((e) =>
       ["blocked", "timed_out", "asked_person"].includes(e.kind),
     );
+    // A stored error can be JSON (a run summary, or a validation error's
+    // issue list), which the row reader has already parsed.
     let firstStopReason = stopEvent?.reason ?? app?.error ?? null;
-    if (firstStopReason?.startsWith("{")) {
+    if (typeof firstStopReason === "string" && /^\s*[[{]/.test(firstStopReason))
       try {
-        firstStopReason =
-          JSON.parse(firstStopReason).summary ?? firstStopReason;
+        firstStopReason = JSON.parse(firstStopReason);
       } catch {
         /* Keep the recorded reason verbatim. */
       }
-    }
+    if (firstStopReason !== null && typeof firstStopReason === "object")
+      firstStopReason =
+        typeof firstStopReason.summary === "string"
+          ? firstStopReason.summary
+          : JSON.stringify(firstStopReason);
+    else if (firstStopReason !== null)
+      firstStopReason = String(firstStopReason);
     const manifest = {
       version: 2,
       kind,
