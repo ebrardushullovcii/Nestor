@@ -205,8 +205,9 @@ export type CandidateAnswerKind = z.infer<typeof CandidateAnswerKindSchema>;
 
 export const SavedOptionFallbackSchema = z
   .object({
-    primary: z.string().trim().min(1).max(300),
-    fallback: z.string().trim().min(1).max(300),
+    // A site's option labels, kept whole.
+    primary: z.string().trim().min(1),
+    fallback: z.string().trim().min(1),
     whenNeitherOffered: z.literal("skip_application"),
   })
   .strict();

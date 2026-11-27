@@ -28,6 +28,7 @@ import {
   openJobStore,
 } from "@nestor/db/job-store";
 import { traceEvent } from "@nestor/core/run-trace";
+import type * as RunTrace from "@nestor/core/run-trace";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -72,8 +73,7 @@ const preparation = vi.hoisted(() => ({
 
 // The run trace is evidence only; tests read what it was told to record.
 vi.mock("@nestor/core/run-trace", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@nestor/core/run-trace")>();
+  const actual = await importOriginal<typeof RunTrace>();
   return { ...actual, traceEvent: vi.fn(actual.traceEvent) };
 });
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {

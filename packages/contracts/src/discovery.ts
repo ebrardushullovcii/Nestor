@@ -2299,13 +2299,17 @@ export type ApplyExecutionModelUse = z.infer<
   typeof ApplyExecutionModelUseSchema
 >;
 
-/** Choices a picker on this application refused, kept so a rerun does not retry them. */
+/**
+ * Choices a picker on this application refused, kept so a rerun does not
+ * retry them. The question and options are the site's text, kept whole: a
+ * length or count limit here can fail a sent application's record.
+ */
 export const ApplyPickerAttemptSchema = z.object({
-  question: z.string().min(1).max(2000),
-  tried: z.array(z.string().max(300)).max(20),
+  question: z.string().min(1),
+  tried: z.array(z.string()),
   /** The refused choices a list that finished loading said it does not have. */
-  notOffered: z.array(z.string().max(300)).max(20).default([]),
-  offeredOptions: z.array(z.string().max(300)).max(500),
+  notOffered: z.array(z.string()).default([]),
+  offeredOptions: z.array(z.string()),
 });
 export type ApplyPickerAttempt = z.infer<typeof ApplyPickerAttemptSchema>;
 /**
@@ -2314,10 +2318,11 @@ export type ApplyPickerAttempt = z.infer<typeof ApplyPickerAttemptSchema>;
  * (address without query, and step label). A restore follows the same path.
  */
 export const ApplyFormPathStepSchema = z.object({
-  from: z.string().max(2_000),
+  // The site's addresses and control text, kept whole.
+  from: z.string(),
   tool: z.enum(["click", "follow_link", "navigate"]),
-  label: z.string().max(300),
-  href: z.string().max(4_096).optional(),
+  label: z.string(),
+  href: z.string().optional(),
 });
 export type ApplyFormPathStep = z.infer<typeof ApplyFormPathStepSchema>;
 
@@ -2941,8 +2946,9 @@ export const ApplicationRecordSchema = z.object({
     .object({
       observedAt: IsoDateTimeSchema,
       origin: UrlStringSchema,
-      safePath: z.string().startsWith("/").max(4096),
-      summary: NonEmptyStringSchema.max(500),
+      // The site's own path and confirmation text, kept whole.
+      safePath: z.string().startsWith("/"),
+      summary: NonEmptyStringSchema,
     })
     .strict()
     .optional(),

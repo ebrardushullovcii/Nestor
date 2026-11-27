@@ -112,10 +112,10 @@ function mapBrowserActionResult(input: {
     reason: input.result.reason,
     ...(input.result.outcome === "not_submitted" &&
     input.result.validationErrors?.length
-      ? { detail: input.result.validationErrors.join(" ").slice(0, 500) }
+      ? { detail: input.result.validationErrors.join(" ") }
       : {}),
     ...(input.result.outcome === "outcome_uncertain" && input.result.siteMessage
-      ? { detail: input.result.siteMessage.slice(0, 500) }
+      ? { detail: input.result.siteMessage }
       : {}),
     actionAttempted: input.result.facts.actionAttempted,
     actionIssued: input.result.facts.actionIssued,
