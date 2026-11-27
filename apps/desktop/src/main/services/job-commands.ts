@@ -79,7 +79,7 @@ async function getSearchService(): Promise<JobSearchService> {
   }
 }
 
-/** Scores saved jobs that have no fit yet. */
+/** Scores new jobs and saved jobs that are due for a refresh. */
 export function scoreUnscoredJobs(): void {
   void getSearchService()
     .then((service) => service.scoreUnscored())
@@ -135,12 +135,16 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     return { ok: true as const };
   });
   const store = getJobStore();
+  const hasSavedFits = () => {
+    const { found, shortlisted, resume, hidden } = store.stageCounts();
+    return found + shortlisted + resume + hidden > 0;
+  };
   let fitRefresh: ReturnType<typeof setTimeout> | null = null;
   store.onChange((change) => {
     if (
       !searchService &&
       (change.cause === "profile" || change.cause === "settings") &&
-      store.stageCounts().found > 0
+      hasSavedFits()
     ) {
       if (fitRefresh) clearTimeout(fitRefresh);
       fitRefresh = setTimeout(scoreUnscoredJobs, 300);
@@ -154,11 +158,7 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     else
       console.warn("[Desktop] Dropped a malformed job change.", checked.error);
   });
-  if (
-    store.searches.latest()?.state === "running" ||
-    store.stageCounts().found > 0 ||
-    store.unscoredJobIds(1).length > 0
-  ) {
+  if (store.searches.latest()?.state === "running" || hasSavedFits()) {
     setTimeout(scoreUnscoredJobs, 5_000).unref?.();
   }
 }

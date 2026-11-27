@@ -65,7 +65,7 @@ export const JOB_COMMANDS = {
   prioritize_fit: {
     effect: "local_write",
     description:
-      "Prioritize fit checks for the jobs currently visible in Find jobs.",
+      "Prioritize fit checks for the jobs shown or open in Find jobs, including jobs with an earlier score.",
     input: z.object({ ids: z.array(JobIdSchema).max(200) }).strict(),
   },
   get_job: {

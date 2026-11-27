@@ -176,6 +176,7 @@ export function JobDetailPane(props: {
           score={score}
           size="detail"
           stage={job.stage}
+          stale={job.fitStale === true}
         />
         <div className="flex flex-wrap items-center gap-2">
           {props.actions.map((action, index) => (
@@ -280,9 +281,7 @@ export function JobDetailPane(props: {
         />
         {description.length > 0 ? (
           <div className="grid gap-1.5" data-job-description>
-            <h3
-              className="text-(length:--text-small) font-semibold text-foreground"
-            >
+            <h3 className="text-(length:--text-small) font-semibold text-foreground">
               About this job
             </h3>
             <div className="grid max-w-prose gap-2.5 text-(length:--text-description) leading-6 text-foreground-soft">

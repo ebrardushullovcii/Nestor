@@ -79,6 +79,16 @@ export function createJobSearchRunner(
   let recoveryError: string | null = null;
   const providerWaits = new Set<object>();
   let visibleIds: readonly number[] = [];
+  const syncFitContextForView = (context: JobSearchContext) => {
+    deps.store.syncFitContext(fitContextFingerprint(context));
+    deps.store.requestDeferredFits(visibleIds);
+  };
+  const enqueueSavedFits = (fits: FitQueue) => {
+    fits.enqueue(
+      deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+      visibleIds,
+    );
+  };
   // Only quitting cancels a fit request already sent; Stop and a new search
   // end what each queue takes next.
   const fitLifetime = new AbortController();
@@ -712,11 +722,7 @@ export function createJobSearchRunner(
       run.enqueue = enqueue;
       await pipeline.start();
       run.setReady(fits);
-      fits.enqueue([
-        ...visibleIds,
-        ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
-      ]);
-      fits.prioritize(visibleIds);
+      enqueueSavedFits(fits);
       for (;;) {
         await abortable(Promise.all([http.idle(), browser.idle()]), signal);
         await pipeline.drain();
@@ -801,7 +807,7 @@ export function createJobSearchRunner(
           true;
         // A search's note shapes the fit of the jobs it finds; it is not a
         // reason to judge every saved job again.
-        deps.store.syncFitContext(fitContextFingerprint(context));
+        syncFitContextForView(context);
         deps.store.restoreAgeHidden(
           settings.postedWithin === "any"
             ? null
@@ -1056,9 +1062,21 @@ export function createJobSearchRunner(
       };
     },
     prioritizeFit(ids) {
-      visibleIds = ids;
-      active?.fits?.prioritize(ids);
-      recoveryQueue?.prioritize(ids);
+      if (fitLifetime.signal.aborted) return;
+      if (
+        ids.length === visibleIds.length &&
+        ids.every((id, i) => id === visibleIds[i])
+      )
+        return;
+      visibleIds = [...ids];
+      const requested = deps.store.requestDeferredFits(ids);
+      const fits = active ? active.fits : recoveryQueue;
+      if (fits) {
+        if (requested.length) fits.enqueue(requested, ids);
+        else fits.prioritize(ids);
+      } else if (requested.length && !fitRefused && !continuation) {
+        scheduleFit();
+      }
     },
     scoreUnscored() {
       if (recovery) return recovery.result;
@@ -1082,12 +1100,9 @@ export function createJobSearchRunner(
                 deps.readRemoteCountsAsAnyLocation?.() ??
                 current.remoteCountsAsAnyLocation ??
                 true;
-              deps.store.syncFitContext(fitContextFingerprint(current));
+              syncFitContextForView(current);
               const before = liveFits.scored;
-              liveFits.enqueue([
-                ...visibleIds,
-                ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
-              ]);
+              enqueueSavedFits(liveFits);
               await liveFits.drain();
               if (liveFits.needsAnotherPass) scheduleFit(5000);
               return liveFits.scored - before;
@@ -1101,7 +1116,7 @@ export function createJobSearchRunner(
               deps.readRemoteCountsAsAnyLocation?.() ??
               context.remoteCountsAsAnyLocation ??
               true;
-            deps.store.syncFitContext(fitContextFingerprint(context));
+            syncFitContextForView(context);
             const fits = createFitQueue(
               deps,
               context,
@@ -1120,11 +1135,7 @@ export function createJobSearchRunner(
               sentFits,
             );
             recoveryQueue = fits;
-            fits.enqueue([
-              ...visibleIds,
-              ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
-            ]);
-            fits.prioritize(visibleIds);
+            enqueueSavedFits(fits);
             await fits.drain();
             if (fits.needsAnotherPass && !controller.signal.aborted)
               scheduleFit(5000);

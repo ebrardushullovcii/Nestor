@@ -129,6 +129,7 @@ export function createFitQueue(
       !job.stageNote?.startsWith("Closed:") &&
       !(
         job.stage === "hidden" &&
+        job.fitScore === null &&
         cutoff !== null &&
         job.postedAt &&
         Date.parse(job.postedAt) < cutoff
@@ -270,7 +271,7 @@ export function createFitQueue(
     for (let index = 0; index < pending.length; ) {
       const id = pending[index]!;
       const flight = requests.inFlight.get(id);
-      const job = flight ? null : deps.store.getJob(id);
+      const job = flight ? null : deps.store.getJobForFit(id);
       if (flight) awaitFlight(id, flight);
       if (!eligible(job)) {
         pending.splice(index, 1);
@@ -353,6 +354,14 @@ export function createFitQueue(
     }
   };
 
+  const prioritize = (ids: readonly number[]) => {
+    if (!ids.length) return;
+    const ranks = new Map(ids.map((id, i) => [id, i]));
+    pending.sort(
+      (a, b) => (ranks.get(a) ?? Infinity) - (ranks.get(b) ?? Infinity),
+    );
+  };
+
   return {
     get pendingCount() {
       return pending.length;
@@ -366,27 +375,23 @@ export function createFitQueue(
     get needsAnotherPass() {
       return deferred;
     },
-    enqueue(ids: readonly number[]) {
+    enqueue(ids: readonly number[], priority: readonly number[] = []) {
       if (signal.aborted) return;
       for (const id of ids)
         if (
           !seen.has(id) ||
           (!inFlight.has(id) &&
             !pending.includes(id) &&
-            deps.store.getJob(id)?.fitStale)
+            deps.store.getJobForFit(id)?.fitStale)
         ) {
           seen.add(id);
           pending.push(id);
         }
+      prioritize(priority);
       pump();
       onProgress();
     },
-    prioritize(ids: readonly number[]) {
-      const ranks = new Map(ids.map((id, i) => [id, i]));
-      pending.sort(
-        (a, b) => (ranks.get(a) ?? Infinity) - (ranks.get(b) ?? Infinity),
-      );
-    },
+    prioritize,
     /**
      * Settles when this queue's work has answered, or at once when it is
      * stopped: requests already sent then finish on their own.

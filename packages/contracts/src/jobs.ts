@@ -106,6 +106,8 @@ export const JobRowSchema = z.object({
    * step wrote none (older rows), which then cut the line with "…".
    */
   fitShort: z.string().nullable().optional(),
+  /** The stored score predates the current listing or fit context. */
+  fitStale: z.boolean().optional(),
   postedAt: z.string().nullable(),
   foundAt: z.string(),
   /** The search that found it first. */
@@ -213,7 +215,6 @@ export const JobDetailSchema = JobRowSchema.extend({
     .nullable(),
   facts: JobListingFactsSchema,
   fit: JobFitSchema.nullable(),
-  fitStale: z.boolean().optional(),
   sightings: z.array(JobSightingSchema),
 });
 export type JobDetail = z.infer<typeof JobDetailSchema>;

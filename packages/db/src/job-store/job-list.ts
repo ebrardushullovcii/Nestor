@@ -15,6 +15,7 @@ import {
 import type { SQLInputValue } from "node:sqlite";
 
 import type { Statements } from "./statements";
+import { READY_FOR_FIT } from "./fit";
 
 const WORK_MODE_BITS: Record<WorkMode, number> = {
   remote: 1,
@@ -143,7 +144,7 @@ const SORT_COLUMNS: Record<JobSort, readonly string[]> = {
 };
 
 const ROW_COLUMNS = `j.id, j.stage, j.stage_at, j.stage_note, j.title, j.company, j.location,
-  j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.fit_short, j.posted_at,
+  j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.fit_short, j.fit_stale, j.posted_at,
   j.found_at, j.found_by, j.source_label, j.source_count`;
 
 type RowRecord = {
@@ -159,6 +160,7 @@ type RowRecord = {
   fit_score: number;
   fit_summary: string | null;
   fit_short: string | null;
+  fit_stale: number;
   posted_at: number;
   found_at: number;
   found_by: string | null;
@@ -180,6 +182,7 @@ function toRow(record: RowRecord): JobRow {
     fitScore: record.fit_score >= 0 ? record.fit_score : null,
     fitSummary: record.fit_summary,
     fitShort: record.fit_short,
+    fitStale: Boolean(record.fit_stale),
     postedAt: record.posted_at > 0 ? toIso(record.posted_at) : null,
     foundAt: toIso(record.found_at),
     searchId: record.found_by,
@@ -372,15 +375,19 @@ type DetailRecord = RowRecord & {
   salary_currency: string | null;
   facts_json: string;
   fit_json: string | null;
-  fit_stale: number;
 };
 
-export function getJob(sql: Statements, id: number): JobDetail | null {
+export function getJob(
+  sql: Statements,
+  id: number,
+  forFit = false,
+): JobDetail | null {
   const record = sql(
     `SELECT ${ROW_COLUMNS}, j.url, j.apply_url, j.seen_at, d.description, d.summary,
        d.seniority, d.employment_type, d.salary_min, d.salary_max,
-       d.salary_currency, d.facts_json, d.fit_json, j.fit_stale
-     FROM jobs j JOIN job_details d ON d.job_id = j.id WHERE j.id = ?`,
+       d.salary_currency, d.facts_json, d.fit_json
+     FROM jobs j JOIN job_details d ON d.job_id = j.id WHERE j.id = ?
+     ${forFit ? `AND ${READY_FOR_FIT}` : ""}`,
   ).get(id) as DetailRecord | undefined;
   if (!record) return null;
   const sightings = sql(
@@ -415,7 +422,6 @@ export function getJob(sql: Statements, id: number): JobDetail | null {
       : null,
     facts: JobListingFactsSchema.parse(JSON.parse(record.facts_json)),
     fit: record.fit_json ? (JSON.parse(record.fit_json) as JobFit) : null,
-    fitStale: Boolean(record.fit_stale),
     sightings: sightings.map((s) => ({
       sourceId: s.source_id,
       sourceLabel: s.source_label,

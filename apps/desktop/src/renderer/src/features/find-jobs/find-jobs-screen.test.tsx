@@ -13,6 +13,7 @@ import {
   type JobStore,
 } from "@nestor/db/job-store";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -24,12 +25,17 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@renderer/components/ui/toast";
+import {
+  createKeptRouteVisibility,
+  KeptRouteVisibilityContext,
+} from "@renderer/features/job-finder/lib/kept-route-visibility";
 
 import { FindJobsScreen } from "./find-jobs-screen";
 
 let store: JobStore;
 let ids: number[];
 let searchStatus: JobSearchStatus;
+let fitViews: number[][];
 /** Holds `count_jobs` until a test lets it answer. */
 let countGate: Promise<void>;
 
@@ -83,6 +89,7 @@ beforeEach(() => {
     jobs: [job(1), job(2), job(3)],
   }));
   countGate = Promise.resolve();
+  fitViews = [];
   store.setFit(
     ids.map((id) => ({
       id,
@@ -92,7 +99,10 @@ beforeEach(() => {
       gaps: [],
     })),
   );
-  const run = (name: string, input: JobListQueryInput & { id?: number }) => {
+  const run = (
+    name: string,
+    input: JobListQueryInput & { id?: number; ids?: number[] },
+  ) => {
     if (name === "list_jobs") return Promise.resolve(store.listJobs(input));
     if (name === "count_jobs")
       return countGate.then(() => ({ total: store.countJobs(input) }));
@@ -100,6 +110,10 @@ beforeEach(() => {
       return Promise.resolve(store.moveJobs(MoveJobsInputSchema.parse(input)));
     if (name === "stage_counts") return Promise.resolve(store.stageCounts());
     if (name === "get_job") return Promise.resolve(store.getJob(input.id!));
+    if (name === "prioritize_fit") {
+      fitViews.push(input.ids!);
+      return Promise.resolve(null);
+    }
     if (name === "search_status") return Promise.resolve(searchStatus);
     if (name === "list_search_sources")
       return Promise.resolve(createSearchSourcesStore(store).list(input));
@@ -136,6 +150,41 @@ afterEach(() => {
 const openTitle = () =>
   screen.queryByRole("heading", { level: 2, name: /Supply Chain Analyst/ })
     ?.textContent ?? null;
+
+it("requests an open job outside the filtered list and clears fit priority when the route is hidden", async () => {
+  const id = ids[0]!;
+  const visibility = createKeptRouteVisibility(false);
+  pastSearch();
+  store.setFit([
+    { id, score: 39, summary: "Earlier verdict", reasons: [], gaps: [] },
+  ]);
+  store.syncFitContext("new scorer");
+  render(
+    <MemoryRouter initialEntries={[`/job-finder/discovery?job=${id}`]}>
+      <ToastProvider>
+        <KeptRouteVisibilityContext.Provider value={visibility}>
+          <FindJobsScreen />
+        </KeptRouteVisibilityContext.Provider>
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Good+" }));
+  await waitFor(() => {
+    expect(
+      screen.queryByRole("checkbox", { name: "Select Supply Chain Analyst 1" }),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "Job details" })).getByText(
+        "Earlier score",
+      ),
+    ).toBeTruthy();
+    expect(fitViews.at(-1)?.[0]).toBe(id);
+  });
+  act(() => visibility.setHidden(true));
+  expect(fitViews.at(-1)).toEqual([]);
+  act(() => visibility.setHidden(false));
+  expect(fitViews.at(-1)?.[0]).toBe(id);
+});
 
 it("opens the next found job when the chat moves the open one, and says all caught up when Found empties", async () => {
   render(

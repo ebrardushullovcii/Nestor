@@ -1245,19 +1245,13 @@ export function ListPane<Row extends { id: number }>(props: {
   // every row is drawn, as an unwindowed list does.
   const drawWindow = windowed && virtualizer.scrollRect?.height !== 0;
   const windowItems = virtualizer.getVirtualItems();
-  const visibleRows = useMemo(
-    () =>
-      drawWindow
-        ? windowItems.flatMap((item) => {
-            const row = rows[item.index];
-            return row ? [row] : [];
-          })
-        : rows,
-    [drawWindow, rows, windowItems],
-  );
+  const visibleStart = virtualizer.range?.startIndex ?? 0;
+  const visibleEnd = (virtualizer.range?.endIndex ?? -1) + 1;
   useEffect(() => {
-    props.onVisibleRows?.(visibleRows);
-  }, [props.onVisibleRows, visibleRows]);
+    props.onVisibleRows?.(
+      drawWindow ? rows.slice(visibleStart, visibleEnd) : rows,
+    );
+  }, [props.onVisibleRows, drawWindow, rows, visibleStart, visibleEnd]);
 
   // Where each drawn row sat, so a row that leaves fades out in its place.
   const drawnTops = useRef<ReadonlyMap<number, number>>(new Map());

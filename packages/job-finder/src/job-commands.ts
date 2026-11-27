@@ -23,7 +23,7 @@ export interface JobSearchControl {
   retrySource(id: number): Promise<unknown>;
   keepReading(id?: number): Promise<unknown>;
   status(): JobSearchStatus;
-  /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
+  /** Scores new jobs and saved jobs that are due for a refresh. */
   scoreUnscored(): Promise<number>;
   prioritizeFit?(ids: readonly number[]): void;
 }

@@ -51,6 +51,8 @@ import {
   fitSummary,
   restoreAgeHidden,
   migrateHideOwners,
+  requestDeferredFits,
+  unscoredJobIds,
 } from "./fit";
 import { importLegacyWorkspace } from "./legacy-workspace";
 import {
@@ -101,11 +103,12 @@ export interface JobStore {
   mergeSamePostings(): SamePostingMergeReport;
   setFit(updates: readonly JobFitUpdate[]): void;
   syncFitContext(fingerprint: string): boolean;
+  requestDeferredFits(ids: readonly number[]): number[];
   fitCounts(): { checking: number; rechecking: number };
   fitRevision(): string;
   fitSummary(minFit: number): JobFitSummary;
   restoreAgeHidden(cutoff: number | null): number;
-  /** Saved jobs still waiting for a fit score, newest first. */
+  /** Saved jobs ready for a first score or a recheck. */
   unscoredJobIds(limit: number): number[];
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
@@ -133,6 +136,7 @@ export interface JobStore {
     additionalStages?: readonly JobStage[],
   ): number;
   getJob(id: number): JobDetail | null;
+  getJobForFit(id: number): JobDetail | null;
   /**
    * Where each saved job was first seen and why it sits in its stage, without
    * reading its whole listing: a search asks this for every job it saves.
@@ -470,13 +474,14 @@ export function openJobStore(
         if (changed)
           notify({
             cause: "fit",
-            stages: ["found"],
+            stages: ["found", "shortlisted", "resume", "hidden"],
             ids: null,
             searchId: null,
           });
         return changed;
       });
     },
+    requestDeferredFits: (ids) => requestDeferredFits(sql, ids),
     fitCounts: () => fitCounts(sql),
     fitRevision: () =>
       String(
@@ -498,14 +503,7 @@ export function openJobStore(
         return n;
       });
     },
-    unscoredJobIds: (limit) =>
-      (
-        sql(
-          `SELECT id FROM jobs WHERE (stage IN ('found', 'shortlisted', 'resume') OR (stage='hidden' AND hide_owner='age_retention'))
-           AND (fit_score=-1 OR fit_stale=1)
-           ORDER BY CASE stage WHEN 'found' THEN 0 ELSE 1 END, fit_score DESC, found_at DESC LIMIT ?`,
-        ).all(limit) as { id: number }[]
-      ).map((row) => row.id),
+    unscoredJobIds: (limit) => unscoredJobIds(sql, limit),
     searches,
 
     listJobs: (query, stages) =>
@@ -513,6 +511,7 @@ export function openJobStore(
     countJobs: (filter, stages) =>
       countJobs(sql, JobFilterSchema.parse(filter), stages),
     getJob: (id) => getJob(sql, id),
+    getJobForFit: (id) => getJob(sql, id, true),
     stageCounts: () => readStageCounts(sql),
 
     moveJobs({ selection, to }) {
