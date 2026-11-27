@@ -29,6 +29,7 @@ import { createFitQueue } from "./fit-queue";
 import {
   fitContextInput,
   fitContextFingerprint,
+  fitContextFingerprints,
   fitInputFingerprint,
   LISTING_FIT_SCORER_VERSION,
 } from "./fit-input";
@@ -1939,6 +1940,59 @@ test("one pass scores the whole backlog, visible jobs first, in bounded batches"
   expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(ids.length);
   expect(store.unscoredJobIds(200)).toHaveLength(0);
 });
+
+test.each(["matching", "mismatched"] as const)(
+  "first fit pass upgrades a %s legacy fingerprint",
+  async (legacy) => {
+    const { runner, store, context, engine } = setup();
+    const currentFingerprint = fitContextFingerprint(context);
+    const storedInput = fitContextInput(context);
+    if (legacy === "mismatched") storedInput.scorerVersion--;
+    // A pre-upgrade database has just the one combined fingerprint.
+    store
+      .sql("INSERT INTO fit_context(id,fingerprint) VALUES (1,?)")
+      .run(
+        createHash("sha256").update(JSON.stringify(storedInput)).digest("hex"),
+      );
+    const ids = seedBacklog(store, 5, "Complete listing: requires SQL.");
+    const [high, visible, shortlisted, ready, low] = ids;
+    store.setFit(
+      ids.map((id) => ({
+        id,
+        score: id === high ? 40 : 39,
+        summary: "Earlier verdict",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    store.setStage([shortlisted!], "shortlisted");
+    store.setStage([ready!], "resume");
+    runner.prioritizeFit([visible!]);
+
+    await runner.scoreUnscored();
+
+    const asked = engine.fitJobs.mock.calls.flatMap(([input]) =>
+      input.jobs.map(({ id }) => id),
+    );
+    if (legacy === "matching") {
+      expect(engine.fitJobs).not.toHaveBeenCalled();
+      expect(ids.map((id) => store.getJob(id)?.fitStale)).toEqual(
+        ids.map(() => false),
+      );
+    } else {
+      expect(engine.fitJobs).toHaveBeenCalledOnce();
+      expect(asked[0]).toBe(visible);
+      expect(asked.toSorted((a, b) => a - b)).toEqual(ids.slice(0, -1));
+      expect(store.getJob(low!)?.fitStale).toBe(true);
+    }
+    expect(store.sql("SELECT * FROM fit_context WHERE id=1").get()).toEqual({
+      id: 1,
+      fingerprint: currentFingerprint,
+      scoring_fingerprint: fitContextFingerprints(context).scoringFingerprint,
+    });
+    expect(store.unscoredJobIds(10)).toEqual([]);
+  },
+);
 
 test("a scorer bump refreshes only priority jobs, then takes displayed or opened jobs once", async () => {
   const { runner, context, engine, store } = setup();

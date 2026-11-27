@@ -33,6 +33,7 @@ export function fitContextFingerprints(context: JobSearchContext) {
   // Country-list fallbacks also come from the saved answer bank.
   const { scorerVersion, person, goals } = input;
   return {
+    // Keep the combined hash byte-for-byte compatible with existing stores.
     fingerprint: hash(input),
     scoringFingerprint: hash({ scorerVersion, person, goals }),
   };
