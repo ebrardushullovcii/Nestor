@@ -3080,3 +3080,53 @@ test("search offers vault preparation and completes the observed Google sign-in 
   expect(click).toHaveBeenCalledTimes(3);
   expect(pages.current.url).toBe("https://jobs.example.test/signed-in");
 });
+
+test("an infinite-scroll page reads only the cards this run has not saved yet", async () => {
+  const card = (id: string, title: string) =>
+    `[Page item ${id}]\n${title} → https://jobs.example.test/jobs/j${id}\nNorthwind · Manchester\n[End page item ${id}]`;
+  const pages = {
+    current: rawPage({ bodyText: card("1", "Platform Engineer") }),
+  };
+  const page = hands(pages);
+  page.scroll = () => {
+    pages.current = rawPage({
+      bodyText: [
+        card("1", "Platform Engineer"),
+        card("2", "Data Engineer"),
+      ].join("\n"),
+    });
+    return Promise.resolve({ ok: true, observedValue: "down" });
+  };
+  const read: string[] = [];
+  const result = await runJobSearchAgent({
+    hands: page,
+    config: config({ inventoryOnly: true }),
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "scroll", args: { direction: "down" } },
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      {
+        name: "finish",
+        args: { reason: "Read every card.", coverageComplete: true },
+      },
+    ]),
+    jobExtractor: {
+      extractJobsFromPage: ({ pageText }) => {
+        read.push(pageText);
+        return Promise.resolve(
+          [
+            posting("Platform Engineer", "Northwind", "j1"),
+            posting("Data Engineer", "Northwind", "j2"),
+          ].filter((job) => pageText.includes(job.canonicalUrl)),
+        );
+      },
+    },
+  });
+  expect(result.jobs.map((job) => job.sourceJobId).sort()).toEqual([
+    "j1",
+    "j2",
+  ]);
+  // The second read is the new card alone.
+  expect(read.at(-1)).toContain("jobs/j2");
+  expect(read.at(-1)).not.toContain("jobs/j1");
+});

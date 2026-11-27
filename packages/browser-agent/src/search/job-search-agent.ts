@@ -36,6 +36,7 @@ import type { APIResponse, Page } from "playwright";
 
 import { isAllowedUrl } from "../allowlist";
 import {
+  withConversationKey,
   withReasoningTask,
   type JobExtractor,
   type LLMClient,
@@ -361,8 +362,14 @@ async function runJobSearchAgentPrivate(
   const now = input.now ?? (() => new Date());
   const isSourceCheck = Boolean(config.promptContext.taskPacket);
   const siteLabel = config.promptContext.siteLabel;
-  // Search and source-check turns are short navigation decisions.
-  const llmClient = withReasoningTask(input.llmClient, "search");
+  // Search and source-check turns are short navigation decisions. Each
+  // site's run is one conversation: concurrent sites sharing one gateway
+  // session lost their cached prefixes to each other (R8: a third of search
+  // turns read nothing from the cache while other sites were in flight).
+  const llmClient = withConversationKey(
+    withReasoningTask(input.llmClient, "search"),
+    `search:${config.source}:${config.startingUrls[0] ?? siteLabel}`,
+  );
 
   input.signal?.throwIfAborted();
   const reused = await readCachedSearchResult(input.resultCache, config);
@@ -823,15 +830,22 @@ async function runJobSearchAgentPrivate(
       }
       recordListingRead(observation.url, observation.bodyTextExcerpt);
       let savedListingsSkipped = 0;
-      if (
-        !isSourceCheck &&
-        pageType === "search_results" &&
-        config.lookupKnownUrls
-      ) {
-        const unseen = await omitKnownListingItems(
-          pageText,
-          config.lookupKnownUrls,
+      if (!isSourceCheck && pageType === "search_results") {
+        // Cards this run already saved are skipped too: an infinite-scroll
+        // page holds every card loaded so far, and re-reading all of them
+        // after each scroll took minutes per call (R8 Wellfound, Working
+        // Nomads). A card the model is deciding on again is read again.
+        const savedThisRun = new Set(
+          collected.map((job) => postingUrlKey(job.canonicalUrl)),
         );
+        const lookupKnownUrls = config.lookupKnownUrls;
+        const unseen = await omitKnownListingItems(pageText, async (urls) => [
+          ...(lookupKnownUrls ? await lookupKnownUrls(urls) : []),
+          ...urls.filter(
+            (url) =>
+              savedThisRun.has(postingUrlKey(url)) && !rejections.has(url),
+          ),
+        ]);
         pageText = unseen.text;
         savedListingsSkipped = unseen.skippedUrls.length;
         for (const url of unseen.skippedUrls) {
@@ -1629,13 +1643,16 @@ async function runJobSearchAgentPrivate(
           }),
         ),
     subjectLabel: siteLabel,
-    // Keep action history and observations intact; recover context at the
-    // provider boundary if the selected model reaches its context limit.
+    // Keep action history intact; recover context at the provider boundary
+    // if the selected model reaches its context limit.
     staleToolResultChars: null,
     compactionMaxChars: Math.floor(
       (input.modelContextWindowTokens ?? 64_000) * 3.6 * 0.8,
     ),
     retainCompactedHistory: true,
+    // Page views the model has acted past are folded to receipts at cheap
+    // moments; each stays readable word for word with read_context_history.
+    supersededContent: (messages) => views.supersededContent(messages),
     onHistoryCompacted: (retained) =>
       views.restoreContext(retained, pageTools.state.observation),
     onStep: ({ step, note }) => {

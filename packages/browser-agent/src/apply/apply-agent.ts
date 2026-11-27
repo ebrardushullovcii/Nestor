@@ -26,6 +26,7 @@ import {
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createVisualPageTools } from "../visual-page-tools";
 import { createKeyboardTools } from "../keyboard-tools";
+import { createViewLedger } from "../superseded-views";
 import { createApplyTiming } from "./apply-timing";
 import { createApplyModelActivity } from "./model-activity";
 import {
@@ -263,6 +264,11 @@ async function runApplyAgentPrivate(
     }
     timingRecord.setObservationChars(describeObservation(next).length);
   };
+  // Every page view written into the conversation, so the loop can fold the
+  // ones the model has acted past (see superseded-views).
+  const views = createViewLedger();
+  const describeView = (page: ApplyFormObservation): string =>
+    views.write(describeObservation(page), page);
   const readPage = async () => {
     const next = await runConfig.hands.observe();
     observe(next);
@@ -588,18 +594,26 @@ async function runApplyAgentPrivate(
       status: outcome.kind === "refused" ? "failed" : "done",
       progress: outcome.kind !== "refused",
       content: includePage
-        ? `${content}\n\n${page ? describeObservation(page) : "Page unavailable."}`
+        ? `${content}\n\n${page ? describeView(page) : "Page unavailable."}`
         : content,
     };
   };
   let opening: string;
   try {
-    opening = describeObservation(await readPage());
+    opening = describeView(await readPage());
   } catch (error) {
     opening = `The initial read failed: ${describeBrowserError(error, "The browser failed.")}. Recover with observe, wait or navigate.`;
   }
-  const visualTools = createVisualPageTools(config.hands, readPage);
-  const keyboardTools = createKeyboardTools(config.hands, readPage);
+  const visualTools = createVisualPageTools(
+    config.hands,
+    readPage,
+    describeView,
+  );
+  const keyboardTools = createKeyboardTools(
+    config.hands,
+    readPage,
+    describeView,
+  );
   const domainTools: AgentLoopTool[] = getApplyToolDefinitions().map(
     (definition) => ({
       definition,
@@ -623,7 +637,7 @@ async function runApplyAgentPrivate(
         }),
     }),
   );
-  domainTools.push(...createTabTools(config.hands, observe));
+  domainTools.push(...createTabTools(config.hands, observe, describeView));
   domainTools.push(createAccountCredentialTool(config.hands));
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
@@ -721,7 +735,7 @@ async function runApplyAgentPrivate(
             return {
               kind: "ok",
               status: "failed",
-              content: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+              content: `${lines.join("\n")}\n\n${page ? describeView(page) : "Page unavailable."}`,
               progress: index > 0,
             };
           }
@@ -793,14 +807,14 @@ async function runApplyAgentPrivate(
                 ...result,
                 finish: {
                   ...result.finish,
-                  output: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+                  output: `${lines.join("\n")}\n\n${page ? describeView(page) : "Page unavailable."}`,
                 },
               }
             : result;
         }
         return {
           kind: "ok",
-          content: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+          content: `${lines.join("\n")}\n\n${page ? describeView(page) : "Page unavailable."}`,
           progress: true,
         };
       }),
@@ -1063,7 +1077,7 @@ async function runApplyAgentPrivate(
       await readPage();
       return {
         kind: "ok",
-        content: `${ok ? "The vault filled the selected password field." : "The vault could not fill that field; inspect the current page and saved login metadata."}\n${page ? describeObservation(page) : ""}`,
+        content: `${ok ? "The vault filled the selected password field." : "The vault could not fill that field; inspect the current page and saved login metadata."}\n${page ? describeView(page) : ""}`,
       };
     },
   });
@@ -1123,6 +1137,7 @@ async function runApplyAgentPrivate(
       parallelToolCalls: false,
       staleToolResultChars: null,
       retainCompactedHistory: true,
+      supersededContent: (messages) => views.supersededContent(messages),
       compactionMaxChars: Math.floor(
         (input.modelContextWindowTokens ?? 64000) * 3.6 * 0.8,
       ),

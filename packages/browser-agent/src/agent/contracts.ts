@@ -24,6 +24,12 @@ export interface LLMClient {
       parallelToolCalls?: boolean
       onStreamEvent?: (event: ModelTurnStreamEvent) => void
       reasoningTask?: BrowserAgentReasoningTask
+      /**
+       * Which conversation this turn continues. A gateway that routes by it
+       * keeps one conversation's turns on one upstream, whose prompt cache
+       * then serves each turn's prefix (see model-request-identity).
+       */
+      conversationKey?: string
       includeUsage?: boolean
       onRequestAttempt?: (event: ModelRequestAttempt) => void
       onRequestUsage?: (usage: ModelRequestUsage) => void
@@ -52,6 +58,20 @@ export function withReasoningTask(
       client.chatWithTools(messages, tools, {
         ...options,
         reasoningTask: options?.reasoningTask ?? reasoningTask,
+      }),
+  }
+}
+
+/** The same client with every turn marked as continuing one conversation. */
+export function withConversationKey(
+  client: LLMClient,
+  conversationKey: string
+): LLMClient {
+  return {
+    chatWithTools: (messages, tools, options) =>
+      client.chatWithTools(messages, tools, {
+        ...options,
+        conversationKey: options?.conversationKey ?? conversationKey,
       }),
   }
 }

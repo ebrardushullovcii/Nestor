@@ -4,6 +4,7 @@ import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import { createContextHistory } from "./context-history";
 import { createContextParts, isModelInputLimit } from "./context-parts";
+import { foldSupersededContent, type SupersededRewrite } from "./context-fold";
 /**
  * The one loop every Job Finder agent runs on.
  *
@@ -212,6 +213,16 @@ export interface AgentLoopOptions extends RuntimeObservers {
     content: string,
   ) => Promise<AgentLoopToolOutcome | null>;
   onHistoryCompacted?: (messages: readonly AgentLoopMessage[]) => string | null;
+  /**
+   * Earlier messages the host has superseded, such as a page view the model
+   * has acted past, each as its one-line receipt. The loop folds them in one
+   * batch once that frees more than it makes the provider read again (see
+   * context-fold), and keeps every folded message readable word for word
+   * with read_context_history.
+   */
+  supersededContent?: (
+    messages: readonly AgentLoopMessage[],
+  ) => readonly SupersededRewrite[];
   /** Called for every attempted tool, including failures. */
   onToolTiming?: (step: { toolName: string; durationMs: number }) => void;
   signal?: AbortSignal;
@@ -402,9 +413,10 @@ export async function runAgentLoop(
 
   let messages: AgentLoopMessage[] = [...options.messages];
   const openingCount = messages.length;
-  const contextHistory = options.retainCompactedHistory
-    ? createContextHistory(compactionMaxChars)
-    : null;
+  const contextHistory =
+    options.retainCompactedHistory || options.supersededContent
+      ? createContextHistory(compactionMaxChars)
+      : null;
   const contextParts = createContextParts();
   const tools = [
     ...options.tools,
@@ -418,6 +430,9 @@ export async function runAgentLoop(
   const turnNotes: string[] = [];
 
   let steps = 0;
+  // Messages the last model request sent; a fold that rewrites inside them
+  // makes the provider read them again.
+  let sentMessages = 0;
   let progressSteps = 0;
   let modelMs = 0;
   let toolMs = 0;
@@ -497,6 +512,7 @@ export async function runAgentLoop(
         compactionMaxChars - JSON.stringify(definitions).length,
       );
       const modelMessages = contextParts.prepare(messages, requestChars);
+      sentMessages = messages.length;
       try {
         response = await runModelTurn(
           (turnOptions) =>
@@ -869,6 +885,22 @@ export async function runAgentLoop(
       }
     }
     if (observation) messages.push({ role: "user", content: observation });
+    if (options.supersededContent && contextHistory) {
+      const folded = foldSupersededContent(
+        messages,
+        options.supersededContent(messages),
+        (archived) => contextHistory.archive(archived),
+        sentMessages,
+      );
+      if (folded) {
+        messages = folded;
+        traceOurs(
+          "packages/agent-runtime/src/agent-loop.ts:foldSupersededContent",
+          "rewritten",
+          "Superseded page views folded to receipts; exact text kept in context-history archives",
+        );
+      }
+    }
     if (staleToolResultChars !== null) {
       const unshortened = messages;
       messages = shortenStaleToolResults(

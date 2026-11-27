@@ -233,9 +233,10 @@ test("an editor that keeps its own document gets the paragraphs the model wrote"
         }
       },
     });
-    // The field summary the model gets back holds the letter, breaks and all.
+    // The write result the model gets back holds the letter, breaks and all
+    // (the page view after it may be folded into a receipt once superseded).
     expect(toolResults.get("rich-0")).toContain(
-      `answered: ${JSON.stringify(letter)}`,
+      `Cover letter* now holds ${JSON.stringify(letter)}`,
     );
     // A form posts line breaks as CRLF.
     expect(

@@ -65,6 +65,7 @@ export const VISUAL_PAGE_TOOL_DEFINITIONS: AgentLoopToolDefinition[] = [
 export function createVisualPageTools(
   hands: ApplyPageHands,
   observe: () => Promise<ApplyFormObservation>,
+  describe: (observation: ApplyFormObservation) => string = describeObservation,
 ): AgentLoopTool[] {
   return VISUAL_PAGE_TOOL_DEFINITIONS.map((definition) => ({
     definition,
@@ -111,7 +112,7 @@ export function createVisualPageTools(
         kind: "ok",
         status: result.ok ? "done" : "failed",
         progress: result.ok,
-        content: `${result.ok ? `Pointer ${input.action} at (${input.x}, ${input.y}).` : result.error}${result.clickFacts ? `\nBrowser press facts: ${JSON.stringify(result.clickFacts)}` : ""}\n\n${describeObservation(await observe())}`,
+        content: `${result.ok ? `Pointer ${input.action} at (${input.x}, ${input.y}).` : result.error}${result.clickFacts ? `\nBrowser press facts: ${JSON.stringify(result.clickFacts)}` : ""}\n\n${describe(await observe())}`,
       };
     },
   }));
