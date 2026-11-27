@@ -218,6 +218,28 @@ export const JobDetailSchema = JobRowSchema.extend({
 });
 export type JobDetail = z.infer<typeof JobDetailSchema>;
 
+/** Whether an address is a web page a browser tab opens (http or https). */
+export function isWebPageUrl(value: string | null | undefined): boolean {
+  if (!value) return false;
+  try {
+    return ["http:", "https:"].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The page an application opens on: its apply link when that is a web page,
+ * otherwise the listing. An apply link can be an email address (mailto:),
+ * which no tab opens; the listing shows it, and the run is told it as a fact.
+ */
+export function applicationPageUrl(job: {
+  url: string;
+  applyUrl: string | null;
+}): string {
+  return job.applyUrl && isWebPageUrl(job.applyUrl) ? job.applyUrl : job.url;
+}
+
 /** Some jobs by id, or every job a filter matches except a few. */
 export const JobSelectionSchema = z.union([
   z.object({ ids: z.array(JobIdSchema).min(1).max(5000) }).strict(),

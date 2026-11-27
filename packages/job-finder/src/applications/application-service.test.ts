@@ -994,6 +994,44 @@ it("the person's Send on a Fill in for me form whose page is gone hands the mode
   expect(f.onError).not.toHaveBeenCalled();
 });
 
+it("an email apply link starts on the listing and gives the model the email", async () => {
+  const f = await setup(1, undefined, {
+    applyUrl:
+      "mailto:jobs@replica.test?subject=Engineer%200%20application&body=Hello%20Replica",
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const input = f.execute.mock.calls[0]![1];
+  // No tab opens a mailto: link; the run opens on the listing.
+  expect(input.job.canonicalUrl).toBe("https://replica.test/jobs/0");
+  expect(input.job.applicationUrl).toBeNull();
+  expect(input.startingUrl).toBeUndefined();
+  const email = input.instructions?.find((line) =>
+    line.includes("applied to by email"),
+  );
+  expect(email).toContain("an email to jobs@replica.test");
+  expect(email).toContain('the subject "Engineer 0 application"');
+  expect(email).toContain('"Hello Replica"');
+  expect(email).toContain("https://replica.test/jobs/0");
+  const row = f.applications.listApplications().rows[0]!;
+  expect(f.applications.originsForApplications([row.id])).toEqual([
+    "https://replica.test",
+  ]);
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(f.onError).not.toHaveBeenCalled();
+  // Open shows the listing too, never the mailto: link.
+  expect(await f.service.open(row.id)).toMatchObject({
+    opened: true,
+  });
+  expect(f.browser.openSession).toHaveBeenLastCalledWith("target_site", {
+    targetUrl: "https://replica.test/jobs/0",
+  });
+});
+
 async function setup(
   count: number,
   concurrency?: number,
@@ -1002,6 +1040,8 @@ async function setup(
     locations?: string[];
     /** A written resume at this level instead of an approved Original. */
     draft?: { level: ResumeLevel; approve: boolean };
+    /** The listings' own apply link, such as an email address. */
+    applyUrl?: string;
   } = {},
 ) {
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
@@ -1031,7 +1071,7 @@ async function setup(
         location: options.locations?.[i] ?? "Remote",
         workModes: ["remote"],
         url: `https://replica.test/jobs/${i}`,
-        applyUrl: null,
+        applyUrl: options.applyUrl ?? null,
         sourceId: "replica",
         sourceLabel: "Replica",
         sourceJobId: String(i),

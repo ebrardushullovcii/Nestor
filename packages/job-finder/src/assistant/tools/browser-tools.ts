@@ -4,6 +4,8 @@ import {
   type PageTools,
 } from "@nestor/browser-agent";
 import {
+  applicationPageUrl,
+  isWebPageUrl,
   JobPostingSchema,
   NonEmptyStringSchema,
   type ApplyRawPageHands,
@@ -675,7 +677,10 @@ export const applyHereTool = defineTool({
     const job = await context.ports.readCommand("get_job", {
       id: Number(jobId),
     });
-    const applicationUrl = job?.applyUrl ?? job?.url ?? null;
+    const applicationUrl = job ? applicationPageUrl(job) : null;
+    // An email apply link opens no page: the run starts on the listing.
+    const emailLink =
+      job?.applyUrl && !isWebPageUrl(job.applyUrl) ? job.applyUrl : null;
     const merged = saved.merged.includes(Number(jobId));
     const samePage =
       applicationUrl !== null && sameOrigin(applicationUrl, pageUrl);
@@ -689,6 +694,11 @@ export const applyHereTool = defineTool({
             ? `The application will run on this site (${applicationUrl}).`
             : `The application will run on ${applicationUrl}, not on this page (${pageUrl}).`
           : "The saved job has no application address.",
+        ...(emailLink
+          ? [
+              `Its apply link is ${emailLink}, not a web page: the application opens on the listing and is sent by email.`,
+            ]
+          : []),
       ].join(" "),
       data: {
         jobId,
@@ -696,6 +706,7 @@ export const applyHereTool = defineTool({
         company: job?.company ?? posting.company,
         mergedIntoExistingJob: merged,
         applicationUrl,
+        ...(emailLink ? { applyLink: emailLink } : {}),
         applicationRunsOnThisPage: samePage,
       },
     };

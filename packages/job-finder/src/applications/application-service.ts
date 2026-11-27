@@ -16,10 +16,12 @@ import {
 import {
   AiBehaviorPreferenceSchema,
   ApplicationResumeArtifactSchema,
+  applicationPageUrl,
   browserAgentPermissionsOf,
   intendedAccountEmail,
   isActiveApplicationAuthorityEnvelope,
   isUploadRepairPrompt,
+  isWebPageUrl,
   jobSiteTarget,
   normalizeFormQuestionPrompt,
   SubmissionOutcomeRecordSchema,
@@ -191,6 +193,50 @@ export const applicationIdentity = (id: number, attempt: number) => ({
  */
 export const PERSON_SEND_INSTRUCTION =
   "The person reviewed this filled application in Job Finder and pressed Send. Send it now, once, with submit_application on the form's own final send control as it is on the page. If the page was reloaded, closed or lost answers, first restore the answers and files from the earlier application state (they are what the person reviewed), then send. Read the send ledger facts first: a send to this posting that is already confirmed or uncertain is not sent again without checking the site.";
+
+/**
+ * An apply link that is not a web page, told to the run as a fact. No tab
+ * opens a mailto: link, so the run starts on the listing; the address,
+ * subject and text the link carries are the model's to apply with, from the
+ * person's mail in a second tab or however it judges best.
+ */
+export function applyLinkInstruction(
+  job: Pick<JobDetail, "url" | "applyUrl">,
+): string | null {
+  if (!job.applyUrl || isWebPageUrl(job.applyUrl)) return null;
+  let link: URL | null = null;
+  try {
+    link = new URL(job.applyUrl);
+  } catch {
+    link = null;
+  }
+  if (link?.protocol !== "mailto:")
+    return `This posting's apply link is ${JSON.stringify(job.applyUrl)}, which is not a web page, so this run opened on the listing at ${job.url}. Read the listing for how it asks applicants to apply.`;
+  const params = link.searchParams;
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  const to = [decode(link.pathname), ...params.getAll("to")]
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const cc = params.getAll("cc").join(", ").trim();
+  const subject = params.get("subject")?.trim();
+  const body = params.get("body")?.trim();
+  return [
+    `This posting is applied to by email: its apply link is ${JSON.stringify(job.applyUrl)}, an email address rather than a web form, so this run opened on the listing at ${job.url}.`,
+    `The application is an email to ${to.join(", ") || "the address the listing names"}`,
+    cc ? `, copied to ${cc}` : "",
+    subject ? `, with the subject ${JSON.stringify(subject)}` : "",
+    body ? `, starting from this text: ${JSON.stringify(body)}` : "",
+    ".",
+    " Read the listing for anything it asks applicants to send or write. The person's signed-in mail is open to you in a second tab (Gmail composes at https://mail.google.com/mail/?view=cm&fs=1&to=<address>); attach the resume to that email and write its message from the person's facts. That mail client's Send is this application's send control.",
+  ].join("");
+}
 
 export function createApplicationService(deps: ApplicationServiceDeps) {
   const { jobs, applications, browser } = deps;
@@ -554,7 +600,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       )
     )
       return;
-    applications.recordOrigin(row.id, new URL(job.applyUrl ?? job.url).origin);
+    // An email apply link has no site; the run starts on the listing.
+    const target = applicationPageUrl(job);
+    applications.recordOrigin(row.id, new URL(target).origin);
     applications.recordOrigin(row.id, new URL(job.url).origin);
     // Apply captures the default. Only task-local authority can narrow it later.
     // The person's own Send on the form they reviewed is their instruction
@@ -574,8 +622,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         })
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
-    const target = job.applyUrl ?? job.url;
     const instructions = instructionsFor(job, sourceInstructionArtifacts);
+    const applyLink = applyLinkInstruction(job);
+    if (applyLink) instructions.push(applyLink);
     if (personSend) instructions.push(PERSON_SEND_INSTRUCTION);
     let startingUrl: string | undefined;
     // A continue keeps the page, and with it the files already attached.
@@ -776,7 +825,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
-      job: toResumeJob(job),
+      job: {
+        ...toResumeJob(job),
+        // A tab opens only a web page; an email link is in the instructions.
+        applicationUrl: isWebPageUrl(job.applyUrl) ? job.applyUrl : null,
+      },
       listingDiscovery: listingDiscovery(job),
       profile,
       settings,
@@ -1594,8 +1647,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const job = jobs.getJob(row.jobId);
     const page =
       applications.getWork(id)?.reviewCard?.pageUrl ??
-      job?.applyUrl ??
-      job?.url;
+      (job ? applicationPageUrl(job) : null);
     if (!page) return false;
     const destination = new URL(page);
     const previous = applications.getSubmissionReceipt(id);
@@ -2088,8 +2140,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const job = jobs.getJob(row.jobId);
     const url =
       applications.getWork(id)?.reviewCard?.pageUrl ??
-      job?.applyUrl ??
-      job?.url;
+      (job ? applicationPageUrl(job) : null);
     if (!url) return { opened: false, retained: false };
     await browser.openSession("target_site", { targetUrl: url });
     return { opened: true, retained: false };

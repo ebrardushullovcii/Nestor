@@ -1,4 +1,5 @@
 import {
+  applicationPageUrl,
   ResumeViewModeSchema,
   RESUME_VIEW_MODE_OPTIONS,
   type ResumeViewMode,
@@ -442,7 +443,7 @@ export function ResumePane(props: {
               </Button>
               <Button
                 onClick={() =>
-                  openUrlInJobFinderBrowser(job.applyUrl ?? job.url)
+                  openUrlInJobFinderBrowser(applicationPageUrl(job))
                 }
                 size="toolbar"
                 title="Open the application page and apply yourself"
