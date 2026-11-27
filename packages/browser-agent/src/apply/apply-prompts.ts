@@ -214,13 +214,22 @@ function describeControl(
   }
   if (control.upload) {
     const { inputFiles, ...upload } = control.upload;
-    if (inputFiles) {
-      const count = inputFiles.length;
-      const files = `${count} ${count === 1 ? "file" : "files"}`;
-      parts.push(
-        `native file input: ${files}${count ? ` ${JSON.stringify(inputFiles)}` : ""}`,
-      );
-    }
+    const held =
+      inputFiles ??
+      (upload.fileName === undefined
+        ? []
+        : [
+            {
+              name: upload.fileName,
+              ...(upload.fileSize === undefined
+                ? {}
+                : { size: upload.fileSize }),
+            },
+          ]);
+    const count = held.length;
+    parts.push(
+      `native file input: ${count} ${count === 1 ? "file" : "files"}${count ? ` ${JSON.stringify(held)}` : ""}`,
+    );
     parts.push(`upload facts: ${JSON.stringify(upload)}`);
   }
   if (control.invalid) {

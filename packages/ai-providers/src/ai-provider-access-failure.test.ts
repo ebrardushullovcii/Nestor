@@ -3,6 +3,7 @@ import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
   AI_ACCESS_MESSAGES,
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   isAiProviderRateLimited,
   resetAiAccessForTests,
 } from "./ai-provider-access-failure";
@@ -26,6 +27,53 @@ import {
 } from "./test-fixtures";
 
 describe("AI provider access failures", () => {
+  test.each([400, 413, 415, 422])(
+    "classifies provider HTTP%i as a rejected Nestor request",
+    (status) => {
+      const rejected = new ModelRequestHttpError(
+        "Provider error",
+        status,
+        null,
+      );
+      expect(
+        getRejectedModelRequest(new Error("wrapped", { cause: rejected })),
+      ).toBe(rejected);
+    },
+  );
+
+  test.each([
+    "Invalid request body",
+    "Request is invalid",
+    "invalid_request_error",
+    "INVALID_ARGUMENT",
+    "Malformed JSON",
+    "Request validation failed",
+  ])(
+    "uses explicit request diagnostics on other 4xx responses: %s",
+    (message) => {
+      const error = new ModelRequestHttpError(message, 424, null);
+      expect(getRejectedModelRequest(error)).toBe(error);
+    },
+  );
+
+  test("leaves account, rate, route and transient errors in their existing flows", () => {
+    for (const status of [401, 402, 403, 404, 408, 409, 425, 429, 500, 503])
+      expect(
+        getRejectedModelRequest(
+          new ModelRequestHttpError("Invalid request", status, null),
+        ),
+      ).toBeNull();
+    expect(
+      getRejectedModelRequest(
+        new ModelRequestHttpError("Resource gone", 410, null),
+      ),
+    ).toBeNull();
+    expect(
+      getRejectedModelRequest(
+        Object.assign(new Error("Website error"), { status: 400 }),
+      ),
+    ).toBeNull();
+  });
   test.each([
     [402, "funding"],
     [401, "authentication"],

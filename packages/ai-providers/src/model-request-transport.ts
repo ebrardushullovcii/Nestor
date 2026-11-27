@@ -20,8 +20,8 @@ import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
  *   have no deadline unless the operator explicitly supplies one.
  * - Retries with capped exponential backoff and `Retry-After` support for
  *   the failures that are worth retrying: network errors, idle timeouts,
- *   incomplete streams, 408/409/425/429 and 5xx. Never for 4xx validation
- *   errors, never after a caller abort. An explicit operator deadline still applies.
+ *   incomplete streams, 408/409/425/429 and 5xx. Never after a request-shape
+ *   rejection or a caller abort. An explicit operator deadline still applies.
  * - The result is the same normalized Chat Completions payload the rest of
  *   the package already reads, so callers do not care whether the bytes came
  *   as one JSON body or as server-sent events. A gateway that ignores
@@ -43,6 +43,7 @@ import {
 } from "./anthropic-messages";
 import {
   recordModelRequestEvent,
+  recordModelRequestRejection,
   finishModelRequestProgress,
 } from "./model-request-events";
 import {
@@ -63,6 +64,12 @@ export const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 20_000;
 
 const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([
   408, 409, 425, 429,
+]);
+const REQUEST_SHAPE_STATUSES: ReadonlySet<number> = new Set([
+  400, 413, 415, 422,
+]);
+const ROUTE_OR_ACCOUNT_STATUSES: ReadonlySet<number> = new Set([
+  401, 402, 403, 404,
 ]);
 
 const TRANSIENT_MESSAGE_PATTERN =
@@ -146,6 +153,39 @@ export class ModelRequestHttpError extends Error {
   }
 }
 
+function canRejectModelRequest(status: number): boolean {
+  return (
+    status >= 400 &&
+    status < 500 &&
+    !ROUTE_OR_ACCOUNT_STATUSES.has(status) &&
+    !RETRYABLE_HTTP_STATUSES.has(status)
+  );
+}
+
+function describesInvalidRequest(detail: string): boolean {
+  const words = detail.trim().replace(/[_-]+/gu, " ");
+  if (
+    /^(?:invalid (?:argument|parameter)|(?:request )?validation error)(?::|$)/iu.test(
+      words,
+    )
+  )
+    return true;
+  return /\b(?:invalid|malformed|bad)\s+(?:request|payload|json|(?:input\s+|tool\s+)?schema)\b|\b(?:request(?:\s+body)?|payload|json|schema)\s+(?:(?:is|was)\s+)?(?:invalid|malformed|failed\s+validation|validation\s+failed)\b/iu.test(
+    words,
+  );
+}
+
+/** A request-shape rejection, with transient, route and account handling taking precedence. */
+export function isRejectedModelRequest(
+  error: Pick<ModelRequestHttpError, "status" | "message">,
+): boolean {
+  return (
+    canRejectModelRequest(error.status) &&
+    (REQUEST_SHAPE_STATUSES.has(error.status) ||
+      describesInvalidRequest(error.message))
+  );
+}
+
 export class ModelRequestTimeoutError extends Error {
   readonly kind: "idle" | "total";
 
@@ -198,6 +238,41 @@ function readErrorMessage(payload: unknown): string | null {
     return error.message;
   }
   return null;
+}
+
+/** Read a diagnostic from provider error bodies beyond the usual error.message. */
+function readRequestRejectionDetail(
+  status: number,
+  payload: unknown,
+  rawBody: string,
+  contentType: string | null,
+  message: string | null,
+): string | null {
+  if (
+    !canRejectModelRequest(status) ||
+    (message && describesInvalidRequest(message))
+  )
+    return null;
+  const body = isRecord(payload) ? payload : null;
+  const error = isRecord(body?.error) ? body.error : body;
+  const hasRequestShapeStatus = REQUEST_SHAPE_STATUSES.has(status);
+  const detail = [
+    error?.message,
+    error?.detail,
+    error?.title,
+    error?.code,
+    error?.type,
+    payload,
+    !contentType || contentType.toLowerCase().startsWith("text/plain")
+      ? rawBody.trim()
+      : null,
+  ].find(
+    (value): value is string =>
+      typeof value === "string" &&
+      Boolean(value.trim()) &&
+      ((hasRequestShapeStatus && !message) || describesInvalidRequest(value)),
+  );
+  return detail ? (message ? `${detail}: ${message}` : detail) : null;
 }
 
 function rejectIncompleteOutput(payload: unknown, apiMode: ModelApiMode): void {
@@ -951,6 +1026,7 @@ export async function performModelRequest(
         rejections.set(credentials, { until: retryAt, error });
       }
       noteRefusal(error, retryAt);
+      if (isRejectedModelRequest(error)) recordModelRequestRejection(error);
     }
     throw error;
   } finally {
@@ -1182,8 +1258,16 @@ async function performModelRequestAttempts(
           parsed = null;
         }
         observedResponse(parsed);
+        const message = readErrorMessage(parsed);
         throw new ModelRequestHttpError(
-          readErrorMessage(parsed) ??
+          readRequestRejectionDetail(
+            response.status,
+            parsed,
+            rawBody,
+            response.headers.get("content-type"),
+            message,
+          ) ??
+            message ??
             `Model request failed with status ${response.status}`,
           response.status,
           parseRetryAfterMs(response.headers.get("retry-after")),
@@ -1253,6 +1337,12 @@ async function performModelRequestAttempts(
         traceEvent("provider_error", {
           id: traceId,
           error,
+          ...(error instanceof ModelRequestHttpError
+            ? {
+                httpStatus: error.status,
+                rejectedNestorRequest: isRejectedModelRequest(error),
+              }
+            : {}),
           abortReason,
           durationMs: Date.now() - traceStarted,
         });

@@ -1,5 +1,6 @@
 import {
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   withModelProviderProgress,
 } from "@nestor/ai-providers";
 import {
@@ -16,7 +17,10 @@ import {
   loadVerifiedResumeBytes,
   type ExecuteApplicationFlowInput,
 } from "@nestor/browser-runtime";
-import { browserAgentPermissionsOf } from "@nestor/contracts";
+import {
+  browserAgentPermissionsOf,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
+} from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolveListingCountry } from "../applications/questions";
@@ -491,7 +495,12 @@ async function runApplyAgentSafely(
   config: Parameters<typeof runApplyAgent>[0],
 ): Promise<
   | { ok: true; result: ApplyAgentResult }
-  | { ok: false; detail: string; timing?: ApplyAgentTiming }
+  | {
+      ok: false;
+      detail: string;
+      timing?: ApplyAgentTiming;
+      requestRejected?: true;
+    }
 > {
   let timing: ApplyAgentTiming | undefined;
   try {
@@ -508,6 +517,13 @@ async function runApplyAgentSafely(
       ),
     };
   } catch (error) {
+    if (getRejectedModelRequest(error))
+      return {
+        ok: false,
+        ...(timing ? { timing } : {}),
+        detail: NESTOR_REQUEST_REJECTED_MESSAGE,
+        requestRejected: true,
+      };
     // The AI account refused the call: say that, and Apply picks the
     // application up again by itself once calls go through.
     const access = getAiProviderAccessFailure(error);
@@ -722,6 +738,26 @@ export async function runAgentApplicationPreparation(
   });
 
   if (!outcome.ok) {
+    if (outcome.requestRejected)
+      return {
+        ...buildPreparationResult({
+          executionInput,
+          state: "paused",
+          summary: "Nestor paused this application",
+          detail: outcome.detail,
+          questions: [],
+          blocker: null,
+          checkpoints: [],
+          checkpointLabel: "Nestor's AI request was rejected",
+          checkpointDetail: outcome.detail,
+          checkpointUrls: [targetUrl],
+          lastUrl: null,
+          now: now().toISOString(),
+          nextActionLabel: "Continues when Nestor restarts",
+        }),
+        requestRejected: true,
+        agentTiming: outcome.timing,
+      };
     // Whatever went wrong, this run ends as a recorded outcome rather than as
     // a thrown error: a run that disappears leaves the person with a button
     // that does nothing and a record that says it is still going.

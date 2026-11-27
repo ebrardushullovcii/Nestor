@@ -4,7 +4,10 @@ import {
   ModelRequestHttpError,
   type AiAccessStatus,
 } from "@nestor/ai-providers";
-import type { FoundJob } from "@nestor/contracts";
+import {
+  NESTOR_REQUEST_REJECTED_MESSAGE,
+  type FoundJob,
+} from "@nestor/contracts";
 import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -86,7 +89,7 @@ afterEach(() => {
 
 function setup(input: {
   store?: JobStore;
-  writes: Array<"refused" | "busy" | "ok">;
+  writes: Array<"refused" | "busy" | "invalid" | "ok">;
   access: ReturnType<typeof scriptedAccess>;
   jobs?: number;
 }) {
@@ -99,6 +102,16 @@ function setup(input: {
     (request: Parameters<typeof base.createResumeDraft>[0]) => {
       const next = writes.shift() ?? "ok";
       if (next === "refused") return Promise.reject(outOfCredit());
+      if (next === "invalid")
+        return Promise.reject(
+          new Error("The AI could not write this resume.", {
+            cause: new ModelRequestHttpError(
+              "Request schema rejected",
+              422,
+              null,
+            ),
+          }),
+        );
       if (next === "busy")
         return Promise.reject(
           new Error("The AI could not write this resume.", {
@@ -139,6 +152,33 @@ const waitFor = (assertion: () => void) =>
   vi.waitFor(assertion, { timeout: 5_000 });
 
 describe("resumes when the AI account refuses calls", () => {
+  it("keeps Nestor's rejected resume request queued until restart", async () => {
+    const access = scriptedAccess();
+    const { store, service, ids, createResumeDraft } = setup({
+      access,
+      writes: ["invalid", "ok"],
+    });
+    const [id] = ids as [number];
+    store.moveJobs({ selection: { ids }, to: "shortlisted" });
+    await waitFor(() =>
+      expect(service.get(id).resume).toMatchObject({
+        state: "queued",
+        error: NESTOR_REQUEST_REJECTED_MESSAGE,
+      }),
+    );
+    access.set("available");
+    expect(access.recheck()).toBe(false);
+    expect(createResumeDraft).toHaveBeenCalledOnce();
+    service.stop();
+    service.start();
+    await waitFor(() =>
+      expect(service.get(id).resume).toMatchObject({
+        state: "ready",
+        error: null,
+      }),
+    );
+    expect(createResumeDraft).toHaveBeenCalledTimes(2);
+  });
   it("says the account ran out of credit, waits without failing the queue, and writes the resume by itself once calls go through", async () => {
     const access = scriptedAccess();
     const { store, service, ids, createResumeDraft } = setup({

@@ -4,6 +4,7 @@ import { editResumeDraft, dropsResumeContent } from "./edit-resume";
 import type { EditResumeInput } from "@nestor/contracts";
 import {
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   isAiProviderAccessMessage,
   isAiProviderRateLimited,
   isAiServiceBusy,
@@ -12,6 +13,7 @@ import {
 import { APP_AI_ACCESS, type AiAccessWatch } from "../internal/ai-access-watch";
 import {
   hasProfileSetupPlaceholderValue,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   type CandidateProfile,
   type ResumeCommandOutputs,
   type ResumeDraft,
@@ -97,6 +99,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     min: 2,
   });
   const running = new Map<number, AbortController>();
+  const rejectedRequests = new Set<number>();
   const scheduled = new Map<number, ReturnType<typeof setTimeout>>();
   const withListing = createResumeListingReader({
     resumes,
@@ -175,6 +178,9 @@ export function createResumeService(deps: ResumeServiceDeps) {
         if (stopped) return;
         if (signal.aborted) {
           resumes.requeue(jobId);
+        } else if (getRejectedModelRequest(error)) {
+          rejectedRequests.add(jobId);
+          resumes.parkWriting(jobId, NESTOR_REQUEST_REJECTED_MESSAGE);
         } else if (
           !getAiProviderAccessFailure(error) &&
           (isAiProviderRateLimited(error) || isAiServiceBusy(error))
@@ -202,6 +208,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     if (
       stopped ||
       running.has(jobId) ||
+      rejectedRequests.has(jobId) ||
       store.getJob(jobId)?.stage !== "shortlisted"
     )
       return;
@@ -221,14 +228,18 @@ export function createResumeService(deps: ResumeServiceDeps) {
     // instead of each failing; the periodic check starts one. The person's
     // own rewrite still goes, and reaches the service now.
     if (access.status() === "blocked") {
-      if (immediateId !== undefined && !running.has(immediateId)) {
+      if (
+        immediateId !== undefined &&
+        !running.has(immediateId) &&
+        !rejectedRequests.has(immediateId)
+      ) {
         access.letCallsThrough();
         clearTimeout(scheduled.get(immediateId));
         launch(immediateId);
       }
       return;
     }
-    for (const jobId of resumes.listUnwritten(50)) {
+    for (const jobId of resumes.listUnwritten(50, rejectedRequests)) {
       if (running.has(jobId)) continue;
       if (jobId === immediateId) {
         clearTimeout(scheduled.get(jobId));
@@ -286,7 +297,8 @@ export function createResumeService(deps: ResumeServiceDeps) {
       .listFailed()
       .find(({ error }) => isAiProviderAccessMessage(error));
     if (refused && !resumes.requeueFailed(refused.jobId)) return false;
-    const jobId = refused?.jobId ?? resumes.listUnwritten(1)[0];
+    const jobId =
+      refused?.jobId ?? resumes.listUnwritten(1, rejectedRequests)[0];
     if (jobId === undefined) return false;
     clearTimeout(scheduled.get(jobId));
     launch(jobId);
@@ -294,6 +306,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
   }
 
   function setLevel(jobId: number, level: ResumeLevel) {
+    rejectedRequests.delete(jobId);
     if (level === "original") running.get(jobId)?.abort();
     const resume = store.transaction(() => {
       const changed = resumes.setLevel(jobId, level);
@@ -330,6 +343,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     start() {
       if (!stopped) return;
       stopped = false;
+      rejectedRequests.clear();
       waitingForProfile = false;
       resumes.requeue();
       unsubscribe = store.onChange((change) => {

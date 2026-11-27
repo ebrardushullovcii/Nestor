@@ -1,6 +1,7 @@
 import { setMaxListeners } from "node:events";
 import {
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   isAiProviderAccessMessage,
   withModelProviderProgress,
 } from "@nestor/ai-providers";
@@ -17,6 +18,7 @@ import {
   jobSiteTarget,
   JobSearchSettingsSchema,
   JobDiscoveryTargetSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   type JobDiscoveryTarget,
   type JobSearchRecord,
   type JobSearchStatus,
@@ -77,6 +79,7 @@ export function createJobSearchRunner(
   let continuation: ReturnType<typeof setTimeout> | null = null;
   let recoveryQueue: FitQueue | null = null;
   let recoveryError: string | null = null;
+  let fitRequestRejected = false;
   const providerWaits = new Set<object>();
   let visibleIds: readonly number[] = [];
   const syncFitContextForView = (context: JobSearchContext) => {
@@ -96,6 +99,7 @@ export function createJobSearchRunner(
   setMaxListeners(0, fitLifetime.signal);
   const sentFits = createFitRequests(fitLifetime.signal);
   const scheduleFit = (delay = 300) => {
+    if (fitRequestRejected) return;
     if (continuation) clearTimeout(continuation);
     continuation = setTimeout(() => {
       continuation = null;
@@ -128,6 +132,7 @@ export function createJobSearchRunner(
    */
   type Parked = {
     owner: "person" | "nestor";
+    requestRejected?: true;
     message: string;
     providerMessage: string | null;
   };
@@ -145,13 +150,29 @@ export function createJobSearchRunner(
       owner: block.owner,
       message: block.message,
       providerMessage: block.providerMessage,
+      ...(block.requestRejected ? { requestRejected: true } : {}),
     };
     run.flush?.();
+    if (block.requestRejected && run.record) {
+      run.record =
+        deps.store.searches.setRunningError(run.record.id, block.message) ??
+        run.record;
+      search = run.record;
+    }
     run.suspended = true;
     run.controller.abort();
     run.setReady(null);
     active = null;
     notify(true);
+  };
+  const parkRejectedRequest = () => {
+    fitRequestRejected = true;
+    park({
+      owner: "nestor",
+      requestRejected: true,
+      message: NESTOR_REQUEST_REJECTED_MESSAGE,
+      providerMessage: null,
+    });
   };
   /** Continues a parked search from its saved queue, as a restart does. */
   const resumeParked = (): Promise<JobSearchRecord> | null => {
@@ -165,6 +186,7 @@ export function createJobSearchRunner(
     return begin(record.settings, undefined, record);
   };
   const retryRefused = (): boolean => {
+    if (fitRequestRejected) return false;
     if (parked) {
       void resumeParked()?.catch(() => undefined);
       return true;
@@ -182,6 +204,7 @@ export function createJobSearchRunner(
   /** The person said go: a parked search continues, and its calls go through now. */
   const resumeForPerson = async (): Promise<void> => {
     if (aiAccess.status() === "blocked") aiAccess.letCallsThrough();
+    fitRequestRejected = false;
     const resumed = resumeParked();
     if (resumed) await resumed;
   };
@@ -261,13 +284,20 @@ export function createJobSearchRunner(
     notification = setTimeout(emit, 250);
     notification.unref();
   };
-  const withProviderProgress = <T>(work: () => Promise<T>): Promise<T> => {
+  const withProviderProgress = <T>(
+    work: () => Promise<T>,
+    onRequestRejected: () => void,
+  ): Promise<T> => {
     const token = {};
-    return withModelProviderProgress((waiting) => {
-      if (waiting) providerWaits.add(token);
-      else providerWaits.delete(token);
-      notify(true);
-    }, work).finally(() => {
+    return withModelProviderProgress(
+      (waiting) => {
+        if (waiting) providerWaits.add(token);
+        else providerWaits.delete(token);
+        notify(true);
+      },
+      work,
+      onRequestRejected,
+    ).finally(() => {
       if (providerWaits.delete(token)) notify(true);
     });
   };
@@ -334,6 +364,10 @@ export function createJobSearchRunner(
       concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
       (n) => update(run, { scored: n }),
       (error) => {
+        if (getRejectedModelRequest(error)) {
+          parkRejectedRequest();
+          return;
+        }
         fitError = noteFitFailure(error) ?? errorMessage(error);
       },
       settings,
@@ -464,6 +498,10 @@ export function createJobSearchRunner(
      */
     const attemptFailed = (source: SourceWork, error: unknown) => {
       if (!current(source)) return;
+      if (getRejectedModelRequest(error)) {
+        parkRejectedRequest();
+        return;
+      }
       source.failure = errorMessage(error);
       if (source.row.cards) {
         source.row.state = "partial";
@@ -696,6 +734,10 @@ export function createJobSearchRunner(
             await collect(source, "http", signal);
           } catch (error) {
             if (!current(source)) return;
+            if (getRejectedModelRequest(error)) {
+              parkRejectedRequest();
+              return;
+            }
             source.notes = [
               `HTTP reading did not finish: ${errorMessage(error)}`,
               ...source.notes,
@@ -764,6 +806,10 @@ export function createJobSearchRunner(
       if (fits.needsAnotherPass) scheduleFit(5000);
     } catch (error) {
       flush();
+      if (!signal.aborted && getRejectedModelRequest(error)) {
+        parkRejectedRequest();
+        return;
+      }
       finish(
         run,
         signal.aborted ? "stopped" : "failed",
@@ -844,7 +890,9 @@ export function createJobSearchRunner(
         let fullIds: Set<string> | undefined;
         deps.store.transaction(() => {
           run.record =
-            resume ?? deps.store.searches.start(settings, targets.length);
+            resume?.error === NESTOR_REQUEST_REJECTED_MESSAGE
+              ? (deps.store.searches.setRunningError(resume.id, null) ?? resume)
+              : (resume ?? deps.store.searches.start(settings, targets.length));
           if (resume && !resultRows.planned(resume.id)) {
             // Upgrade an interrupted search written before durable queues.
             const rows = [];
@@ -921,12 +969,17 @@ export function createJobSearchRunner(
         const started = structuredClone(run.record!);
         void yieldTurn()
           .then(() =>
-            withProviderProgress(() =>
-              execute(run, context, targets, {
-                ids: new Set(forced?.targets.map((target) => target.id)),
-                full: forced?.full ?? false,
-                ...(fullIds ? { fullIds } : {}),
-              }),
+            withProviderProgress(
+              () =>
+                execute(run, context, targets, {
+                  ids: new Set(forced?.targets.map((target) => target.id)),
+                  full: forced?.full ?? false,
+                  ...(fullIds ? { fullIds } : {}),
+                }),
+              () => {
+                if (active === run && !run.controller.signal.aborted)
+                  parkRejectedRequest();
+              },
             ),
           )
           .catch((error: unknown) => {
@@ -1084,72 +1137,91 @@ export function createJobSearchRunner(
         scheduleFit();
       }
     },
-    scoreUnscored() {
+    scoreUnscored(explicit = false) {
       if (recovery) return recovery.result;
+      if (explicit && !parked?.requestRejected) fitRequestRejected = false;
+      if (fitRequestRejected) return Promise.resolve(0);
       recoveryError = null;
       const controller = new AbortController();
       const result = Promise.resolve()
         .then(() =>
-          withProviderProgress(async () => {
-            const run = active;
-            if (run && !run.record) await run.starting;
-            const liveFits = run
-              ? await abortable(run.ready, controller.signal)
-              : null;
-            // Use the live queue, so recovery and discovery cannot score a job twice.
-            if (run && !run.controller.signal.aborted && liveFits) {
-              const current = await abortable(
+          withProviderProgress(
+            async () => {
+              const run = active;
+              if (run && !run.record) await run.starting;
+              const liveFits = run
+                ? await abortable(run.ready, controller.signal)
+                : null;
+              // Use the live queue, so recovery and discovery cannot score a job twice.
+              if (run && !run.controller.signal.aborted && liveFits) {
+                const current = await abortable(
+                  deps.readContext(),
+                  controller.signal,
+                );
+                current.remoteCountsAsAnyLocation =
+                  deps.readRemoteCountsAsAnyLocation?.() ??
+                  current.remoteCountsAsAnyLocation ??
+                  true;
+                syncFitContextForView(current);
+                const before = liveFits.scored;
+                enqueueSavedFits(liveFits);
+                await liveFits.drain();
+                if (liveFits.needsAnotherPass) scheduleFit(5000);
+                return liveFits.scored - before;
+              }
+              controller.signal.throwIfAborted();
+              const context = await abortable(
                 deps.readContext(),
                 controller.signal,
               );
-              current.remoteCountsAsAnyLocation =
+              context.remoteCountsAsAnyLocation =
                 deps.readRemoteCountsAsAnyLocation?.() ??
-                current.remoteCountsAsAnyLocation ??
+                context.remoteCountsAsAnyLocation ??
                 true;
-              syncFitContextForView(current);
-              const before = liveFits.scored;
-              enqueueSavedFits(liveFits);
-              await liveFits.drain();
-              if (liveFits.needsAnotherPass) scheduleFit(5000);
-              return liveFits.scored - before;
-            }
-            controller.signal.throwIfAborted();
-            const context = await abortable(
-              deps.readContext(),
-              controller.signal,
-            );
-            context.remoteCountsAsAnyLocation =
-              deps.readRemoteCountsAsAnyLocation?.() ??
-              context.remoteCountsAsAnyLocation ??
-              true;
-            syncFitContextForView(context);
-            const fits = createFitQueue(
-              deps,
-              context,
-              controller.signal,
-              concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
-              () => notify(),
-              (error) => {
-                recoveryError =
-                  noteFitFailure(error) ??
-                  "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
-                notify();
-              },
-              // The last search's note was for that search only.
-              search ? { ...search.settings, note: "" } : undefined,
-              () => notify(),
-              sentFits,
-            );
-            recoveryQueue = fits;
-            enqueueSavedFits(fits);
-            await fits.drain();
-            if (fits.needsAnotherPass && !controller.signal.aborted)
-              scheduleFit(5000);
-            return fits.scored;
-          }),
+              syncFitContextForView(context);
+              const fits = createFitQueue(
+                deps,
+                context,
+                controller.signal,
+                concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
+                () => notify(),
+                (error) => {
+                  if (getRejectedModelRequest(error)) {
+                    parkRejectedRequest();
+                    return;
+                  }
+                  recoveryError =
+                    noteFitFailure(error) ??
+                    "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
+                  notify();
+                },
+                // The last search's note was for that search only.
+                search ? { ...search.settings, note: "" } : undefined,
+                () => notify(),
+                sentFits,
+              );
+              recoveryQueue = fits;
+              enqueueSavedFits(fits);
+              await fits.drain();
+              if (fits.needsAnotherPass && !controller.signal.aborted)
+                scheduleFit(5000);
+              return fits.scored;
+            },
+            () => {
+              if (
+                recovery?.controller === controller &&
+                !controller.signal.aborted
+              )
+                parkRejectedRequest();
+            },
+          ),
         )
         .catch((error: unknown) => {
           if (controller.signal.aborted) return 0;
+          if (getRejectedModelRequest(error)) {
+            parkRejectedRequest();
+            return 0;
+          }
           recoveryError =
             noteFitFailure(error) ??
             "Fit scoring did not finish. Your progress is kept; retry fit to continue.";

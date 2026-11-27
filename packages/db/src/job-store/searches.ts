@@ -24,6 +24,7 @@ export interface JobSearches {
   start(settings: JobSearchSettings, sourcesTotal: number): JobSearchRecord;
   /** Adds to the running counts. */
   count(id: string, increments: Partial<SearchCounts>): JobSearchRecord | null;
+  setRunningError(id: string, error: string | null): JobSearchRecord | null;
   finish(
     id: string,
     state: Exclude<JobSearchState, "running">,
@@ -108,6 +109,12 @@ export function createSearches(sql: Statements): JobSearches {
         `UPDATE searches SET state = ?, finished_at = ?, error = ?
          WHERE id = ? AND state = 'running'`,
       ).run(state, Date.now(), error, id);
+      return get(id);
+    },
+    setRunningError(id, error) {
+      sql(
+        "UPDATE searches SET error = ? WHERE id = ? AND state = 'running'",
+      ).run(error, id);
       return get(id);
     },
     get,

@@ -1,5 +1,6 @@
 import {
   JobSearchSettingsSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   type JobSearchSettings,
   type JobSearchStatus,
 } from "@nestor/contracts";
@@ -82,8 +83,9 @@ function runningLine(status: JobSearchStatus): {
   // bundled key asks nothing of the person.
   if (status.parked)
     return {
-      text:
-        status.parked.owner === "nestor"
+      text: status.parked.requestRejected
+        ? "Paused · Nestor sent an invalid AI request"
+        : status.parked.owner === "nestor"
           ? "Paused · Nestor's AI service is paused; this search continues when it is back"
           : "Paused · your AI account needs you (see Needs you)",
       detail: status.parked.providerMessage
@@ -448,13 +450,16 @@ export function SearchStatus(props: {
       className={cn("flex min-h-8 min-w-0 items-center gap-2", props.className)}
       data-search-status
     >
-      {props.error || fitError ? (
+      {props.error ||
+      fitError ||
+      (!running &&
+        props.status.fitError === NESTOR_REQUEST_REJECTED_MESSAGE) ? (
         <p
           className="min-w-0 flex-1 truncate text-(length:--text-small) text-(--warning-text)"
           role="alert"
-          title={props.error ?? fitError ?? undefined}
+          title={props.error ?? fitError ?? props.status.fitError ?? undefined}
         >
-          {props.error ?? fitError}
+          {props.error ?? fitError ?? props.status.fitError}
         </p>
       ) : !running && fitting ? (
         <p role="status" className="min-w-0 flex-1 text-(length:--text-small)">
