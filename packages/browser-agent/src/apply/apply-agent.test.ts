@@ -287,6 +287,11 @@ test.each([
     expect(prompt).toContain(
       "Leave an optional field you have no fact for empty",
     );
+    expect(prompt).toContain(
+      "a tool, product, practice, design choice, event or work detail it does not state",
+    );
+    expect(prompt).toContain("a missing record is not that basis");
+    expect(prompt).toContain("never from total career years");
   },
 );
 
