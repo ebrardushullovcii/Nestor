@@ -89,13 +89,13 @@ test("page observations distinguish a site's old upload label from the browser's
   };
 
   expect(describeObservation(before)).toContain(
-    "browser file input holds: resume.pdf",
+    'native file input: 1 file [{"name":"resume.pdf","size":256}]',
   );
   for (const text of [
     describeObservation(current),
     describeObservationUpdate(current, before),
   ]) {
-    expect(text).toContain("browser file input: empty");
+    expect(text).toContain("native file input: 0 files");
     expect(text).toContain('"nearby":"resume.pdf"');
   }
 });

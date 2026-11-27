@@ -122,7 +122,9 @@ export interface RawApplyUpload {
   nearby: string;
   /** The browser's own file widget is on screen, showing the chosen name. */
   shown: boolean;
-  /** The file the input holds now, as the page reports it. */
+  /** Current browser FileList, empty when the native input holds no files. */
+  inputFiles?: readonly { name: string; size: number }[];
+  /** First file in the input, also used to correlate upload receipt evidence. */
   fileName?: string;
   fileSize?: number;
   /** The file selected by this runtime, even if the widget emptied its input. */

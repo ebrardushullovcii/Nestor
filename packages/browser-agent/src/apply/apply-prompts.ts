@@ -66,6 +66,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "",
     "Answering this application:",
     `- ${KEYBOARD_INSTRUCTIONS}`,
+    "- For file fields, the native file input lists the files the browser holds now, with sizes in bytes. The described and nearby text comes from the site and can still show an old filename. For widgets that clear or lack a native input, use their visible status and any upload response to decide whether to attach again.",
     "- Your answer is the decision: the app executes and records it without another model reviewing it. Use all supplied applicant facts and the selected resume. The listing describes the role, not the applicant's history. Write truthful, relevant answers in the person's voice and interpret equivalent choices and quantities yourself.",
     "- Needs you is your decision only for a fact genuinely absent from the profile, resume and saved answers, a secret the vault lacks, or a step still failing after a real attempt. Name each missing field by its observed ref in finish with needsPerson: true. Our checking, provider or tool failures are errors to recover or report, never questions for the person.",
     "- Derive the earliest start date from the saved notice period and today. Map a BSc to the form's Bachelor's choice, and compose experience, skills and AI-tool-use summaries from the whole record; no verbatim saved sentence or additional confirmation is required.",
@@ -212,12 +213,24 @@ function describeControl(
     );
   }
   if (control.upload) {
+    const { inputFiles, ...upload } = control.upload;
+    const held =
+      inputFiles ??
+      (upload.fileName === undefined
+        ? []
+        : [
+            {
+              name: upload.fileName,
+              ...(upload.fileSize === undefined
+                ? {}
+                : { size: upload.fileSize }),
+            },
+          ]);
+    const count = held.length;
     parts.push(
-      control.upload.fileName === undefined
-        ? "browser file input: empty"
-        : `browser file input holds: ${control.upload.fileName}`,
+      `native file input: ${count} ${count === 1 ? "file" : "files"}${count ? ` ${JSON.stringify(held)}` : ""}`,
     );
-    parts.push(`upload facts: ${JSON.stringify(control.upload)}`);
+    parts.push(`upload facts: ${JSON.stringify(upload)}`);
   }
   if (control.invalid) {
     parts.push(
