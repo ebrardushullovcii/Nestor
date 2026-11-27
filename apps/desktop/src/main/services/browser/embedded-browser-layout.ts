@@ -12,22 +12,24 @@ export function isUsableViewRect(rect: ViewRect): boolean {
   return rect.width > MIN_USABLE && rect.height > MIN_USABLE;
 }
 
-/**
- * The bounds a tab's native view should get on this layout pass, or null to
- * leave it as it is.
- *
- * While the browser is on screen every tab takes the on-screen viewport.
- * While it is minimized (the renderer reports 0×0) a tab keeps the size it
- * had; a tab created in that state has never had one, and a page with a 0×0
- * viewport cannot be clicked, so it gets the last usable size. The view is
- * hidden either way, so the person sees nothing change.
- */
-export function resolvePageViewBounds(input: {
+/** Clip the renderer's CSS viewport to the window in native view coordinates. */
+export function resolvePanelPageBounds(input: {
   viewport: ViewRect;
-  current: ViewRect;
-  lastUsable: ViewRect;
+  zoom: number;
+  windowWidth: number;
+  windowHeight: number;
 }): ViewRect | null {
-  if (isUsableViewRect(input.viewport)) return input.viewport;
-  if (isUsableViewRect(input.current)) return null;
-  return input.lastUsable;
+  const { viewport, zoom, windowWidth, windowHeight } = input;
+  const x = Math.max(0, Math.ceil(viewport.x * zoom));
+  const y = Math.max(0, Math.ceil(viewport.y * zoom));
+  const right = Math.min(
+    windowWidth,
+    Math.floor((viewport.x + viewport.width) * zoom),
+  );
+  const bottom = Math.min(
+    windowHeight,
+    Math.floor((viewport.y + viewport.height) * zoom),
+  );
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
 }

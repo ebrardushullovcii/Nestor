@@ -6,6 +6,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -374,23 +375,35 @@ export function BrowserPeek(props: {
       .then((listed) => setImportSources(listed.sources))
       .catch(() => setImportSources([]));
   }, [bridge, shown, blank, importSources]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!bridge || !shown) return;
+    const dialog = dialogRef.current;
+    const viewport = viewportRef.current;
+    if (!dialog || !viewport) return;
     const measure = () => {
-      const rect = viewportRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      const rect = viewport.getBoundingClientRect();
+      // The native view cannot follow the panel's opening transform.
+      const animating = dialog
+        .getAnimations?.()
+        .some(
+          (animation) => animation.pending || animation.playState === "running",
+        );
       void bridge
         .setViewport({
           x: Math.max(0, rect.x),
           y: Math.max(0, rect.y),
-          width: rect.width,
-          height: rect.height,
-          visible: isTopmost() && !blank && !pageHidden && !firstLoad,
+          width: Math.max(0, rect.right - Math.max(0, rect.x)),
+          height: Math.max(0, rect.bottom - Math.max(0, rect.y)),
+          visible:
+            isTopmost() && !animating && !blank && !pageHidden && !firstLoad,
         })
         .catch(() => undefined);
     };
     const observer = new ResizeObserver(measure);
-    if (viewportRef.current) observer.observe(viewportRef.current);
+    observer.observe(viewport);
+    if (dialog.parentElement) observer.observe(dialog.parentElement);
+    dialog.addEventListener("animationend", measure);
+    dialog.addEventListener("animationcancel", measure);
     const unsubscribe = subscribeToJobFinderOverlays(measure);
     window.addEventListener("resize", measure);
     const frame = requestAnimationFrame(measure);
@@ -398,6 +411,8 @@ export function BrowserPeek(props: {
       observer.disconnect();
       unsubscribe();
       cancelAnimationFrame(frame);
+      dialog.removeEventListener("animationend", measure);
+      dialog.removeEventListener("animationcancel", measure);
       window.removeEventListener("resize", measure);
       void bridge
         .setViewport({ x: 0, y: 0, width: 0, height: 0, visible: false })

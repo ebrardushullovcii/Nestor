@@ -1,34 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { resolvePageViewBounds } from "./embedded-browser-layout";
+import { resolvePanelPageBounds } from "./embedded-browser-layout";
 
-const lastUsable = { x: 50, y: 130, width: 1100, height: 640 };
-const zero = { x: 0, y: 0, width: 0, height: 0 };
+const windowSize = { windowWidth: 1200, windowHeight: 800 };
 
-describe("resolvePageViewBounds", () => {
-  it("gives every tab the on-screen viewport while the browser is shown", () => {
-    const viewport = { x: 10, y: 20, width: 1243, height: 675 };
+describe("resolvePanelPageBounds", () => {
+  it("rounds zoomed edges inward so the native view remains inside the panel", () => {
     expect(
-      resolvePageViewBounds({ viewport, current: zero, lastUsable }),
-    ).toEqual(viewport);
+      resolvePanelPageBounds({
+        ...windowSize,
+        viewport: { x: 10.3, y: 20.2, width: 750.2, height: 450.2 },
+        zoom: 1.25,
+      }),
+    ).toEqual({ x: 13, y: 26, width: 937, height: 562 });
   });
 
-  it("keeps a tab's size while the browser is minimized", () => {
+  it("clips the panel when the window shrinks", () => {
     expect(
-      resolvePageViewBounds({
-        viewport: { x: 0, y: 0, width: 1, height: 1 },
-        current: { x: 10, y: 20, width: 1243, height: 675 },
-        lastUsable,
+      resolvePanelPageBounds({
+        ...windowSize,
+        viewport: { x: 190, y: 220, width: 1150, height: 720 },
+        zoom: 1,
       }),
+    ).toEqual({ x: 190, y: 220, width: 1010, height: 580 });
+  });
+
+  it.each([
+    { x: 0, y: 0, width: 0, height: 0 },
+    { x: 1200, y: 40, width: 300, height: 450 },
+  ])("has no display bounds for %o", (viewport) => {
+    expect(
+      resolvePanelPageBounds({ ...windowSize, viewport, zoom: 1 }),
     ).toBeNull();
-  });
-
-  it("sizes a tab created while the browser is minimized so its page can be clicked", () => {
-    expect(
-      resolvePageViewBounds({
-        viewport: { x: 0, y: 0, width: 1, height: 1 },
-        current: zero,
-        lastUsable,
-      }),
-    ).toEqual(lastUsable);
   });
 });

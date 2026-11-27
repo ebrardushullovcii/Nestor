@@ -20,7 +20,7 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   app,
-  BrowserWindow,
+  BaseWindow,
   dialog,
   ipcMain,
   screen,
@@ -28,6 +28,7 @@ import {
   shell,
   WebContentsView,
   nativeImage,
+  type BrowserWindow,
   type Session,
   type BrowserWindowConstructorOptions,
 } from "electron";
@@ -54,7 +55,7 @@ import { BrowserCdpBridge, type BrowserCdpPage } from "./browser-cdp-bridge";
 import { getEmbeddedBrowserFocusAction } from "./embedded-browser-focus-policy";
 import {
   isUsableViewRect,
-  resolvePageViewBounds,
+  resolvePanelPageBounds,
   type ViewRect,
 } from "./embedded-browser-layout";
 import { parseSendObserverNotice, sendObserverSource } from "./send-observer";
@@ -83,7 +84,7 @@ interface BrowserPage extends BrowserCdpPage {
   view: WebContentsView;
   createdAt: number;
   /** Which window currently holds the page's view; see `backstage`. */
-  host: "main" | "backstage";
+  host: BaseWindow | null;
 }
 interface ActivityHooks {
   pause(reason: string): Promise<void>;
@@ -175,7 +176,7 @@ export class EmbeddedBrowser {
     return this.passwords().generateAccountCredential(tabId, username, targets);
   }
   private window: BrowserWindow | null = null;
-  private backstage: BrowserWindow | null = null;
+  private backstage: BaseWindow | null = null;
   private browserSession: Session | null = null;
   private originalUserAgent: string | null = null;
   private readonly pageMap = new Map<string, BrowserPage>();
@@ -405,20 +406,15 @@ export class EmbeddedBrowser {
    */
   private readonly lentTabs = new Set<string>();
   private activityHooks: ActivityHooks | null = null;
-  private viewport: DesktopBrowserViewport = {
-    x: 50,
-    y: 130,
-    width: 1100,
-    height: 640,
-    visible: false,
-  };
+  private viewport: DesktopBrowserViewport | null = null;
   /** The last on-screen page size, for tabs sized while it is minimized. */
   private lastUsableViewport: ViewRect = {
-    x: 50,
-    y: 130,
+    x: 0,
+    y: 0,
     width: 1100,
     height: 640,
   };
+  private backstageUntilFocus = false;
   private readonly operations = new Map<AbortController, string>();
   private readonly automationCommands = new Map<string, number>();
   private readonly focusedAutomationCommands = new Map<string, number>();
@@ -446,18 +442,19 @@ export class EmbeddedBrowser {
   attachWindow(window: BrowserWindow): void {
     if (this.window === window) return;
     this.window = window;
-    window.on("focus", () => this.hostPages());
-    window.on("blur", () => this.hostPages());
+    window.on("focus", () => this.layout());
+    window.on("blur", () => this.layout());
     window.on("resize", () => this.layout());
     window.on("show", () => this.layout());
     window.on("restore", () => this.layout());
     window.on("closed", () => {
       if (this.window !== window) return;
       this.window = null;
+      void this.close(false);
       if (this.backstage && !this.backstage.isDestroyed())
         this.backstage.destroy();
       this.backstage = null;
-      void this.close(false);
+      this.backstageUntilFocus = false;
     });
   }
 
@@ -468,57 +465,42 @@ export class EmbeddedBrowser {
    * a full-page screenshot, emulated focus. Every one of them switched the
    * user out of whatever full-screen app they were in. A hidden
    * non-activating panel window is immune to all of them, so while a run is
-   * going and the app window is not focused the pages live there, and they
-   * move back into the app window as soon as it is focused again. Nobody can
-   * see the pages while the window is unfocused anyway.
+   * going and the app window is not focused the pages live there. Background
+   * tabs also live there so the main window only hosts the displayed page.
    */
-  private getBackstage(): BrowserWindow | null {
-    if (process.platform !== "darwin") return null;
-    if (this.backstage && !this.backstage.isDestroyed()) return this.backstage;
-    this.backstage = new BrowserWindow({
-      show: false,
-      type: "panel",
-      focusable: false,
-      width: 1280,
-      height: 800,
-      webPreferences: { sandbox: true, contextIsolation: true },
-    });
+  private getBackstage({ width, height }: ViewRect): BaseWindow {
+    if (!this.backstage || this.backstage.isDestroyed()) {
+      this.backstage = new BaseWindow({
+        show: false,
+        ...(process.platform === "darwin" ? { type: "panel" } : {}),
+        focusable: false,
+        width,
+        height,
+      });
+    }
+    const [currentWidth, currentHeight] = this.backstage.getContentSize();
+    if (width !== currentWidth || height !== currentHeight)
+      this.backstage.setContentSize(width, height);
     return this.backstage;
   }
 
-  private pagesBelongBackstage(): boolean {
-    if (
-      process.platform !== "darwin" ||
-      !this.window ||
-      this.window.isDestroyed() ||
-      this.window.isFocused()
-    )
-      return false;
-    // Once a run sent pages backstage they stay until the window is focused:
-    // a site keeps navigating on its own after the run ends.
-    return (
-      this.operations.size > 0 ||
-      [...this.pageMap.values()].some((page) => page.host === "backstage")
-    );
-  }
-
-  private placePage(page: BrowserPage, host: BrowserPage["host"]): void {
-    if (page.contents.isDestroyed() || page.host === host) return;
-    if (!this.window || this.window.isDestroyed()) return;
-    const to = host === "backstage" ? this.getBackstage() : this.window;
-    if (!to) return;
-    const from = page.host === "backstage" ? this.backstage : this.window;
-    if (from && !from.isDestroyed())
-      from.contentView.removeChildView(page.view);
-    to.contentView.addChildView(page.view);
-    page.host = host;
-  }
-
-  /** Move every page to the window it belongs in right now, then lay out. */
-  private hostPages(): void {
-    const host = this.pagesBelongBackstage() ? "backstage" : "main";
-    for (const page of this.pageMap.values()) this.placePage(page, host);
-    this.layout();
+  private placePage(
+    page: BrowserPage,
+    host: BaseWindow,
+    bounds: ViewRect,
+  ): void {
+    const moving = page.host !== host;
+    if (moving) {
+      page.view.setVisible(false);
+      if (page.host && !page.host.isDestroyed())
+        page.host.contentView.removeChildView(page.view);
+    }
+    page.view.setBounds(bounds);
+    if (moving) {
+      page.host = host;
+      host.contentView.addChildView(page.view);
+      page.view.setVisible(true);
+    }
   }
 
   ownsRenderer(id: number): boolean {
@@ -657,7 +639,7 @@ export class EmbeddedBrowser {
           !(
             this.activeTabId === id &&
             this.presentation !== "minimized" &&
-            this.viewport.visible
+            this.viewport?.visible
           ) &&
           ![...this.operationClaims.values()].some((claim) =>
             claim.tabs.has(id),
@@ -812,7 +794,7 @@ export class EmbeddedBrowser {
         (options.keepActive &&
           id === this.activeTabId &&
           this.presentation !== "minimized" &&
-          this.viewport.visible) ||
+          this.viewport?.visible) ||
         this.heldTabs.has(id) ||
         this.parkedTabs.has(id) ||
         this.personTabs.has(id) ||
@@ -1097,10 +1079,8 @@ export class EmbeddedBrowser {
   showTab(tabId: string): boolean {
     if (!this.pageMap.has(tabId)) return false;
     this.closed = false;
-    this.presentation = "peek";
+    this.setPresentation("peek");
     this.selectPage(tabId);
-    this.layout();
-    this.emit();
     return true;
   }
 
@@ -1406,7 +1386,7 @@ export class EmbeddedBrowser {
       !this.closed &&
       !this.closing &&
       this.presentation !== "minimized" &&
-      this.viewport.visible &&
+      this.viewport?.visible &&
       this.activeTabId === page.id;
     // A tab handed to the person is theirs: it is only throttled in the
     // background, never frozen, so an upload or sign-in they started keeps
@@ -1636,13 +1616,12 @@ export class EmbeddedBrowser {
         navigateOnDragDrop: false,
       },
     });
-    const host = this.pagesBelongBackstage() ? "backstage" : "main";
     const page: BrowserPage = {
       id: fixedId && !this.pageMap.has(fixedId) ? fixedId : randomUUID(),
       contents: view.webContents,
       view,
       createdAt: Date.now(),
-      host,
+      host: null,
       ...(openerId ? { openerId } : {}),
     };
     this.pageMap.set(page.id, page);
@@ -1669,10 +1648,6 @@ export class EmbeddedBrowser {
     if (selectOnCreate || !this.activeTabId || replacesPlaceholder)
       this.activeTabId = page.id;
     view.setBorderRadius(12);
-    (host === "backstage"
-      ? (this.getBackstage() ?? this.window)
-      : this.window
-    ).contentView.addChildView(view);
     const update = () => {
       if (!page.contents.isDestroyed()) {
         this.syncTabLifecycle(page);
@@ -1858,7 +1833,7 @@ export class EmbeddedBrowser {
       const mod = process.platform === "darwin" ? input.meta : input.control;
       if (input.key === "Escape" && !input.isComposing) {
         event.preventDefault();
-        this.presentation = "minimized";
+        this.setPresentation("minimized");
         this.layout();
         this.emit();
       }
@@ -1936,11 +1911,10 @@ export class EmbeddedBrowser {
         const left = [...this.pageMap.values()].some(
           (other) => !other.contents.isDestroyed(),
         );
-        if (!left) this.presentation = "minimized";
+        if (!left) this.setPresentation("minimized");
       }
-      const holder = page.host === "backstage" ? this.backstage : this.window;
-      if (holder && !holder.isDestroyed())
-        holder.contentView.removeChildView(view);
+      if (page.host && !page.host.isDestroyed())
+        page.host.contentView.removeChildView(view);
       this.layout();
       this.emit();
     });
@@ -2017,7 +1991,7 @@ export class EmbeddedBrowser {
       !page ||
       page.contents.isDestroyed() ||
       page.contents.getURL() === "about:blank" ||
-      !this.viewport.visible
+      !this.viewport?.visible
     )
       return { dataUrl: null };
     try {
@@ -2036,77 +2010,62 @@ export class EmbeddedBrowser {
   }
 
   setViewport(viewport: DesktopBrowserViewport): void {
-    this.viewport = { ...viewport };
+    this.viewport = this.presentation === "minimized" ? null : viewport;
     this.layout();
   }
+
+  private setPresentation(
+    presentation: DesktopBrowserState["presentation"],
+  ): void {
+    if (presentation === this.presentation) return;
+    this.presentation = presentation;
+    this.viewport = null;
+  }
+
   private layout(): void {
-    if (!this.window || this.window.isDestroyed()) return;
-    const zoom = this.window.webContents.getZoomFactor();
-    const [windowWidth = 1, windowHeight = 1] = this.window.getContentSize();
-    const x = Math.max(
-      0,
-      Math.min(windowWidth, Math.round(this.viewport.x * zoom)),
-    );
-    const y = Math.max(
-      0,
-      Math.min(windowHeight, Math.round(this.viewport.y * zoom)),
-    );
-    const width = Math.max(
-      1,
-      Math.min(windowWidth - x, Math.round(this.viewport.width * zoom)),
-    );
-    const height = Math.max(
-      1,
-      Math.min(windowHeight - y, Math.round(this.viewport.height * zoom)),
-    );
-    const viewport = { x, y, width, height };
-    if (isUsableViewRect(viewport)) this.lastUsableViewport = viewport;
-    const last = this.lastUsableViewport;
-    const backstage =
-      this.backstage && !this.backstage.isDestroyed() ? this.backstage : null;
-    if (backstage) {
-      const [backstageWidth = 0, backstageHeight = 0] =
-        backstage.getContentSize();
-      const size = resolvePageViewBounds({
-        viewport,
-        current: { x: 0, y: 0, width: backstageWidth, height: backstageHeight },
-        lastUsable: last,
-      });
-      if (size) backstage.setContentSize(size.width, size.height);
-    }
+    const window = this.window;
+    if (!window || window.isDestroyed()) return;
+    const [windowWidth = 0, windowHeight = 0] = window.getContentSize();
+    const bounds = this.viewport
+      ? resolvePanelPageBounds({
+          viewport: this.viewport,
+          zoom: window.webContents.getZoomFactor(),
+          windowWidth,
+          windowHeight,
+        })
+      : null;
+    if (bounds && isUsableViewRect(bounds)) this.lastUsableViewport = bounds;
+    // Once a run moves pages away from an unfocused app on macOS, keep its
+    // pages there until focus returns. They can keep navigating after it ends.
+    this.backstageUntilFocus =
+      process.platform === "darwin" &&
+      !window.isFocused() &&
+      (this.backstageUntilFocus || this.operations.size > 0);
+    const visibleBounds =
+      !this.closed &&
+      !this.closing &&
+      this.viewport?.visible &&
+      !this.backstageUntilFocus
+        ? bounds
+        : null;
+    const visiblePage =
+      visibleBounds && this.activeTabId
+        ? this.pageMap.get(this.activeTabId)
+        : undefined;
+    const { width, height } = this.lastUsableViewport;
+    const backgroundBounds = { x: 0, y: 0, width, height };
+    let backstage: BaseWindow | undefined;
     for (const page of this.pageMap.values()) {
       if (page.contents.isDestroyed()) continue;
-      if (page.host === "backstage") {
-        // Same size as the on-screen viewport so layout and screenshots match
-        // what the user would see; always visible, the window itself is not.
-        const bounds = resolvePageViewBounds({
-          viewport: { ...viewport, x: 0, y: 0 },
-          current: page.view.getBounds(),
-          lastUsable: { ...last, x: 0, y: 0 },
-        });
-        if (bounds) page.view.setBounds(bounds);
-        page.view.setVisible(true);
-        this.syncTabLifecycle(page);
-        continue;
+      if (page !== visiblePage) {
+        backstage ??= this.getBackstage(backgroundBounds);
+        this.placePage(page, backstage, backgroundBounds);
       }
-      // Minimize preserves the last usable viewport; never resize a live page
-      // to 0. A tab opened while minimized gets that size too: a hidden page
-      // at 0×0 lays out nothing the agent can click.
-      const bounds = resolvePageViewBounds({
-        viewport,
-        current: page.view.getBounds(),
-        lastUsable: last,
-      });
-      if (bounds) page.view.setBounds(bounds);
-      page.view.setVisible(
-        !this.closed &&
-          !this.closing &&
-          this.presentation !== "minimized" &&
-          this.viewport.visible &&
-          this.activeTabId === page.id,
-      );
       this.syncTabLifecycle(page);
     }
+    // Demote the previous view before attaching the new one to the main window.
+    if (visiblePage && visibleBounds && !visiblePage.contents.isDestroyed())
+      this.placePage(visiblePage, window, visibleBounds);
   }
 
   private disconnectAutomation(): void {
@@ -2583,7 +2542,7 @@ export class EmbeddedBrowser {
     this.closed = false;
     this.releasePending = false;
     this.focusApp();
-    this.hostPages();
+    this.layout();
     this.emit();
     const updateActivity = (nextLabel: string): void => {
       if (!this.operations.has(controller)) return;
@@ -2638,7 +2597,7 @@ export class EmbeddedBrowser {
     }
     if (command.type === "open") {
       this.closed = false;
-      this.presentation = "peek";
+      this.setPresentation("peek");
       if (command.url) {
         const requestedUrl = command.url;
         const existingPage = [...this.pageMap.values()].find(
@@ -2650,7 +2609,7 @@ export class EmbeddedBrowser {
         else this.createPage(requestedUrl);
       }
     } else if (command.type === "minimize") {
-      this.presentation = "minimized";
+      this.setPresentation("minimized");
       if (
         this.releasePending &&
         this.operations.size === 0 &&
@@ -2664,7 +2623,7 @@ export class EmbeddedBrowser {
         return this.getState();
       }
     } else if (command.type === "expand")
-      this.presentation = command.expanded ? "expanded" : "peek";
+      this.setPresentation(command.expanded ? "expanded" : "peek");
     else if (command.type === "take_control") {
       if (this.activeTabId) this.takeTabByPerson(this.activeTabId, true);
     } else if (command.type === "resume") {
@@ -2801,11 +2760,11 @@ export class EmbeddedBrowser {
   /** The page is on screen and the pointer is over it. */
   private isPointerOverPage(page: BrowserPage): boolean {
     if (
-      page.host === "backstage" ||
       !this.window ||
+      page.host !== this.window ||
       this.window.isDestroyed() ||
       this.presentation === "minimized" ||
-      !this.viewport.visible ||
+      !this.viewport?.visible ||
       this.activeTabId !== page.id ||
       page.contents.isDestroyed() ||
       Date.now() - page.createdAt < 1500
@@ -2861,7 +2820,7 @@ export class EmbeddedBrowser {
       this.parkedTabs.size > 0 ||
       // A tab the person opened stays until they close it.
       this.personTabs.size > 0 ||
-      (this.presentation !== "minimized" && this.viewport.visible)
+      (this.presentation !== "minimized" && this.viewport?.visible)
     ) {
       this.releasePending = true;
       this.emit();
@@ -2881,8 +2840,8 @@ export class EmbeddedBrowser {
     this.releasePending = false;
     if (pauseActivity && this.operations.size > 0) this.closedByPerson = true;
     this.abortOperations();
-    this.presentation = "minimized";
-    this.viewport.visible = false;
+    this.setPresentation("minimized");
+    this.layout();
     this.emit();
     const closing = (async () => {
       for (const id of [...this.pageMap.keys()]) this.closePage(id);
