@@ -34,9 +34,12 @@ import {
   serializeApplicationData,
 } from "./application-facts";
 import {
+  applyObservationView,
   createApplySystemPrompt,
   createApplyUserPrompt,
   describeObservation,
+  formatApplyObservationView,
+  type ApplyObservationView,
 } from "./apply-prompts";
 import {
   FILL_FIELDS_TOOL_DEFINITION,
@@ -46,7 +49,10 @@ import {
 } from "./apply-tools";
 import { buildCoverLetterRequest, isCoverLetterControl } from "./cover-letter";
 import { reviewFieldKey, screenKey } from "./form-replay";
-import { applicationModelFactsMessages } from "./model-facts";
+import {
+  applicationModelFactsMessages,
+  modelApplicationActivity,
+} from "./model-facts";
 import {
   approvedApplicationLetter,
   buildPendingQuestion,
@@ -265,10 +271,18 @@ async function runApplyAgentPrivate(
     timingRecord.setObservationChars(describeObservation(next).length);
   };
   // Every page view written into the conversation, so the loop can fold the
-  // ones the model has acted past (see superseded-views).
+  // ones the model has acted past on routes that support folding.
   const views = createViewLedger();
-  const describeView = (page: ApplyFormObservation): string =>
-    views.write(describeObservation(page), page);
+  let appendOnlyHistory = false;
+  let lastView: ApplyObservationView | undefined;
+  const describeView = (page: ApplyFormObservation): string => {
+    const view = applyObservationView(page);
+    const previous = lastView;
+    lastView = view;
+    return appendOnlyHistory
+      ? formatApplyObservationView(view, previous)
+      : views.write(formatApplyObservationView(view), page);
+  };
   const readPage = async () => {
     const next = await runConfig.hands.observe();
     observe(next);
@@ -489,7 +503,11 @@ async function runApplyAgentPrivate(
         const entry = { ...outcome.filled, fieldKey };
         filled.push(entry);
         reviewFilled.set(fieldKey, entry);
-        content = `${entry.label} now holds ${JSON.stringify(entry.answer.value)}${proposal.tool === "type" ? ` (requested ${JSON.stringify(proposal.text)})` : ""}.${outcome.stateNote ?? ""}`;
+        const requested =
+          proposal.tool === "type" && proposal.text !== entry.answer.value
+            ? ` (requested ${JSON.stringify(proposal.text)})`
+            : "";
+        content = `${entry.label} now holds ${JSON.stringify(entry.answer.value)}${requested}.${outcome.stateNote ?? ""}`;
         break;
       }
       case "attached": {
@@ -1100,6 +1118,9 @@ async function runApplyAgentPrivate(
     // Keep each update at its original position so later turns can reuse the prefix.
     const answerUpdates: Array<{ after: number; content: string }> = [];
     let historyLength = 0;
+    let lastSendFact = "";
+    const noOpenSends =
+      "Send ledger: all previously listed sends now have a recorded outcome.";
     const model: AgentLoopModel = {
       chatWithTools: async (messages, tools, options) =>
         modelActivity.runModel(options, async () => {
@@ -1134,6 +1155,7 @@ async function runApplyAgentPrivate(
             tools,
             { ...options, stableLead: facts.owner },
           );
+          appendOnlyHistory ||= reply.appendOnlyHistory === true;
           for (const call of reply.toolCalls ?? []) {
             const key = `${call.function.name}|${call.function.arguments}`;
             modelCallIds.set(key, [...(modelCallIds.get(key) ?? []), call.id]);
@@ -1150,18 +1172,25 @@ async function runApplyAgentPrivate(
         { role: "user", content: createApplyUserPrompt(runConfig) },
         {
           role: "user",
-          content: `Earlier application state and actions (history only; choose any restoration yourself):\n${serializeApplicationData({ replay: input.replay, earlierActivity: input.earlierActivity, earlierAttachments: input.earlierAttachments, pickerAttempts: input.initialPickerAttempts })}\n\n${opening}`,
+          content: `Earlier application state and actions (history only; choose any restoration yourself). An earlierActivity detail with sameAs uses the exact text at that JSON Pointer in this object:\n${serializeApplicationData({ replay: input.replay, earlierActivity: modelApplicationActivity(input.earlierActivity), earlierAttachments: input.earlierAttachments, pickerAttempts: input.initialPickerAttempts })}\n\n${opening}`,
         },
       ],
       model,
-      // Every tool result carries the sends still without a recorded outcome.
       tools: domainTools.map((tool) => ({
         ...tool,
         execute: async (raw, context) => {
           const result = await tool.execute(raw, context);
+          if (result.kind !== "ok") return result;
           const fact = unresolvedSendsFact();
-          return result.kind === "ok" && fact
-            ? { ...result, content: `${result.content}\n\n${fact}` }
+          if (!appendOnlyHistory)
+            return fact
+              ? { ...result, content: `${result.content}\n\n${fact}` }
+              : result;
+          const update = fact || (lastSendFact ? noOpenSends : "");
+          if (update === lastSendFact) return result;
+          lastSendFact = update;
+          return update
+            ? { ...result, content: `${result.content}\n\n${update}` }
             : result;
         },
       })),
@@ -1170,6 +1199,23 @@ async function runApplyAgentPrivate(
       staleToolResultChars: null,
       retainCompactedHistory: true,
       supersededContent: (messages) => views.supersededContent(messages),
+      onHistoryCompacted: () => {
+        if (!appendOnlyHistory) return null;
+        // A recovery note and a full view can replace the archived messages
+        // without reducing history length. Re-emit saved answers from opening.
+        answerUpdates.length = 0;
+        sentAnswers = new Map(initialAnswers);
+        // The earlier delta bases may now live in read_context_history.
+        return (
+          [
+            lastView &&
+              `Current page after history recovery:\n\n${formatApplyObservationView(lastView)}`,
+            lastSendFact,
+          ]
+            .filter(Boolean)
+            .join("\n\n") || null
+        );
+      },
       compactionMaxChars: Math.floor(
         (input.modelContextWindowTokens ?? 64000) * 3.6 * 0.8,
       ),

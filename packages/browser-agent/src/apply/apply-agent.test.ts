@@ -12,6 +12,7 @@ import { runApplyAgent } from "./apply-agent";
 import { buildApplyFormObservation } from "./page-hands";
 import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
 import type { ApplyAgentConfig, ApplyPageHands } from "./types";
+import { modelApplicationActivity } from "./model-facts";
 function nameControl(): RawApplyControl {
   return {
     index: 0,
@@ -1778,7 +1779,111 @@ test("on an append-only route each apply request starts with the previous reques
       JSON.stringify(previous),
     );
   }
-  expect(JSON.stringify(requests.at(-1))).not.toContain("Saved-answer changes");
+  const transcript = JSON.stringify(requests.at(-1));
+  expect(transcript).not.toContain("Saved-answer changes");
+  expect(transcript.match(/Fields:/gu)).toHaveLength(1);
+  expect(transcript.match(/Page update:/gu)).toHaveLength(3);
+  expect(transcript).toContain("View 4.");
+});
+
+test("append-only history recovery restores a full page when its delta bases move to the archive", async () => {
+  const source = page();
+  const input = config(source, { modelContextWindowTokens: 24_000 });
+  let views = 0;
+  input.hands.observe = () => {
+    views += 1;
+    return Promise.resolve(
+      buildApplyFormObservation(
+        {
+          ...source,
+          bodyText: `Current view ${views}`,
+        },
+        "2026-09-14T10:00:00.000Z",
+      ),
+    );
+  };
+  const scripted = model([
+    ...Array.from({ length: 5 }, () => ({ name: "observe", args: {} })),
+    done,
+  ]);
+  await runApplyAgent(input, {
+    async chatWithTools(messages, tools, options) {
+      const response = await scripted.chatWithTools(messages, tools, options);
+      return {
+        ...response,
+        content: "Recorded observation. ".repeat(900),
+        appendOnlyHistory: true,
+      };
+    },
+  });
+  const recovery = vi
+    .mocked(scripted.chatWithTools)
+    .mock.calls.flatMap(([messages]) => messages)
+    .map((message) => String(message.content))
+    .find((content) =>
+      content.startsWith("Current page after history recovery:"),
+    );
+  expect(recovery).toContain("Fields:\n- c0 [text] · Full name");
+  expect(recovery).toMatch(/Page text:\nCurrent view [2-6]/u);
+});
+
+test("repeated activity keeps each checkpoint and references the exact first detail", () => {
+  const detail = "A full past browser observation. ".repeat(10);
+  const first = {
+    label: "Observation",
+    at: "2026-09-14T10:00:00.000Z",
+    detail,
+  };
+  const later = { ...first, label: "Retry", at: "2026-09-14T10:01:00.000Z" };
+  expect(modelApplicationActivity([first, later])).toEqual([
+    first,
+    { ...later, detail: { sameAs: "/earlierActivity/0/detail" } },
+  ]);
+  expect(later.detail).toBe(detail);
+});
+
+test("an append-only transcript adds ledger updates when the open sends change", async () => {
+  const input = config(page());
+  input.authority.mode = "autonomous_submit";
+  input.submitApplication = () =>
+    Promise.resolve({
+      outcome: "outcome_uncertain",
+      content: "The form remained open after the press.",
+    });
+  input.recordSendOutcome = () =>
+    Promise.resolve({ recorded: true, content: "Recorded failed" });
+  const scripted = model([
+    { name: "submit_application", id: "press-1", args: { ref: "a0" } },
+    { name: "observe", args: {} },
+    {
+      name: "record_send_outcome",
+      args: {
+        sendCallId: "press-1",
+        outcome: "failed",
+        evidence: "The form reported an error.",
+      },
+    },
+    { name: "observe", args: {} },
+    done,
+  ]);
+  await runApplyAgent(input, {
+    async chatWithTools(messages, tools, options) {
+      return {
+        ...(await scripted.chatWithTools(messages, tools, options)),
+        appendOnlyHistory: true,
+      };
+    },
+  });
+  const latest = vi.mocked(scripted.chatWithTools).mock.calls.at(-1)?.[0] ?? [];
+  const receipts = latest
+    .filter((message) => message.role === "tool")
+    .map((message) => String(message.content));
+  expect(receipts[0]).toContain("sendCallId=press-1");
+  expect(receipts[1]).not.toContain("Send ledger:");
+  expect(receipts[2]).toContain(
+    "all previously listed sends now have a recorded outcome",
+  );
+  expect(receipts[3]).not.toContain("Send ledger:");
 });
 
 test("the opening has the refreshed saved answers once and changes append only the changed records", async () => {

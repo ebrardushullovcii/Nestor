@@ -7,6 +7,25 @@ import {
 } from "./application-facts";
 import type { ApplyAnswerSources } from "./types";
 
+/** Keep each checkpoint and its relationship to the original, exact detail. */
+export function modelApplicationActivity<T extends { detail: string }>(
+  activity: readonly T[] | undefined,
+) {
+  const firstByDetail = new Map<string, number>();
+  return activity?.map((entry, index) => {
+    const first = firstByDetail.get(entry.detail);
+    if (first === undefined) {
+      firstByDetail.set(entry.detail, index);
+      return entry;
+    }
+    const reference = { sameAs: `/earlierActivity/${first}/detail` };
+    return JSON.stringify(reference).length <
+      JSON.stringify(entry.detail).length
+      ? { ...entry, detail: reference }
+      : entry;
+  });
+}
+
 /** Long catalog values already present in the facts need only their exact address. */
 function modelOwnerFacts(
   sources: ApplyAnswerSources,

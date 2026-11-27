@@ -183,19 +183,17 @@ function describeAnswered(
 function describeControl(
   control: ApplyFormObservation["controls"][number],
   asChoice = false,
-): string {
+) {
   const question = [asChoice ? "" : control.groupLabel, control.label]
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
     .join(" — ");
   const parts = [
-    `${control.ref} [${control.kind}]`,
+    `[${control.kind}]`,
     question || control.placeholder || "(no label)",
     control.required ? "required" : "optional",
     describeAnswered(control),
   ];
-  if (control.visibility)
-    parts.push(`visibility: ${JSON.stringify(control.visibility)}`);
   if (control.frame) parts.push(`frame: ${control.frame.origin}`);
   if (!asChoice && control.sectionPath?.length)
     parts.push(`sections: ${control.sectionPath.join(" > ")}`);
@@ -243,7 +241,12 @@ function describeControl(
   if (control.disabled || control.readOnly) {
     parts.push("cannot be edited");
   }
-  return `- ${parts.join(" · ")}`;
+  return { ref: control.ref, description: parts.join(" · ") };
+}
+
+interface ApplyFieldView {
+  group: string | null;
+  rows: readonly ReturnType<typeof describeControl>[];
 }
 
 /** One question per group, with the page's separate handles for its options. */
@@ -256,29 +259,36 @@ function describeFields(controls: ApplyFormObservation["controls"]) {
     if (group) group.push(control);
     else groups.set(key, [control]);
   }
-  const fields = new Map<string, string>();
+  const fields = new Map<string, ApplyFieldView>();
   for (const control of controls) {
     const group = groups.get(`${control.kind}:${control.choiceGroupKey}`);
     if (!group || group.length < 2) {
-      fields.set(control.ref, describeControl(control));
+      fields.set(control.ref, {
+        group: null,
+        rows: [describeControl(control)],
+      });
     } else if (group[0] === control) {
       const question = group.find((option) => option.groupLabel)?.groupLabel;
       const sections = control.sectionPath?.filter(
         (part) => !` — ${question ?? ""} — `.includes(` — ${part} — `),
       );
       const header = `- [${control.kind} group] · ${question || "(no label)"}`;
-      fields.set(
-        control.ref,
-        [
-          sections?.length
-            ? `${header} · sections: ${sections.join(" > ")}`
-            : header,
-          ...group.map((option) => `  ${describeControl(option, true)}`),
-        ].join("\n"),
-      );
+      fields.set(control.ref, {
+        group: sections?.length
+          ? `${header} · sections: ${sections.join(" > ")}`
+          : header,
+        rows: group.map((option) => describeControl(option, true)),
+      });
     }
   }
   return fields;
+}
+
+function renderField({ group, rows }: ApplyFieldView): string {
+  const lines = rows.map(({ ref, description }) => `- ${ref} ${description}`);
+  return group
+    ? [group, ...lines.map((line) => `  ${line}`)].join("\n")
+    : lines.join("\n");
 }
 
 /**
@@ -319,7 +329,23 @@ export function collapseBlankRuns(text: string): string {
     .trim();
 }
 
-export function describeObservation(observation: ApplyFormObservation): string {
+type FieldVisibility = NonNullable<
+  ApplyFormObservation["controls"][number]["visibility"]
+>;
+
+export interface ApplyObservationView {
+  pageKey: string;
+  beforeFields: ReadonlyMap<string, string>;
+  afterFields: ReadonlyMap<string, string>;
+  fields: ReadonlyMap<string, ApplyFieldView>;
+  fieldRefs: readonly string[];
+  emptyFields: number;
+  visibility: ReadonlyMap<string, FieldVisibility>;
+}
+
+export function applyObservationView(
+  observation: ApplyFormObservation,
+): ApplyObservationView {
   const step =
     observation.step.index !== null && observation.step.total !== null
       ? `Step ${observation.step.index} of ${observation.step.total}.`
@@ -334,68 +360,152 @@ export function describeObservation(observation: ApplyFormObservation): string {
   const actionPlaces = placesOfRepeatedLabels(actions);
   const clickablePlaces = placesOfRepeatedLabels(clickables);
 
-  if (observation.navigationNote)
-    observation = {
-      ...observation,
-      bodyTextExcerpt: `${observation.navigationNote}\n${observation.bodyTextExcerpt}`,
-    };
-  return [
-    observation.tabs ? `Task tabs: ${JSON.stringify(observation.tabs)}` : null,
-    observation.url ? `Page: ${observation.url}` : null,
-    observation.title ? `Title: ${observation.title}` : null,
-    observation.loading ? "The page is still loading." : null,
-    step,
-    observation.blocker
-      ? `Worth knowing: ${observation.blocker.summary} ${observation.blocker.detail}`
-      : null,
-    observation.openedTabs.length > 0
-      ? `The page opened ${observation.openedTabs.length === 1 ? "a tab" : "tabs"}:\n${observation.openedTabs
-          .map((tab) => `- ${tab.title || "untitled"} — ${tab.url}`)
-          .join("\n")}`
-      : null,
-    observation.headings.length > 0
-      ? `Headings:\n${observation.headings
-          .map((heading) => `- ${heading.text}`)
-          .join("\n")}`
-      : null,
-    observation.validationErrors.length > 0
-      ? `The page announces (its alert regions, word for word):\n${observation.validationErrors
-          .map((error) => `- ${error}`)
-          .join("\n")}`
-      : null,
-    controls.length > 0
-      ? `Fields:\n${[...describeFields(controls).values()].join("\n")}`
-      : "There are no fields on this page.",
-    actions.length > 0
-      ? `Buttons:\n${actions
-          .map(
-            (action) =>
-              `- ${action.ref}: ${action.label}${actionPlaces.get(action) ?? ""}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
-          )
-          .join("\n")}`
-      : null,
-    links.length > 0
-      ? `Links:\n${links
-          .map(
-            (link) =>
-              `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
-          )
-          .join("\n")}`
-      : null,
-    clickables.length > 0
-      ? `Other clickable things:\n${clickables
-          .map(
-            (entry) =>
-              `- ${entry.ref}: ${entry.label}${clickablePlaces.get(entry) ?? ""}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
-          )
-          .join("\n")}`
-      : null,
-    observation.bodyTextExcerpt.trim()
-      ? `Page text:\n${collapseBlankRuns(observation.bodyTextExcerpt)}`
-      : null,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n\n");
+  const pageText = collapseBlankRuns(
+    [observation.navigationNote, observation.bodyTextExcerpt].join("\n"),
+  );
+  const beforeFields: Array<[string, string | null]> = [
+    [
+      "Task tabs:",
+      observation.tabs
+        ? `Task tabs: ${JSON.stringify(observation.tabs)}`
+        : null,
+    ],
+    ["Page:", observation.url ? `Page: ${observation.url}` : null],
+    ["Title:", observation.title ? `Title: ${observation.title}` : null],
+    [
+      "The page is still loading.",
+      observation.loading ? "The page is still loading." : null,
+    ],
+    ["Step", step],
+    [
+      "Worth knowing:",
+      observation.blocker
+        ? `Worth knowing: ${observation.blocker.summary} ${observation.blocker.detail}`
+        : null,
+    ],
+    [
+      "The page opened tabs",
+      observation.openedTabs.length > 0
+        ? `The page opened ${observation.openedTabs.length === 1 ? "a tab" : "tabs"}:\n${observation.openedTabs
+            .map((tab) => `- ${tab.title || "untitled"} — ${tab.url}`)
+            .join("\n")}`
+        : null,
+    ],
+    [
+      "Headings:",
+      observation.headings.length > 0
+        ? `Headings:\n${observation.headings
+            .map((heading) => `- ${heading.text}`)
+            .join("\n")}`
+        : null,
+    ],
+    [
+      "The page announces (its alert regions, word for word):",
+      observation.validationErrors.length > 0
+        ? `The page announces (its alert regions, word for word):\n${observation.validationErrors
+            .map((error) => `- ${error}`)
+            .join("\n")}`
+        : null,
+    ],
+  ];
+  const afterFields: Array<[string, string | null]> = [
+    [
+      "Buttons:",
+      actions.length > 0
+        ? `Buttons:\n${actions
+            .map(
+              (action) =>
+                `- ${action.ref}: ${action.label}${actionPlaces.get(action) ?? ""}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
+            )
+            .join("\n")}`
+        : null,
+    ],
+    [
+      "Links:",
+      links.length > 0
+        ? `Links:\n${links
+            .map(
+              (link) =>
+                `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
+            )
+            .join("\n")}`
+        : null,
+    ],
+    [
+      "Other clickable things:",
+      clickables.length > 0
+        ? `Other clickable things:\n${clickables
+            .map(
+              (entry) =>
+                `- ${entry.ref}: ${entry.label}${clickablePlaces.get(entry) ?? ""}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
+            )
+            .join("\n")}`
+        : null,
+    ],
+    ["Page text:", pageText ? `Page text:\n${pageText}` : null],
+  ];
+  const present = (sections: Array<[string, string | null]>) =>
+    new Map(
+      sections.filter((entry): entry is [string, string] => entry[1] !== null),
+    );
+  return {
+    pageKey: JSON.stringify([
+      observation.url,
+      observation.step,
+      observation.tabs?.find((tab) => tab.active)?.id,
+    ]),
+    beforeFields: present(beforeFields),
+    afterFields: present(afterFields),
+    fields: describeFields(controls),
+    fieldRefs: controls.map((control) => control.ref),
+    emptyFields: controls.filter(
+      (control) => !control.answered && !control.disabled,
+    ).length,
+    visibility: new Map(
+      controls.flatMap(({ ref, visibility }) =>
+        visibility ? [[ref, visibility]] : [],
+      ),
+    ),
+  };
+}
+
+function describeVisibility(
+  view: ApplyObservationView,
+  previous?: ApplyObservationView,
+  reusedHandles?: ReadonlyMap<string, string>,
+): string[] {
+  const previousVisibility = (ref: string) =>
+    previous?.visibility.get(reusedHandles?.get(ref) ?? ref);
+  const groups = new Map<string, string[]>();
+  for (const [ref, visibility] of view.visibility) {
+    const before = previousVisibility(ref);
+    const keys = (
+      Object.keys(visibility) as Array<keyof FieldVisibility>
+    ).filter((key) => visibility[key] !== before?.[key]);
+    if (!keys.length) continue;
+    const columns = keys.join(", ");
+    const rows = groups.get(columns) ?? [];
+    rows.push(
+      `- ${ref}: ${JSON.stringify(keys.map((key) => visibility[key]))}`,
+    );
+    groups.set(columns, rows);
+  }
+  const described = [...groups].map(
+    ([columns, rows]) =>
+      `${previous ? "Changed field visibility" : "Field visibility"} (columns after ref: ${columns}):\n${rows.join("\n")}`,
+  );
+  const removed = view.fieldRefs.filter(
+    (ref) => previousVisibility(ref) && !view.visibility.has(ref),
+  );
+  if (removed.length)
+    described.push(
+      `Field visibility no longer reported for: ${removed.join(", ")}.`,
+    );
+  return described;
+}
+
+export function describeObservation(observation: ApplyFormObservation): string {
+  return formatApplyObservationView(applyObservationView(observation));
 }
 
 export function buildStallWarning(input: {
@@ -418,52 +528,116 @@ export function describeObservationUpdate(
   observation: ApplyFormObservation,
   previous: ApplyFormObservation | null,
 ): string {
-  if (
-    !previous ||
-    observation.url !== previous.url ||
-    JSON.stringify(observation.step) !== JSON.stringify(previous.step)
-  ) {
-    return describeObservation(observation);
-  }
-  const previousFields = describeFields(previous.controls);
-  const controls = observation.controls;
-  const fields = describeFields(controls);
-  const changed = [...fields].flatMap(([ref, description]) =>
-    previousFields.get(ref) === description ? [] : [description],
+  return formatApplyObservationView(
+    applyObservationView(observation),
+    previous ? applyObservationView(previous) : undefined,
   );
-  const refs = new Set(controls.map((control) => control.ref));
-  const removed = previous.controls
-    .map((control) => control.ref)
-    .filter((ref) => !refs.has(ref));
-  const nonFieldSections = (page: ApplyFormObservation) =>
-    describeObservation(page)
-      .split("\n\n")
-      .filter(
-        (section) =>
-          !section.startsWith("Fields:\n") &&
-          section !== "There are no fields on this page.",
-      );
-  const previousSections = nonFieldSections(previous);
-  const currentSections = nonFieldSections(observation);
-  const sections = currentSections.filter(
-    (section) => !previousSections.includes(section),
-  );
-  const header = (section: string) => section.split("\n")[0] ?? section;
-  const currentHeaders = new Set(currentSections.map(header));
-  const cleared = previousSections
-    .filter((section) => !currentHeaders.has(header(section)))
-    .map((section) => `${header(section)} (no longer shown).`);
+}
+
+/** Unchanged lines keep their exact words and position in the current page text. */
+function pageTextUpdate(current: string, previous: string): string {
+  const before = previous.split("\n").slice(1);
+  const after = current.split("\n").slice(1);
+  let start = 0;
+  while (start < before.length && before[start] === after[start]) start += 1;
+  let end = 0;
+  while (
+    end < Math.min(before.length, after.length) - start &&
+    before.at(-1 - end) === after.at(-1 - end)
+  )
+    end += 1;
+  const middle = after.slice(start, after.length - end);
+  const update = `Page text update: keep the first ${start} and last ${end} lines of the previous page text. ${middle.length ? `Replace the lines between them with these ${middle.length} lines:\n${middle.join("\n")}` : "Remove the lines between them."}`;
+  return update.length < current.length ? update : current;
+}
+
+function changedSections(
+  current: ReadonlyMap<string, string>,
+  previous: ReadonlyMap<string, string>,
+): string[] {
   return [
-    `Page update: ${observation.url ?? "open page"}. ${controls.length} visible fields; ${controls.filter((control) => !control.answered && !control.disabled).length} still empty. Unchanged fields and page text remain as last shown; use their earlier handles.`,
-    "Each new or changed entry replaces its previous description in full.",
-    changed.length
-      ? `New or changed fields:\n${changed.join("\n")}`
-      : "No field changes.",
+    ...[...current].flatMap(([key, section]) => {
+      const before = previous.get(key);
+      if (before === section) return [];
+      return [
+        key === "Page text:" && before
+          ? pageTextUpdate(section, before)
+          : section,
+      ];
+    }),
+    ...[...previous.keys()]
+      .filter((key) => !current.has(key))
+      .map((key) => `${key} (no longer shown).`),
+  ];
+}
+
+function fieldDescriptionKey({ group, rows }: ApplyFieldView): string {
+  return JSON.stringify([group, rows.map(({ description }) => description)]);
+}
+
+/** Render a full view or an exact update against the last view sent to the model. */
+export function formatApplyObservationView(
+  view: ApplyObservationView,
+  previous?: ApplyObservationView,
+): string {
+  if (!previous || view.pageKey !== previous.pageKey) {
+    return [
+      ...view.beforeFields.values(),
+      view.fields.size
+        ? `Fields:\n${[...view.fields.values()].map(renderField).join("\n")}`
+        : "There are no fields on this page.",
+      ...describeVisibility(view),
+      ...view.afterFields.values(),
+    ].join("\n\n");
+  }
+  const refs = new Set(view.fieldRefs);
+  const removed = previous.fieldRefs.filter((ref) => !refs.has(ref));
+  const pastFields = new Map(
+    [...previous.fields.values()]
+      .filter(({ rows }) => rows.every(({ ref }) => !refs.has(ref)))
+      .map((field) => [fieldDescriptionKey(field), field]),
+  );
+  const previousRefs = new Set(previous.fieldRefs);
+  const changed: string[] = [];
+  const redrawn: string[] = [];
+  const reusedHandles = new Map<string, string>();
+  for (const [ref, field] of view.fields) {
+    const full = renderField(field);
+    const prior = previous.fields.get(ref);
+    if (prior && renderField(prior) === full) continue;
+    const past = field.rows.every(({ ref }) => !previousRefs.has(ref))
+      ? pastFields.get(fieldDescriptionKey(field))
+      : undefined;
+    if (!past) {
+      changed.push(full);
+      continue;
+    }
+    redrawn.push(
+      `- ${field.rows
+        .map(({ ref }, index) => {
+          const oldRef = past.rows[index].ref;
+          reusedHandles.set(ref, oldRef);
+          return `${oldRef} → ${ref}`;
+        })
+        .join(", ")}`,
+    );
+  }
+  return [
+    `Page update: ${view.fieldRefs.length} field handles, ${view.emptyFields} still empty. Unchanged fields and page text remain as last shown.`,
+    "Use updated sections and field descriptions in place of the earlier ones. Visibility updates replace only the listed columns for each handle.",
+    ...changedSections(view.beforeFields, previous.beforeFields),
+    redrawn.length
+      ? `Field descriptions and visibility reused (previous → current handles; use only the current handles):\n${redrawn.join("\n")}`
+      : null,
+    changed.length ? `New or changed fields:\n${changed.join("\n")}` : null,
+    !changed.length && !redrawn.length && !removed.length
+      ? "No field changes."
+      : null,
     removed.length
       ? `Removed fields (do not use these handles): ${removed.join(", ")}.`
       : null,
-    ...sections,
-    ...cleared,
+    ...describeVisibility(view, previous, reusedHandles),
+    ...changedSections(view.afterFields, previous.afterFields),
   ]
     .filter((section): section is string => section !== null)
     .join("\n\n");
