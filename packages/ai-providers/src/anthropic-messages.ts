@@ -331,6 +331,8 @@ export function buildMessagesRequestBody(input: {
    * cache the evolving turn.
    */
   stableLead?: string | undefined;
+  /** A later reusable text block in the opening, after the stable lead. */
+  stableLeadEnd?: string | undefined;
 }): Record<string, unknown> {
   let leading = 0;
   while (input.messages[leading]?.role === "system") leading += 1;
@@ -399,10 +401,20 @@ export function buildMessagesRequestBody(input: {
   if (
     continuesConversation &&
     stableLead &&
+    first?.role === "user" &&
     firstBlock?.type === "text" &&
     firstBlock.text === stableLead
-  )
+  ) {
     firstBlock.cache_control = { type: "ephemeral" };
+    // This uses the remaining slot beside system, stableLead and the automatic turn breakpoint.
+    const end = first.content.find(
+      (block) =>
+        block !== firstBlock &&
+        block.type === "text" &&
+        block.text === input.stableLeadEnd,
+    );
+    if (end?.type === "text") end.cache_control = { type: "ephemeral" };
+  }
   if (
     !continuesConversation &&
     stableLead &&

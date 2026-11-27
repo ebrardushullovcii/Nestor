@@ -4,6 +4,7 @@ import type { ModelRequestUsage } from "@nestor/contracts";
 import type { ModelStreamEvent } from "./model-request-transport";
 import { ModelOutputLimitError } from "@nestor/agent-runtime";
 import {
+  buildMessagesRequestBody,
   ModelRefusalError,
   messagesSdkBaseUrl,
   messagesToolInputSchema,
@@ -1137,6 +1138,51 @@ test("a second application reads the first application's owner prefix", async ()
     cacheWriteInputTokens: 1_000,
   });
   expect(written.size).toBe(1);
+});
+
+test("an expanded opening can reuse the previous application history breakpoint", () => {
+  const owner = "Same owner facts";
+  const firstHistory = "Older applications";
+  const newHistory = "More applications";
+  const request = (history: string[], job: string) =>
+    buildMessagesRequestBody({
+      model: "claude-opus-5-5",
+      tools,
+      messages: [
+        { role: "system", content: "Apply to the selected posting." },
+        { role: "user", content: owner },
+        ...history.map((content) => ({ role: "user" as const, content })),
+        { role: "user", content: job },
+      ],
+      stableLead: owner,
+      stableLeadEnd: history.at(-1),
+    });
+  type Block = { text: string; cache_control?: { type: string } };
+  const opening = (body: Record<string, unknown>) =>
+    (body.messages as Array<{ content: Block[] }>)[0]!.content;
+  const prior = request([firstHistory], "First posting");
+  const next = request([firstHistory, newHistory], "Second posting");
+  expect(
+    opening(prior)
+      .slice(0, 2)
+      .map(({ text }) => text),
+  ).toEqual(
+    opening(next)
+      .slice(0, 2)
+      .map(({ text }) => text),
+  );
+  expect(opening(prior).map((block) => block.cache_control?.type)).toEqual([
+    "ephemeral",
+    "ephemeral",
+    undefined,
+  ]);
+  expect(opening(next).map((block) => block.cache_control?.type)).toEqual([
+    "ephemeral",
+    undefined,
+    "ephemeral",
+    undefined,
+  ]);
+  expect(next.cache_control).toEqual({ type: "ephemeral" });
 });
 
 describe("Messages tool input schemas", () => {

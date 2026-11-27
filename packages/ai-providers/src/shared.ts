@@ -813,6 +813,8 @@ export interface ChatWithToolsOptions {
    * message for a one-shot request or is the first user block of a conversation.
    */
   stableLead?: string;
+  /** An optional second cache breakpoint in the conversation opening. */
+  stableLeadEnd?: string;
 }
 
 export interface ChatWithToolsResult {

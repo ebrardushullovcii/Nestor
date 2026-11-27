@@ -94,12 +94,18 @@ function historyOutcome(
   receipt: SubmissionOutcomeRecord | null,
 ): CandidateApplicationHistory["applications"][number]["submissionOutcome"] {
   if (!receipt) return null;
-  const { browserAction, ...outcome } = receipt;
-  if (!browserAction) return outcome;
-  const { detail, requestsAfterClick, ...action } = browserAction;
-  void detail;
-  void requestsAfterClick;
-  return { ...outcome, browserAction: action };
+  const { outcome, attemptedAt, verifiedAt, evidence } = receipt;
+  return {
+    outcome,
+    attemptedAt,
+    verifiedAt,
+    evidence: evidence.map(({ kind, observedAt, destination, summary }) => ({
+      kind,
+      observedAt,
+      destination,
+      summary,
+    })),
+  };
 }
 
 /** These commands write only the selected rows, inside the shared transaction. */
