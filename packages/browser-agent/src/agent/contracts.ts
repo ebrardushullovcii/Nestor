@@ -35,6 +35,10 @@ export interface LLMClient {
       onRequestUsage?: (usage: ModelRequestUsage) => void
       jsonOutput?: boolean
       jsonSchema?: { name: string; schema: Record<string, unknown> }
+      /** The answer usually ends this work; see ChatWithToolsOptions.oneShot. */
+      oneShot?: boolean
+      /** With oneShot: the last message's repeating opening text. */
+      stableLead?: string
     }
   ) => Promise<{
     content?: string

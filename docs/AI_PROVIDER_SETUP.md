@@ -296,11 +296,15 @@ facts, retries, idle clock and `[AI request]`/`[AI usage]` records as the
 other routes:
 
 - **Caching.** One `cache_control` breakpoint closes tools + system on every
-  request. A conversation (any request with tools or an earlier assistant
-  turn) also sets top-level automatic caching, so each turn's request is the
-  next turn's cached prefix. A one-shot JSON request caches only tools +
-  system: shared facts inside its single user message are not a separate
-  cache entry on this route.
+  request. A conversation (an agent loop, the assistant, the resume writer:
+  any request with tools, or with an earlier assistant turn) also sets
+  top-level automatic caching, so each turn's request is the next turn's
+  cached prefix. A one-shot request (no tools, or `oneShot` from its caller,
+  as fit, screening and page reads send) never caches its per-call end, since
+  a cache write costs more than uncached input: only tools + system and the
+  messages before its last are cached, plus its `stableLead`, the opening of
+  its last message that repeats across the work (fit sends the person's
+  facts). Once such a request takes a tool turn it caches as a conversation.
 - **Thinking.** Always on (adaptive, summarized so long thoughts keep the
   stream alive). Each assistant turn's content blocks, thinking signatures
   included, return unchanged on the next turn. A turn the app has since
@@ -317,6 +321,11 @@ other routes:
   with its category, without a retry. 401, 402 and 403 are the usual access
   failures.
 - **Output.** `max_tokens` is the model's published output limit (128K).
+- **Tool schemas.** The API rejects `allOf`, `anyOf` and `oneOf` at the top
+  of a tool's `input_schema`. Such a schema (pointer's conditional
+  requirements, for example) is sent as one object of every alternative's
+  properties, with the original rule in its description; the tool still
+  validates its input.
 
 In `[AI usage]`, `inputTokens` includes cache reads and writes, as on the
 other routes. `cachedInputTokens` is Anthropic's `cache_read_input_tokens`,

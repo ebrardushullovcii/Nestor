@@ -6,6 +6,7 @@ import { ModelOutputLimitError } from "@nestor/agent-runtime";
 import {
   ModelRefusalError,
   messagesSdkBaseUrl,
+  messagesToolInputSchema,
   normalizeMessagesResponse,
 } from "./anthropic-messages";
 import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
@@ -937,5 +938,239 @@ describe("Messages vision", () => {
       type: "image",
       source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
     });
+  });
+});
+
+describe("Messages one-shot caching", () => {
+  const system = { role: "system" as const, content: "Judge fit. ".repeat(80) };
+  const lead = { person: { name: "Synthetic" }, goals: { remote: true } };
+  const batch = (n: number) =>
+    JSON.stringify({ ...lead, listings: [{ id: n, text: `Listing ${n}` }] });
+
+  test("a one-shot request with a tool caches tools + system and the stable lead, never its end", () => {
+    const leadText = JSON.stringify(lead).slice(0, -1);
+    const bodies = [1, 2].map((n) =>
+      buildModelRequestBody({
+        apiMode: "messages",
+        model: "claude-opus-5-5",
+        messages: [system, { role: "user", content: batch(n) }],
+        tools,
+        oneShot: true,
+        stableLead: leadText,
+      }),
+    );
+    for (const body of bodies) {
+      // No automatic breakpoint on the per-call end.
+      expect(body).not.toHaveProperty("cache_control");
+      expect(body.system).toMatchObject([
+        { cache_control: { type: "ephemeral" } },
+      ]);
+    }
+    const [first, second] = bodies.map(
+      (body) =>
+        (
+          body.messages as Array<{ content: Array<Record<string, unknown>> }>
+        )[0]!.content,
+    );
+    expect(first).toEqual([
+      { type: "text", text: leadText, cache_control: { type: "ephemeral" } },
+      { type: "text", text: batch(1).slice(leadText.length) },
+    ]);
+    // Everything up to the last breakpoint is byte-identical across calls;
+    // only the uncached end differs, so the next call reads the lead.
+    const cachedPrefix = (body: Record<string, unknown>, blocks: unknown[]) =>
+      JSON.stringify([body.tools, body.system, blocks[0]]);
+    expect(cachedPrefix(bodies[1]!, second!)).toBe(
+      cachedPrefix(bodies[0]!, first!),
+    );
+    expect(second![1]).not.toEqual(first![1]);
+  });
+
+  test("a lead that is not where the message starts is not split", () => {
+    const body = buildModelRequestBody({
+      apiMode: "messages",
+      model: "claude-opus-5-5",
+      messages: [system, { role: "user", content: batch(1) }],
+      oneShot: true,
+      stableLead: '{"other":',
+    });
+    expect(body.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: batch(1) }] },
+    ]);
+  });
+
+  test("earlier messages of a one-shot request are its lead", () => {
+    const body = buildModelRequestBody({
+      apiMode: "messages",
+      model: "claude-opus-5-5",
+      messages: [
+        system,
+        { role: "user", content: "The person's facts." },
+        { role: "user", content: "This batch." },
+      ],
+    });
+    expect(body).not.toHaveProperty("cache_control");
+    expect(body.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "The person's facts.",
+            cache_control: { type: "ephemeral" },
+          },
+          { type: "text", text: "This batch." },
+        ],
+      },
+    ]);
+  });
+
+  test("once a one-shot request takes a tool turn, it caches as a conversation", () => {
+    const body = buildModelRequestBody({
+      apiMode: "messages",
+      model: "claude-opus-5-5",
+      messages: [
+        system,
+        { role: "user", content: batch(1) },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "toolu_1",
+              type: "function",
+              function: { name: "open_page", arguments: '{"url":"a"}' },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "toolu_1", content: "part 2" },
+      ],
+      tools,
+      oneShot: true,
+      stableLead: JSON.stringify(lead).slice(0, -1),
+    });
+    expect(body.cache_control).toEqual({ type: "ephemeral" });
+    expect(JSON.stringify(body.messages)).not.toContain('"cache_control"');
+  });
+
+  test("the client passes oneShot and stableLead to the route", async () => {
+    const script = scriptFetch([
+      sse({ content: [{ type: "text", text: "{}" }], stop_reason: "end_turn" }),
+    ]);
+    restoreFetch = script.restore;
+    const leadText = JSON.stringify(lead).slice(0, -1);
+    await client().chatWithTools(
+      [system, { role: "user", content: batch(3) }],
+      tools,
+      { oneShot: true, stableLead: leadText, reasoningTask: "fit_batch" },
+    );
+    const body = script.captured[0]!.body;
+    expect(body).not.toHaveProperty("cache_control");
+    expect(
+      (body.messages as Array<{ content: Array<{ text?: string }> }>)[0]!
+        .content[0]!.text,
+    ).toBe(leadText);
+  });
+});
+
+describe("Messages tool input schemas", () => {
+  const COMBINATORS = ["allOf", "anyOf", "oneOf"];
+  /** Anthropic: an object at the top level, no combinator there. */
+  const acceptable = (schema: Record<string, unknown>) =>
+    schema.type === "object" && COMBINATORS.every((key) => !(key in schema));
+
+  test("pointer's conditional requirements become a described object", () => {
+    const pointer = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["click", "drag", "hold"] },
+        x: { type: "number" },
+        y: { type: "number" },
+        endX: { type: "number" },
+        endY: { type: "number" },
+        durationMs: { type: "number", minimum: 0 },
+      },
+      required: ["action", "x", "y"],
+      additionalProperties: false,
+      allOf: [
+        {
+          if: {
+            properties: { action: { const: "drag" } },
+            required: ["action"],
+          },
+          then: { required: ["endX", "endY"] },
+        },
+      ],
+    };
+    const schema = messagesToolInputSchema(pointer) as Record<string, unknown>;
+    expect(acceptable(schema)).toBe(true);
+    expect(schema).toMatchObject({
+      properties: pointer.properties,
+      required: ["action", "x", "y"],
+      additionalProperties: false,
+    });
+    expect(schema.description).toContain('"then":{"required":["endX","endY"]}');
+    // The app's own schema is left as it was.
+    expect(pointer).toHaveProperty("allOf");
+  });
+
+  test("alternative argument shapes become one object of every property", () => {
+    const schema = messagesToolInputSchema({
+      type: "object",
+      description: "Edit one thing.",
+      anyOf: [
+        {
+          properties: { field: { type: "string" }, value: { type: "string" } },
+          required: ["field", "value"],
+        },
+        {
+          properties: { field: { type: "string" }, values: { type: "array" } },
+          required: ["field", "values"],
+        },
+      ],
+    }) as Record<string, unknown>;
+    expect(acceptable(schema)).toBe(true);
+    expect(schema).toMatchObject({
+      properties: {
+        field: { type: "string" },
+        value: { type: "string" },
+        values: { type: "array" },
+      },
+      required: ["field"],
+    });
+    expect(schema.description).toMatch(
+      /^Edit one thing\.\nThe input must also satisfy/u,
+    );
+  });
+
+  test("a schema the API already accepts goes out unchanged", () => {
+    const plain = tools[0]!.function.parameters;
+    expect(messagesToolInputSchema(plain)).toBe(plain);
+  });
+
+  test("every tool in a request is sent in the accepted form", () => {
+    const body = buildModelRequestBody({
+      apiMode: "messages",
+      model: "claude-opus-5-5",
+      messages: [{ role: "user", content: "go" }],
+      tools: [
+        ...tools,
+        {
+          type: "function",
+          function: {
+            name: "pointer",
+            parameters: {
+              type: "object",
+              properties: { action: { type: "string" } },
+              allOf: [{ if: {}, then: {} }],
+            },
+          },
+        },
+      ],
+    });
+    for (const tool of body.tools as Array<{
+      input_schema: Record<string, unknown>;
+    }>)
+      expect(acceptable(tool.input_schema)).toBe(true);
   });
 });

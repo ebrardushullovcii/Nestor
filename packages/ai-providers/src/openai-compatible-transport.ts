@@ -430,6 +430,10 @@ export function buildModelRequestBody(input: {
   reasoningSummary?: boolean | undefined;
   /** Chat Completions only: ask for a usage chunk at the end of a stream. */
   includeStreamUsage?: boolean | undefined;
+  /** Messages only: cache the request's stable lead, not its end. */
+  oneShot?: boolean | undefined;
+  /** Messages only: the final message's repeating opening text. */
+  stableLead?: string | undefined;
 }): Record<string, unknown> {
   if (input.apiMode === "messages") return buildMessagesRequestBody(input);
   // Complete every tool reply before attaching its images in a user message.

@@ -204,6 +204,95 @@ function assistantContentBlocks(
   ];
 }
 
+const SCHEMA_COMBINATORS = ["allOf", "anyOf", "oneOf"] as const;
+
+function mergeProperty(left: unknown, right: unknown): unknown {
+  if (left === undefined) return right;
+  if (JSON.stringify(left) === JSON.stringify(right)) return left;
+  return { anyOf: [left, right] };
+}
+
+/**
+ * A tool's input schema as the Messages API accepts it. The API rejects
+ * `allOf`, `anyOf` and `oneOf` at the top level of `input_schema`; the app's
+ * tools use them for conditional requirements (pointer: drag needs endX and
+ * endY) and for alternative argument shapes. They become one object schema
+ * holding every alternative's properties, required where every alternative
+ * requires them, and the original rule is stated in the schema description.
+ * The model's input keeps the app's own object shape, and the tool still
+ * validates it and answers with its error when a rule is broken.
+ */
+export function messagesToolInputSchema(
+  parameters: unknown,
+): Anthropic.Beta.Messages.BetaTool.InputSchema {
+  if (!isRecord(parameters)) return { type: "object", properties: {} };
+  if (!SCHEMA_COMBINATORS.some((key) => key in parameters))
+    return parameters as Anthropic.Beta.Messages.BetaTool.InputSchema;
+  const { allOf, anyOf, oneOf, ...rest } = parameters;
+  const properties: Record<string, unknown> = isRecord(rest.properties)
+    ? { ...rest.properties }
+    : {};
+  const required = new Set(
+    Array.isArray(rest.required)
+      ? rest.required.filter((key): key is string => typeof key === "string")
+      : [],
+  );
+  const addProperties = (entry: Record<string, unknown>) => {
+    if (isRecord(entry.properties))
+      for (const [key, value] of Object.entries(entry.properties))
+        properties[key] = mergeProperty(properties[key], value);
+  };
+  const requiredOf = (entry: Record<string, unknown>) =>
+    Array.isArray(entry.required)
+      ? entry.required.filter((key): key is string => typeof key === "string")
+      : [];
+  // Every allOf entry applies; an unconditional one is merged in whole.
+  for (const entry of Array.isArray(allOf) ? allOf : []) {
+    if (!isRecord(entry) || "if" in entry || "not" in entry) continue;
+    addProperties(entry);
+    for (const key of requiredOf(entry)) required.add(key);
+  }
+  // One alternative applies: offer every alternative's properties, and
+  // require only what all of them require.
+  for (const alternatives of [anyOf, oneOf]) {
+    if (!Array.isArray(alternatives) || alternatives.length === 0) continue;
+    const entries = alternatives.filter(isRecord);
+    for (const entry of entries) addProperties(entry);
+    const shared = entries
+      .map((entry) => new Set(requiredOf(entry)))
+      .reduce<Set<string> | null>(
+        (common, next) =>
+          common === null
+            ? next
+            : new Set([...common].filter((key) => next.has(key))),
+        null,
+      );
+    for (const key of shared ?? []) required.add(key);
+  }
+  const rule = Object.fromEntries(
+    (
+      [
+        ["allOf", allOf],
+        ["anyOf", anyOf],
+        ["oneOf", oneOf],
+      ] as const
+    ).filter(([, value]) => value !== undefined),
+  );
+  const description = [
+    typeof rest.description === "string" ? rest.description : "",
+    `The input must also satisfy this JSON Schema rule: ${JSON.stringify(rule)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return {
+    ...rest,
+    type: "object",
+    properties,
+    ...(required.size > 0 ? { required: [...required] } : {}),
+    description,
+  } as Anthropic.Beta.Messages.BetaTool.InputSchema;
+}
+
 type BuiltMessage =
   | { role: "user" | "assistant"; content: BetaContentBlockParam[] }
   | { role: "system"; content: string };
@@ -230,6 +319,18 @@ export function buildMessagesRequestBody(input: {
   jsonSchema?: { name: string; schema: Record<string, unknown> } | undefined;
   tools?: readonly CompatibleTool[];
   parallelToolCalls?: boolean | undefined;
+  /**
+   * The answer to this request usually ends its work, even when it is offered
+   * a tool. Only its stable lead is cached: tools, system and every message
+   * before the last, never the per-call material at its end.
+   */
+  oneShot?: boolean | undefined;
+  /**
+   * One-shot only: text the final message starts with that repeats across
+   * requests of this work (the person's facts ahead of a batch). It is cached
+   * as its own block; the model reads the same text.
+   */
+  stableLead?: string | undefined;
 }): Record<string, unknown> {
   let leading = 0;
   while (input.messages[leading]?.role === "system") leading += 1;
@@ -240,6 +341,14 @@ export function buildMessagesRequestBody(input: {
   if (lastSystem) lastSystem.cache_control = { type: "ephemeral" };
 
   const built: BuiltMessage[] = [];
+  // The last block each message produced, so a message boundary is known
+  // after consecutive user turns are joined.
+  const endsOfMessages: BetaContentBlockParam[] = [];
+  let finalUserBlocks: BetaContentBlockParam[] = [];
+  const noteEnd = (blocks: readonly BetaContentBlockParam[]) => {
+    const last = blocks.at(-1);
+    if (last) endsOfMessages.push(last);
+  };
   for (const message of input.messages.slice(leading)) {
     if (message.role === "tool") {
       const result: BetaToolResultBlockParam = {
@@ -251,22 +360,62 @@ export function buildMessagesRequestBody(input: {
         ],
       };
       appendUserBlocks(built, [result]);
+      noteEnd([result]);
       continue;
     }
     if (message.role === "user") {
-      appendUserBlocks(built, [
+      const blocks = [
         ...userContentBlocks(message.content),
         ...imageInputBlocks(message.images),
-      ]);
+      ];
+      appendUserBlocks(built, blocks);
+      noteEnd(blocks);
+      finalUserBlocks = message === input.messages.at(-1) ? blocks : [];
       continue;
     }
     if (message.role === "assistant") {
       const content = assistantContentBlocks(message);
       if (content.length > 0) built.push({ role: "assistant", content });
+      noteEnd(content);
       continue;
     }
     const text = contentText(message.content);
     if (text) built.push({ role: "system", content: text });
+  }
+  const tools = input.tools ?? [];
+  // Where caching pays: a conversation's end is the next turn's prefix, so it
+  // is written; a one-shot request's end is never read again, so only its
+  // lead is (a cache write costs more than uncached input).
+  const continuesConversation =
+    built.some((message) => message.role === "assistant") ||
+    (tools.length > 0 && input.oneShot !== true);
+  const lead = continuesConversation ? undefined : endsOfMessages.at(-2);
+  if (lead && lead.type !== "thinking" && lead.type !== "redacted_thinking")
+    (lead as BetaTextBlockParam).cache_control = { type: "ephemeral" };
+  const opening = finalUserBlocks[0];
+  const stableLead = input.stableLead;
+  if (
+    !continuesConversation &&
+    stableLead &&
+    opening?.type === "text" &&
+    opening.text.length > stableLead.length &&
+    opening.text.startsWith(stableLead)
+  ) {
+    const holder = built.find(
+      (message) =>
+        message.role !== "system" && message.content.includes(opening),
+    );
+    if (holder && holder.role !== "system")
+      holder.content.splice(
+        holder.content.indexOf(opening),
+        1,
+        {
+          type: "text",
+          text: stableLead,
+          cache_control: { type: "ephemeral" },
+        },
+        { type: "text", text: opening.text.slice(stableLead.length) },
+      );
   }
   // A mid-conversation system message must follow a user turn and be last
   // or followed by an assistant turn; elsewhere it is said in a user turn.
@@ -297,11 +446,7 @@ export function buildMessagesRequestBody(input: {
     else messages.push({ role: "user", content: [block] });
   });
 
-  const tools = input.tools ?? [];
   const effort = messagesEffort(input.reasoningEffort);
-  const continuesConversation =
-    tools.length > 0 ||
-    input.messages.some((message) => message.role === "assistant");
   const body: Omit<MessageCreateParamsStreaming, "stream"> = {
     model: input.model,
     max_tokens:
@@ -332,8 +477,6 @@ export function buildMessagesRequestBody(input: {
           },
         }
       : {}),
-    // One-shot requests end in their own unique input; a write there would
-    // never be read back. A conversation's end is the next turn's prefix.
     ...(continuesConversation
       ? { cache_control: { type: "ephemeral" as const } }
       : {}),
@@ -346,8 +489,7 @@ export function buildMessagesRequestBody(input: {
             ...(tool.function.description
               ? { description: tool.function.description }
               : {}),
-            input_schema: tool.function
-              .parameters as Anthropic.Beta.Messages.BetaTool.InputSchema,
+            input_schema: messagesToolInputSchema(tool.function.parameters),
           })),
           ...(input.parallelToolCalls === false
             ? {

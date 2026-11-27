@@ -801,6 +801,18 @@ export interface ChatWithToolsOptions {
   onStreamEvent?: (event: ModelStreamEvent) => void;
   /** Which work this turn belongs to; picks its reasoning effort. */
   reasoningTask?: ModelReasoningTask;
+  /**
+   * The answer to this request usually ends its work, though a tool is
+   * offered. A route that pays to write its prompt cache (Anthropic
+   * Messages) then caches only the lead (tools, system and every message
+   * before the last), not the per-call material at the end.
+   */
+  oneShot?: boolean;
+  /**
+   * With `oneShot`: text the last message starts with that repeats across
+   * requests of the same work, cached on its own on such a route.
+   */
+  stableLead?: string;
 }
 
 export interface ChatWithToolsResult {
