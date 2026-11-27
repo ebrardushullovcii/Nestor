@@ -1,17 +1,18 @@
+# The owner turned AI reviews off (Nov 27, 2026); no automatic reviews, status comments or chat replies.
 language: "en-US"
 
 reviews:
   profile: "assertive"
   request_changes_workflow: false
-  high_level_summary: true
-  review_status: true
-  commit_status: true
+  high_level_summary: false
+  review_status: false
+  commit_status: false
   fail_commit_status: false
   collapse_walkthrough: false
   poem: false
   auto_review:
-    enabled: true
-    auto_incremental_review: true
+    enabled: false
+    auto_incremental_review: false
     auto_pause_after_reviewed_commits: 0
     drafts: true
     base_branches:
@@ -38,8 +39,8 @@ reviews:
       instructions: "Keep package boundaries typed, schema-validated, and free of deep cross-package imports or any usage."
   tools:
     github-checks:
-      enabled: true
+      enabled: false
       timeout_ms: 120000
 
 chat:
-  auto_reply: true
+  auto_reply: false
