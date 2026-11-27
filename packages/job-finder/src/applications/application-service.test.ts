@@ -1,4 +1,7 @@
-import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  AI_ACCESS_MESSAGES,
+  createDeterministicJobFinderAiClient,
+} from "@nestor/ai-providers";
 import type { ApplyBlocker } from "@nestor/browser-agent";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
@@ -4117,4 +4120,94 @@ it("a failed legacy rewrite reports our error and never opens the browser with t
     f.applications.getApplication(f.applications.listApplications().rows[0]!.id)
       ?.error,
   ).toContain("Writer service unavailable");
+});
+
+/** The AI account as the scripted transport leaves it, driven by the test. */
+type ScriptedAiStatus = "unknown" | "available" | "blocked";
+function scriptedAiAccess() {
+  let status: ScriptedAiStatus = "unknown";
+  const changes = new Set<(status: ScriptedAiStatus) => void>();
+  const rechecks: Array<() => boolean> = [];
+  return {
+    watch: {
+      status: () => status,
+      onChange: (listener: (next: ScriptedAiStatus) => void) => {
+        changes.add(listener);
+        return () => changes.delete(listener);
+      },
+      onRefused: () => () => undefined,
+      onRecheck: (recheck: () => boolean) => {
+        rechecks.push(recheck);
+        return () => rechecks.splice(rechecks.indexOf(recheck), 1);
+      },
+      letCallsThrough: vi.fn(),
+    },
+    set(next: ScriptedAiStatus) {
+      status = next;
+      for (const listener of changes) listener(next);
+    },
+    recheck: () => rechecks.some((recheck) => recheck()),
+  };
+}
+
+it("an application the AI account refused fails with the person's step, then is prepared again once, by itself, when calls go through", async () => {
+  const f = await setup(1);
+  const access = scriptedAiAccess();
+  f.deps.aiAccess = access.watch;
+  preparation.notReadyToSend = true;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      state: "failed",
+      summary: "Not finished",
+      detail: AI_ACCESS_MESSAGES.funding,
+      submittedAt: null,
+      outcome: null,
+      nextActionLabel: null,
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]).toMatchObject({
+      state: "failed",
+      error: AI_ACCESS_MESSAGES.funding,
+    }),
+  );
+  access.set("blocked");
+
+  access.set("available");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  // A later recovery does not prepare it again.
+  access.set("available");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(f.execute).toHaveBeenCalledTimes(2);
+});
+
+it("while the AI account refuses calls, queued applications wait in the queue and the check takes one", async () => {
+  const f = await setup(2);
+  const access = scriptedAiAccess();
+  f.deps.aiAccess = access.watch;
+  access.set("blocked");
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(f.execute).not.toHaveBeenCalled();
+  expect(
+    f.applications
+      .listApplications()
+      .rows.every((row) => row.state === "queued"),
+  ).toBe(true);
+
+  expect(access.recheck()).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(f.execute).toHaveBeenCalledOnce();
+
+  access.set("available");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
 });

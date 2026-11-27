@@ -4039,8 +4039,8 @@ export function createBrowserAgentRuntime(
           error instanceof Error
             ? error.message
             : "Unknown error during agent discovery";
-        // The AI service refusing the request is an outage to the person,
-        // never the service's own words about keys or accounts.
+        // The AI account refusing the request is a step only the person can
+        // take (Needs you carries the service's own words and link).
         const accessFailure = getAiProviderAccessFailure(error);
 
         return DiscoveryRunResultSchema.parse({

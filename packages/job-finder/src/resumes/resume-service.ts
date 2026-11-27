@@ -4,10 +4,12 @@ import { editResumeDraft, dropsResumeContent } from "./edit-resume";
 import type { EditResumeInput } from "@nestor/contracts";
 import {
   getAiProviderAccessFailure,
+  isAiProviderAccessMessage,
   isAiProviderRateLimited,
   isAiServiceBusy,
   withModelProviderProgress,
 } from "@nestor/ai-providers";
+import { APP_AI_ACCESS, type AiAccessWatch } from "../internal/ai-access-watch";
 import {
   hasProfileSetupPlaceholderValue,
   type CandidateProfile,
@@ -74,6 +76,8 @@ export interface ResumeServiceDeps extends ResumeWriterDeps {
   readInputs(): Promise<ResumeWriterInputs>;
   /** Nestor's browser, where the model reads a posting the job lacks. */
   browserRuntime?: Pick<BrowserSessionRuntime, "runAgentDiscovery">;
+  /** Whether the AI account lets calls through; the app's own by default. */
+  aiAccess?: AiAccessWatch;
 }
 
 export type ResumeView = ResumeCommandOutputs["get_resume"];
@@ -109,6 +113,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
   let stopped = true;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribe: (() => void) | null = null;
+  let stopWatchingAccess: (() => void) | null = null;
   let waitingForProfile = false;
   let profileRevision = 0;
 
@@ -208,8 +213,21 @@ export function createResumeService(deps: ResumeServiceDeps) {
     );
   }
 
+  const access = deps.aiAccess ?? APP_AI_ACCESS;
+
   function pump(immediateId?: number) {
     if (stopped || waitingForProfile) return;
+    // While the AI account refuses calls, queued writes wait in the queue
+    // instead of each failing; the periodic check starts one. The person's
+    // own rewrite still goes, and reaches the service now.
+    if (access.status() === "blocked") {
+      if (immediateId !== undefined && !running.has(immediateId)) {
+        access.letCallsThrough();
+        clearTimeout(scheduled.get(immediateId));
+        launch(immediateId);
+      }
+      return;
+    }
     for (const jobId of resumes.listUnwritten(50)) {
       if (running.has(jobId)) continue;
       if (jobId === immediateId) {
@@ -244,6 +262,35 @@ export function createResumeService(deps: ResumeServiceDeps) {
     for (const [jobId, controller] of running) {
       if (!shortlisted.has(jobId)) controller.abort();
     }
+  }
+
+  /**
+   * Resumes the AI account refused go back in the queue, at its normal
+   * pace: all of them once calls go through again, or the oldest one as the
+   * check while the account still refuses. True when one went back.
+   */
+  function retryRefusedWrites(): boolean {
+    if (stopped) return false;
+    let requeued = false;
+    for (const { jobId, error } of resumes.listFailed())
+      if (isAiProviderAccessMessage(error) && resumes.requeueFailed(jobId))
+        requeued = true;
+    if (requeued) pump();
+    return requeued;
+  }
+
+  /** The check while the account refuses: one waiting write, started now. */
+  function checkWithOneWrite(): boolean {
+    if (stopped || waitingForProfile || running.size > 0) return false;
+    const refused = resumes
+      .listFailed()
+      .find(({ error }) => isAiProviderAccessMessage(error));
+    if (refused && !resumes.requeueFailed(refused.jobId)) return false;
+    const jobId = refused?.jobId ?? resumes.listUnwritten(1)[0];
+    if (jobId === undefined) return false;
+    clearTimeout(scheduled.get(jobId));
+    launch(jobId);
+    return running.has(jobId);
   }
 
   function setLevel(jobId: number, level: ResumeLevel) {
@@ -297,6 +344,18 @@ export function createResumeService(deps: ResumeServiceDeps) {
         stopWritesThatLeft();
         pump();
       });
+      const stopHearing = access.onChange((status) => {
+        if (status !== "available") return;
+        if (!retryRefusedWrites()) pump();
+      });
+      const stopChecking = access.onRecheck(checkWithOneWrite);
+      stopWatchingAccess = () => {
+        stopHearing();
+        stopChecking();
+      };
+      // A resume the account refused before this start is tried again now,
+      // unless the account is known to refuse still; then it waits.
+      if (access.status() !== "blocked") retryRefusedWrites();
       pump();
     },
 
@@ -304,6 +363,8 @@ export function createResumeService(deps: ResumeServiceDeps) {
       stopped = true;
       unsubscribe?.();
       unsubscribe = null;
+      stopWatchingAccess?.();
+      stopWatchingAccess = null;
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
       for (const timer of scheduled.values()) clearTimeout(timer);

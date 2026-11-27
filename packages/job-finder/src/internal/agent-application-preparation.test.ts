@@ -1,5 +1,10 @@
 import type { LLMClient } from "@nestor/browser-agent";
-import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  AI_ACCESS_MESSAGES,
+  aiAccessBlocks,
+  createOpenAiCompatibleJobFinderAiClient,
+  resetAiAccessForTests,
+} from "@nestor/ai-providers";
 import * as browserAgent from "@nestor/browser-agent";
 import {
   AiBehaviorPreferenceSchema,
@@ -690,6 +695,47 @@ describe("agent application preparation seam", () => {
     } finally {
       fetchMock.mockRestore();
       vi.useRealTimers();
+    }
+  });
+
+  test("an application the AI account refuses says the person's step plainly, and nothing is sent", async () => {
+    resetAiAccessForTests();
+    const words =
+      "Insufficient balance. Top up at https://model.example.test/console/account-test/billing?credits=1.";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: { message: words } }), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      apiKey: "synthetic-out-of-credit",
+      baseUrl: "https://model.example.test/v1",
+      model: "synthetic",
+    });
+    try {
+      const prepare = createApplyFormPreparer({
+        executionInput: executionInput(),
+        aiClient: client,
+        siteLabel: "Local replica",
+      });
+      const result = await prepare({
+        session: session(),
+        currentUrl: PAGE_URL,
+        startedAt: new Date().toISOString(),
+      });
+      expect(result.state).toBe("failed");
+      expect(result.detail).toBe(AI_ACCESS_MESSAGES.funding);
+      expect(result.submittedAt).toBeNull();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(aiAccessBlocks()).toEqual([
+        expect.objectContaining({ reason: "funding", providerMessage: words }),
+      ]);
+    } finally {
+      fetchMock.mockRestore();
+      resetAiAccessForTests();
     }
   });
 

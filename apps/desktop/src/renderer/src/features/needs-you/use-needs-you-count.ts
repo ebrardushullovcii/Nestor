@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
+import { useAiAccountNeeds } from "./use-ai-account-needs";
 
-/** The badge and Needs you count the same open store tasks. */
+/**
+ * The badge and Needs you count the same open store tasks, and the AI
+ * account step while one is open.
+ */
 export function useNeedsYouCount(): number {
+  const accountSteps = useAiAccountNeeds().length;
   const [count, setCount] = useState(0);
   useEffect(() => {
     let live = true;
@@ -25,5 +30,5 @@ export function useNeedsYouCount(): number {
       unsubscribe();
     };
   }, []);
-  return count;
+  return count + accountSteps;
 }

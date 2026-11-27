@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
+  AI_ACCESS_MESSAGES,
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
+  resetAiAccessForTests,
 } from "./ai-provider-access-failure";
 import {
   ModelRequestHttpError,
@@ -12,6 +14,7 @@ import {
 
 beforeEach(() => {
   resetModelCredentialRejections();
+  resetAiAccessForTests();
 });
 import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
 import {
@@ -28,18 +31,17 @@ describe("AI provider access failures", () => {
     [401, "authentication"],
     [403, "permission"],
   ] as const)(
-    "recognizes a structured AI provider %i without exposing its body",
+    "recognizes a structured AI provider %i, says the person's step plainly and keeps the provider's words apart",
     (status, reason) => {
       const failure = getAiProviderAccessFailure(
-        new ModelRequestHttpError("PRIVATE_PROVIDER_BODY", status, null),
+        new ModelRequestHttpError("PROVIDER_WORDS", status, null),
       );
       expect(failure?.reason).toBe(reason);
-      expect(failure?.message).toContain("The AI service is unavailable");
-      expect(failure?.message).toContain("Nothing was changed");
-      expect(failure?.message).toContain("after the service is restored");
-      expect(failure?.message).not.toMatch(
-        /PRIVATE_PROVIDER_BODY|API key|model settings|billing settings/,
-      );
+      expect(failure?.message).toBe(AI_ACCESS_MESSAGES[reason]);
+      expect(failure?.message).toContain("nothing was changed");
+      expect(failure?.message).toContain("Needs you");
+      expect(failure?.message).not.toContain("PROVIDER_WORDS");
+      expect(failure?.providerMessage).toBe("PROVIDER_WORDS");
     },
   );
 
@@ -222,7 +224,8 @@ describe("AI provider rate limits", () => {
 });
 
 test("a request the service never finished answering counts as busy, not failed", async () => {
-  const { ModelRequestTimeoutError } = await import("./model-request-transport");
+  const { ModelRequestTimeoutError } =
+    await import("./model-request-transport");
   const { isAiServiceBusy } = await import("./ai-provider-access-failure");
   const wrapped = new Error("The AI could not write this resume in time.", {
     cause: new ModelRequestTimeoutError("total", 300_000),

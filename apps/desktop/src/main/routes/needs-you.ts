@@ -1,6 +1,15 @@
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/needs-you";
 import {
+  aiAccessBlocks,
+  checkAiAccessAgain,
+  onAiAccessChange,
+} from "@nestor/ai-providers";
+import {
+  AiAccountNeedRequestSchema,
+  AiAccountNeedSchema,
+  NEEDS_YOU_AI_ACCOUNT_CHANNEL,
   NEEDS_YOU_RUN_CHANNEL,
+  type AiAccountNeed,
   type NeedsYouCommandName,
   type NeedsYouCommandOutput,
   type NeedsYouTask,
@@ -98,7 +107,57 @@ export async function runNeedsYouCommand<K extends NeedsYouCommandName>(
     await applicationService();
   return result;
 }
+/** The AI accounts refusing Nestor's calls now, as Needs you shows them. */
+export function aiAccountNeeds(): AiAccountNeed[] {
+  return aiAccessBlocks().map((block) =>
+    AiAccountNeedSchema.parse({
+      id: block.id,
+      provider: block.provider,
+      reason: block.reason,
+      providerMessage: block.providerMessage,
+      actionUrl: block.actionUrl,
+      since: block.since,
+    }),
+  );
+}
+
+async function runAiAccountNeed(request: unknown) {
+  const parsed = AiAccountNeedRequestSchema.parse(request);
+  if (parsed.action === "list") return aiAccountNeeds();
+  if (parsed.action === "check") return checkAiAccessAgain();
+  const link = aiAccessBlocks().find(
+    (block) => block.id === parsed.id,
+  )?.actionUrl;
+  if (!link) return false;
+  const url = new URL(link);
+  if (!["https:", "http:"].includes(url.protocol)) return false;
+  await shell.openExternal(url.href);
+  return true;
+}
+
+/**
+ * Needs you and its count read the AI account item with the store's tasks:
+ * a change to it reaches them as an application change.
+ */
+let announcingAiAccess: (() => void) | null = null;
+function announceAiAccessChanges(): void {
+  announcingAiAccess ??= onAiAccessChange(() => {
+    getJobStore().notify({
+      cause: "application",
+      stages: [],
+      ids: [],
+      searchId: null,
+    });
+  });
+}
+
 export function registerNeedsYouRoutes(ipcMain: IpcMain): void {
+  announceAiAccessChanges();
+  ipcMain.handle(NEEDS_YOU_AI_ACCOUNT_CHANNEL, (event, request: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame)
+      throw new Error("Not allowed.");
+    return runAiAccountNeed(request);
+  });
   ipcMain.handle(NEEDS_YOU_RUN_CHANNEL, (event, request: unknown) => {
     if (event.senderFrame !== event.sender.mainFrame)
       throw new Error("Not allowed.");

@@ -4,6 +4,10 @@ import { verifyPersonAnswerAuthority } from "./person-answer-authority";
 import { readAssistantWorkState } from "./work-state";
 import { buildChangePreview } from "./change-diff";
 import { createHash, randomUUID } from "node:crypto";
+import {
+  AI_ACCESS_STEPS,
+  getAiProviderAccessFailure,
+} from "@nestor/ai-providers";
 
 import {
   createTokenCalibrator,
@@ -181,6 +185,10 @@ const OUTAGE_TEXT =
  * person's internet.
  */
 function describeModelFailure(error: unknown): string {
+  // The AI account refused the call: only the person can fix that.
+  const access = getAiProviderAccessFailure(error);
+  if (access)
+    return `${AI_ACCESS_STEPS[access.reason]} Your message is kept; send it again once that is done.`;
   const message =
     error instanceof Error
       ? error.message

@@ -19,7 +19,7 @@ Job Finder had two chats: one beside the profile and one inside the Resume studi
 - **Work continues across background runs.** A search, resume batch or application run the assistant starts is watched; when it finishes the host continues the same turn's plan without a new message. Stop fences the turn, cancels its runs and releases its browser tab.
 - **Bounded context.** Old tool outputs become handles the model can reopen, and long threads compact into validated checkpoints that keep corrections, result order, pending questions, grants and outcomes.
 - **No legacy chat migration.** The Job Finder rewrite starts with fresh data. The side chat does not scan or import the old Profile Copilot and Resume assistant histories.
-- **AI is bundled.** The default route is `deepseek-v4.1-flash` over Chat Completions, with `muse-spark-1.3-contributor` over Responses as the alternative (`NESTOR_AI_ASSISTANT_*`). A missing or failing model reads as a temporary outage, never as a setup task.
+- **AI is bundled.** The default route is `deepseek-v4.1-flash` over Chat Completions, with `muse-spark-1.3-contributor` over Responses as the alternative (`NESTOR_AI_ASSISTANT_*`). A missing or failing model reads as a temporary outage, never as a setup task. Amended 2026-11-27: an AI account that refuses calls (402 out of credit, 401 key not accepted, 403 no access to the model) is not an outage. It is one Needs you step only the account holder can take, with the service's own words and link. Work it held up waits with its queue kept and continues by itself once a call goes through (`packages/ai-providers/src/ai-provider-access-state.ts`). A 429, 5xx or timeout stays an ordinary retry.
 
 ## Consequences
 

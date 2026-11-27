@@ -47,6 +47,8 @@ import {
 import { TaskPane, describeError } from "./task-pane";
 import { SavedAnswerPane } from "./saved-answer-pane";
 import { SourceNeedPane } from "./source-need-pane";
+import { AiAccountNeedItem } from "./ai-account-need";
+import { useAiAccountNeeds } from "./use-ai-account-needs";
 import { useNeedsSelection } from "./use-needs-selection";
 import {
   currentWorkItem,
@@ -287,6 +289,7 @@ export function NeedsYouScreen() {
   const navigateTo = useNavigate();
   const pinned = useRef<number | null>(null);
   const [counts, setCounts] = useState(EMPTY_COUNTS);
+  const accountNeeds = useAiAccountNeeds();
   // Until the counts are read they are unknown ("–"), never 0.
   const [countsKnown, setCountsKnown] = useState(false);
   // Read the counts again (Try again on the list reads them with it).
@@ -686,9 +689,9 @@ export function NeedsYouScreen() {
           ? list.loading
             ? "Reading what needs you…"
             : "Not read yet"
-          : blocked === 0
+          : blocked + accountNeeds.length === 0
             ? "Nothing needs you"
-            : `${plural(blocked, "item needs", "items need")} you`}
+            : `${plural(blocked + accountNeeds.length, "item needs", "items need")} you`}
         {/* The badge counts every waiting item; sign-ins on one host are
             one row and one step: say how many Work through takes when the
             two differ. */}
@@ -812,13 +815,13 @@ export function NeedsYouScreen() {
                   <span className="flex items-center gap-1.5">
                     Needs you
                     <CountFigure
-                      count={totalTasks}
+                      count={totalTasks + accountNeeds.length}
                       known={countsKnown}
                       slot="needs-you:tasks"
                     />
                   </span>
                 ),
-                ariaLabel: `Needs you ${countText(totalTasks, countsKnown)}`,
+                ariaLabel: `Needs you ${countText(totalTasks + accountNeeds.length, countsKnown)}`,
               },
               {
                 value: "saved",
@@ -836,6 +839,11 @@ export function NeedsYouScreen() {
               },
             ]}
           />
+          {tab === "tasks"
+            ? accountNeeds.map((need) => (
+                <AiAccountNeedItem key={need.id} need={need} />
+              ))
+            : null}
           {tab === "tasks" && kind ? (
             <p className="flex items-center gap-2 text-sm text-foreground-soft">
               Showing {KIND_FILTER_LABEL[kind].toLowerCase()} only.

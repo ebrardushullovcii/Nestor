@@ -1,5 +1,10 @@
 import { setMaxListeners } from "node:events";
-import { withModelProviderProgress } from "@nestor/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  isAiProviderAccessMessage,
+  withModelProviderProgress,
+} from "@nestor/ai-providers";
+import { APP_AI_ACCESS } from "../internal/ai-access-watch";
 import {
   createJobSitesStore,
   createSearchSourcesStore,
@@ -87,6 +92,79 @@ export function createJobSearchRunner(
     }, delay);
     continuation.unref();
   };
+  // Fit the AI account refused: the unscored jobs stay saved and are scored
+  // once calls go through again, at the queue's normal pace. A search saved
+  // with that refusal (before a restart) waits the same way.
+  let fitRefused = isAiProviderAccessMessage(search?.error);
+  const noteFitFailure = (error: unknown): string | null => {
+    const access = getAiProviderAccessFailure(error);
+    if (!access) return null;
+    fitRefused = true;
+    return access.message;
+  };
+  const retryRefusedFit = (): boolean => {
+    if (!fitRefused) return false;
+    fitRefused = false;
+    scheduleFit();
+    return true;
+  };
+  const aiAccess = deps.aiAccess ?? APP_AI_ACCESS;
+  /**
+   * The AI account refused a call of the running search: it stops taking
+   * new work at once, as Quit does. The record stays running and every
+   * unfinished site keeps its queued listings, so nothing reads as done or
+   * failed for the refusal.
+   */
+  let parked: { message: string; providerMessage: string | null } | null = null;
+  const park = (block: { message: string; providerMessage: string | null }) => {
+    if (recovery) {
+      fitRefused = true;
+      recoveryError = block.message;
+      recovery.controller.abort();
+    }
+    const run = active;
+    if (!run || run.controller.signal.aborted || run.suspended) return;
+    fitRefused = true;
+    parked = { message: block.message, providerMessage: block.providerMessage };
+    run.flush?.();
+    run.suspended = true;
+    run.controller.abort();
+    run.setReady(null);
+    active = null;
+    notify(true);
+  };
+  /** Continues a parked search from its saved queue, as a restart does. */
+  const resumeParked = (): Promise<JobSearchRecord> | null => {
+    if (!parked) return null;
+    parked = null;
+    notify(true);
+    const record = search;
+    if (active || record?.state !== "running") return null;
+    // The continued search scores its unscored jobs itself.
+    fitRefused = false;
+    return begin(record.settings, undefined, record);
+  };
+  const retryRefused = (): boolean => {
+    if (parked) {
+      void resumeParked()?.catch(() => undefined);
+      return true;
+    }
+    return retryRefusedFit();
+  };
+  aiAccess.onRefused(park);
+  aiAccess.onChange((status) => {
+    if (status === "available") retryRefused();
+  });
+  aiAccess.onRecheck(retryRefused);
+  // A refusal saved before this start is tried again now, unless the
+  // account is known to refuse still.
+  if (fitRefused && aiAccess.status() !== "blocked") retryRefusedFit();
+  /** The person said go: a parked search continues, and its calls go through now. */
+  const resumeForPerson = async (): Promise<void> => {
+    if (aiAccess.status() === "blocked") aiAccess.letCallsThrough();
+    const resumed = resumeParked();
+    if (resumed) await resumed;
+  };
   deps.store.onChange((change) => {
     if (change.cause === "profile" || change.cause === "settings") {
       if (recovery) {
@@ -115,6 +193,7 @@ export function createJobSearchRunner(
       fitChecking: fits.checking,
       fitRechecking: fits.rechecking,
       search: search ? structuredClone(search) : null,
+      parked: parked ? { ...parked } : null,
       ...compact,
       progress: compact.progress
         ? {
@@ -230,7 +309,7 @@ export function createJobSearchRunner(
       concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
       (n) => update(run, { scored: n }),
       (error) => {
-        fitError = errorMessage(error);
+        fitError = noteFitFailure(error) ?? errorMessage(error);
       },
       settings,
       () => notify(),
@@ -806,12 +885,15 @@ export function createJobSearchRunner(
   };
 
   const runner: JobSearchRunner = {
-    start: (input) => {
+    start: async (input) => {
       deps.onExplicitStart?.();
+      // Search again on a parked search continues it first.
+      await resumeForPerson();
       return begin(input);
     },
     async retrySource(id) {
       deps.onExplicitStart?.();
+      await resumeForPerson();
       const site = siteRows.get(id);
       if (!site) throw new Error("This source is no longer in your list.");
       const target = { ...jobSiteTarget(site), enabled: true };
@@ -831,6 +913,7 @@ export function createJobSearchRunner(
     },
     async keepReading(id) {
       deps.onExplicitStart?.();
+      await resumeForPerson();
       const ids =
         id !== undefined
           ? [String(id)]
@@ -860,6 +943,16 @@ export function createJobSearchRunner(
       if (continuation) clearTimeout(continuation);
       continuation = null;
       recovery?.controller.abort();
+      if (!active && parked) {
+        // Stop on a parked search ends it as stopped, its saved results kept.
+        parked = null;
+        fitRefused = false;
+        if (search?.state === "running")
+          search =
+            deps.store.searches.finish(search.id, "stopped", null) ?? search;
+        notify(true);
+        return;
+      }
       if (!active) return;
       const run = active;
       run.flush?.();
@@ -963,8 +1056,9 @@ export function createJobSearchRunner(
               controller.signal,
               concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
               () => notify(),
-              () => {
+              (error) => {
                 recoveryError =
+                  noteFitFailure(error) ??
                   "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
                 notify();
               },
@@ -988,6 +1082,7 @@ export function createJobSearchRunner(
         .catch((error: unknown) => {
           if (controller.signal.aborted) return 0;
           recoveryError =
+            noteFitFailure(error) ??
             "Fit scoring did not finish. Your progress is kept; retry fit to continue.";
           throw error;
         })

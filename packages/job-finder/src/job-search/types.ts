@@ -13,6 +13,7 @@ import type {
 import type { JobStore } from "@nestor/db/job-store";
 
 import type { JobSearchEngine } from "./engine";
+import type { AiAccessWatch } from "../internal/ai-access-watch";
 
 export interface JobSearchContext {
   browserPermissions?: BrowserAgentPermissions;
@@ -52,6 +53,8 @@ export interface JobSearchRunnerDeps {
    * person stopped by closing the browser may use it again.
    */
   onExplicitStart?: () => void;
+  /** Whether the AI account lets calls through; the app's own by default. */
+  aiAccess?: AiAccessWatch;
 }
 
 export interface JobSearchRunner {

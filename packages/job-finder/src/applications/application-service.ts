@@ -1,5 +1,10 @@
 import type { JobFinderAiClient } from "@nestor/ai-providers";
-import { createModelUsageRecorder } from "@nestor/ai-providers";
+import {
+  createModelUsageRecorder,
+  getAiProviderAccessFailure,
+  isAiProviderAccessMessage,
+} from "@nestor/ai-providers";
+import { APP_AI_ACCESS, type AiAccessWatch } from "../internal/ai-access-watch";
 import {
   buildApplyFormObservation,
   fileUploadProblems,
@@ -121,6 +126,8 @@ function uploadRepairFields(prompt: string): string[] {
 }
 
 export interface ApplicationServiceDeps {
+  /** Whether the AI account lets calls through; the app's own by default. */
+  aiAccess?: AiAccessWatch;
   jobs: JobStore;
   applications: ApplicationStore;
   browser: BrowserSessionRuntime;
@@ -325,6 +332,40 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   let stopped = true;
   let unsubscribe: (() => void) | null = null;
   let unsubscribePersonSend: (() => void) | null = null;
+  let stopWatchingAccess: (() => void) | null = null;
+  const access = () => deps.aiAccess ?? APP_AI_ACCESS;
+  /** Claims the periodic check may make while the AI account refuses calls. */
+  let checksAllowed = 0;
+  /**
+   * Applications the AI account refused go back in the queue, through the
+   * same path as Try again: all of them once calls go through again, or the
+   * oldest as the check while it still refuses. Each is tried once per
+   * recovery; the queue runs them at its normal pace.
+   */
+  const retryRefusedApplications = (only?: "oldest"): boolean => {
+    if (stopped) return false;
+    let queued = false;
+    for (const row of applications.listWorkInState("failed", -1)) {
+      if (!isAiProviderAccessMessage(row.error)) continue;
+      if (resumes.get(row.jobId)?.state !== "ready") continue;
+      if (applications.retryPreparation(row.id, row.attempt)) queued = true;
+      if (queued && only) break;
+    }
+    if (queued) wake();
+    return queued;
+  };
+  /** The check while the account refuses: one waiting application, claimed now. */
+  const checkWithOneApplication = (): boolean => {
+    if (stopped || active.size > 0) return false;
+    const waitingRow =
+      retryRefusedApplications("oldest") ||
+      applications.listApplications({ state: "queued", limit: 1 }).rows.length >
+        0;
+    if (!waitingRow) return false;
+    checksAllowed = 1;
+    wake();
+    return true;
+  };
   let pumping: Promise<void> | null = null;
   let pumpAgain = false;
   let watching = false;
@@ -1953,6 +1994,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     pumping = (async () => {
       while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
+        // While the AI account refuses calls, queued applications wait in
+        // the queue instead of each failing; the periodic check claims one.
+        if (access().status() === "blocked") {
+          if (checksAllowed === 0) break;
+          checksAllowed--;
+        }
         const row = applications.claimNext();
         if (!row) break;
         void runClaimed(row, new AbortController());
@@ -2001,9 +2048,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             attempt: row.attempt,
             state: "failed",
             error:
-              error instanceof Error
+              getAiProviderAccessFailure(error)?.message ??
+              (error instanceof Error
                 ? error.message
-                : "The application could not finish.",
+                : "The application could not finish."),
           });
         await closePage(row.id, row.attempt).catch(onError);
       })
@@ -2076,12 +2124,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         wake();
       }, 2_000);
       timer.unref();
+      const stopHearing = access().onChange((status) => {
+        if (status !== "available") return;
+        checksAllowed = 0;
+        if (!retryRefusedApplications()) wake();
+      });
+      const stopChecking = access().onRecheck(checkWithOneApplication);
+      stopWatchingAccess = () => {
+        stopHearing();
+        stopChecking();
+      };
+      // Calls already went through since the app started: what the account
+      // refused earlier goes again now.
+      if (access().status() === "available") retryRefusedApplications();
       wake();
     },
     stop() {
       stopped = true;
       unsubscribe?.();
       unsubscribe = null;
+      stopWatchingAccess?.();
+      stopWatchingAccess = null;
       unsubscribePersonSend?.();
       unsubscribePersonSend = null;
       if (timer) clearInterval(timer);

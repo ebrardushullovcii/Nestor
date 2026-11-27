@@ -42,6 +42,11 @@ import {
   finishModelRequestProgress,
 } from "./model-request-events";
 import {
+  ACCOUNT_REFUSAL_PATTERN,
+  noteAiProviderAccessFailure,
+  noteAiProviderRequestSucceeded,
+} from "./ai-provider-access-state";
+import {
   recordModelRequestAttempt,
   recordModelRequestUsage,
 } from "./model-usage-scope";
@@ -56,10 +61,6 @@ const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([
 
 const TRANSIENT_MESSAGE_PATTERN =
   /rate.?limit|overload|temporar|too many requests|try again|prefill_cap_refused|at capacity|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|socket hang up|network|fetch failed|terminated|premature|502|503|504/i;
-
-// These are account refusals, not a busy provider. Keep the provider's message.
-const ACCOUNT_REFUSAL_PATTERN =
-  /insufficient[_ ]quota|(?:plan|monthly quota|account quota|allowance|credits|balance).{0,80}(?:exhausted|used up|insufficient)|(?:exhausted|used up).{0,80}(?:plan|allowance|credits)|quota.{0,80}next month|credit balance is too low/i;
 
 export type ModelRequestRetryReason =
   | "network"
@@ -864,6 +865,14 @@ function rejectionsFor(fetchImpl: typeof fetch): CredentialRejections {
   return rejections;
 }
 
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
 function credentialKey(url: string, headers: Record<string, string>): string {
   let origin = url;
   try {
@@ -895,7 +904,16 @@ export async function performModelRequest(
   const rejections = rejectionsFor(input.fetchImpl ?? fetch);
   const credentials = credentialKey(input.url, input.headers);
   const rejection = rejections.get(credentials);
+  const noteRefusal = (error: ModelRequestHttpError, retryAt: number) =>
+    noteAiProviderAccessFailure({
+      credentials,
+      provider: originOf(input.url),
+      status: error.status,
+      providerMessage: error.message,
+      retryAt,
+    });
   if (rejection && rejection.until > Date.now()) {
+    noteRefusal(rejection.error, rejection.until);
     throw new ModelRequestHttpError(
       rejection.error.message,
       rejection.error.status,
@@ -903,16 +921,17 @@ export async function performModelRequest(
     );
   }
   try {
-    return await performModelRequestAttempts(input);
+    const payload = await performModelRequestAttempts(input);
+    noteAiProviderRequestSucceeded(credentials);
+    return payload;
   } catch (error) {
-    if (
-      error instanceof ModelRequestHttpError &&
-      (error.status === 401 || error.status === 402)
-    ) {
-      rejections.set(credentials, {
-        until: Date.now() + MODEL_AUTH_FAILURE_PAUSE_MS,
-        error,
-      });
+    if (error instanceof ModelRequestHttpError) {
+      let retryAt = Date.now();
+      if (error.status === 401 || error.status === 402) {
+        retryAt += MODEL_AUTH_FAILURE_PAUSE_MS;
+        rejections.set(credentials, { until: retryAt, error });
+      }
+      noteRefusal(error, retryAt);
     }
     throw error;
   } finally {

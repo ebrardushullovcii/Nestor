@@ -1,40 +1,65 @@
 import {
   ModelRequestHttpError,
   ModelRequestTimeoutError,
+  resetModelCredentialRejections,
 } from "./model-request-transport";
+import {
+  describeAiAccessFailure,
+  resetAiAccessState,
+  runAiAccessRechecks,
+  type AiAccessReason,
+} from "./ai-provider-access-state";
+
+export {
+  AI_ACCESS_MESSAGES,
+  AI_ACCESS_STEPS,
+  AI_ACCESS_RECHECK_MS,
+  aiAccessBlocks,
+  aiAccessStatus,
+  isAiProviderAccessMessage,
+  onAiAccessChange,
+  onAiAccessRecheck,
+  onAiAccessRefused,
+  type AiAccessBlock,
+  type AiAccessReason,
+  type AiAccessStatus,
+} from "./ai-provider-access-state";
 
 export interface AiProviderAccessFailure {
-  readonly reason: "funding" | "authentication" | "permission";
+  readonly reason: AiAccessReason;
+  /** Plain, and the same for every call: what failed work records. */
   readonly message: string;
+  /** The AI service's own words, when it gave any. */
+  readonly providerMessage: string | null;
+  /** The first web link in those words: its top-up or key page. */
+  readonly actionUrl: string | null;
 }
 
-const ACCESS_FAILURES = new Map<number, AiProviderAccessFailure>([
-  [
-    402,
-    {
-      reason: "funding",
-      message:
-        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
-    },
-  ],
-  [
-    401,
-    {
-      reason: "authentication",
-      message:
-        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
-    },
-  ],
-  [
-    403,
-    {
-      reason: "permission",
-      message:
-        "The AI service is unavailable right now. Nothing was changed. Try again after the service is restored.",
-    },
-  ],
-]);
 const MAX_CAUSE_DEPTH = 16;
+
+/**
+ * Check the refused AI account again now, without waiting for the
+ * transport's pause: the person says they topped it up or fixed the key.
+ * True when waiting work started a call to find out.
+ */
+export function checkAiAccessAgain(): boolean {
+  resetModelCredentialRejections();
+  return runAiAccessRechecks();
+}
+
+/**
+ * The person started work again themselves: let its calls reach the
+ * service now instead of answering from the transport's pause.
+ */
+export function letAiCallsThroughNow(): void {
+  resetModelCredentialRejections();
+}
+
+/** Test seam: forget refused accounts, their listeners and the transport's pause. */
+export function resetAiAccessForTests(): void {
+  resetAiAccessState();
+  resetModelCredentialRejections();
+}
 
 /** Only known AI transport errors qualify; website errors and their messages do not. */
 export function getAiProviderAccessFailure(
@@ -47,8 +72,11 @@ export function getAiProviderAccessFailure(
     visited.add(current);
     try {
       if (current instanceof ModelRequestHttpError) {
-        const failure = ACCESS_FAILURES.get(current.status);
-        if (failure) return { ...failure };
+        const failure = describeAiAccessFailure(
+          current.status,
+          current.message,
+        );
+        if (failure) return failure;
       }
       current = current.cause;
     } catch {
@@ -83,6 +111,7 @@ function hasModelRequestStatus(
  * own retries. Callers running many model requests at once should send fewer.
  */
 export function isAiProviderRateLimited(error: unknown): boolean {
+  if (getAiProviderAccessFailure(error)) return false;
   return hasModelRequestStatus(error, (status) => status === 429);
 }
 
@@ -93,6 +122,7 @@ export function isAiProviderRateLimited(error: unknown): boolean {
  * put off rather than failed.
  */
 export function isAiServiceBusy(error: unknown): boolean {
+  if (getAiProviderAccessFailure(error)) return false;
   return (
     hasModelRequestStatus(error, (status) => status === 429 || status >= 500) ||
     hasCause(error, (cause) => cause instanceof ModelRequestTimeoutError)

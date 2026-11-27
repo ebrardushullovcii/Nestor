@@ -1,4 +1,7 @@
-import { withModelProviderProgress } from "@nestor/ai-providers";
+import {
+  getAiProviderAccessFailure,
+  withModelProviderProgress,
+} from "@nestor/ai-providers";
 import {
   applicationFacts,
   createApplyPageHands,
@@ -505,6 +508,15 @@ async function runApplyAgentSafely(
       ),
     };
   } catch (error) {
+    // The AI account refused the call: say that, and Apply picks the
+    // application up again by itself once calls go through.
+    const access = getAiProviderAccessFailure(error);
+    if (access)
+      return {
+        ok: false,
+        ...(timing ? { timing } : {}),
+        detail: access.message,
+      };
     const reason =
       error instanceof Error && error.message.trim()
         ? error.message.trim().replace(/\.?$/u, ".")

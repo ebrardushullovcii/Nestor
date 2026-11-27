@@ -22,6 +22,10 @@ export const aiProvidersPackageReady = true;
 export * from "./assistant-model";
 export { modelOutputLimit } from "./model-output-limit";
 export type { ModelStreamEvent } from "./model-request-transport";
+export {
+  ModelRequestHttpError,
+  ModelRequestTimeoutError,
+} from "./model-request-transport";
 export type { ModelReasoningTask } from "./openai-compatible-transport";
 
 export { buildResumeSkillContextFilter } from "./resume-skill-context";
