@@ -51,6 +51,7 @@ import {
   type JobStore,
   type SendGuards,
 } from "@nestor/db/job-store";
+import { traceEvent } from "@nestor/core/run-trace";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -1527,9 +1528,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         prepared.readyToSend,
       );
     } else {
+      // Fill in for me leaves the send to the person: its finish is the
+      // run's summary, already saved with its execution, never an error. A
+      // Send for me run that finished without sending keeps why it waits.
       await leaveForPerson(
         row,
-        `The model finished without sending: ${result.detail}`,
+        sends
+          ? `The model finished without sending: ${result.detail}`
+          : undefined,
       );
     }
   }
@@ -2039,6 +2045,23 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         row.attempt,
         callId ?? null,
       );
+      // The press is the person's own action, recorded in the run trace
+      // under both attempts: the form they reviewed and the run that sends it.
+      traceEvent("operator_action", {
+        source: callId ? "person (sidebar)" : "person",
+        action: "send_application",
+        applicationKeys: [
+          applicationIdentity(id, row.attempt).resultId,
+          ...(claimed
+            ? [applicationIdentity(id, claimed.attempt).resultId]
+            : []),
+        ],
+        detail: claimed
+          ? `Send pressed on the ${row.state} application (attempt ${row.attempt}); attempt ${claimed.attempt} sends it`
+          : `Send pressed on the ${row.state} application (attempt ${row.attempt}); it started no new send`,
+        outcome: claimed ? "ok" : "no new send",
+        ...(callId ? { callId } : {}),
+      });
       if (!claimed) return false;
       const controller = new AbortController();
       const controllers = personSends.get(id) ?? new Set<AbortController>();

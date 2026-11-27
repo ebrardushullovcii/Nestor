@@ -575,6 +575,13 @@ export async function generatePack(options) {
     if (e.applicationKey && applicationKey) return ownKey(e.applicationKey);
     if (e.applicationKeys && applicationKey)
       return e.applicationKeys.some(ownKey);
+    // A search and an application run side by side in one trace. Each
+    // records its own key: an application its applicationKey, a search the
+    // source it works on. A pack keeps only its own run's records.
+    if (kind === "application" && (e.sourceId != null || e.sourceIds?.length))
+      return false;
+    if (kind === "search" && (e.applicationKey || e.applicationKeys?.length))
+      return false;
     // Retain settings history and header facts; unscoped activity belongs only
     // to this run's persisted time interval, never the whole session.
     if (e.event.startsWith("settings_"))
@@ -1184,7 +1191,9 @@ export async function generatePack(options) {
     const attachments = [];
     const imports = [];
     for (const entry of relevant) {
-      const event = readEvent(entry);
+      // Traces recorded before a redaction rule existed are masked here too,
+      // in every file and table row the pack writes.
+      const event = traceSafe(readEvent(entry));
       const file = fileOf.get(entry);
       if (entry.event === "provider_request")
         writeJson(out, file, {
@@ -1306,7 +1315,8 @@ export async function generatePack(options) {
         ]),
         ...operatorActions.map((a) => ({
           at: a.at,
-          what: `operator: ${a.action}`,
+          // The person's own presses (Send on a Ready form) read as theirs.
+          what: `${String(a.by).startsWith("person") ? "person" : "operator"}: ${a.action}`,
           by: a.by,
           detail: `${a.detail ?? ""}${a.outcome === "failed" ? ` (failed${a.error ? `: ${a.error}` : ""})` : ""}`,
         })),

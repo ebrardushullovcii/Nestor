@@ -27,6 +27,7 @@ import {
   createSendGuards,
   openJobStore,
 } from "@nestor/db/job-store";
+import { traceEvent } from "@nestor/core/run-trace";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,6 +70,12 @@ const preparation = vi.hoisted(() => ({
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["recordSendOutcome"],
 }));
 
+// The run trace is evidence only; tests read what it was told to record.
+vi.mock("@nestor/core/run-trace", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@nestor/core/run-trace")>();
+  return { ...actual, traceEvent: vi.fn(actual.traceEvent) };
+});
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
   const actual = await importOriginal<typeof ApplicationPreparation>();
   return {
@@ -886,6 +893,7 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   // The person's Send starts the model on the retained page as Send for me;
   // its send goes out once and a second press sends nothing.
   preparation.notReadyToSend = false;
+  vi.mocked(traceEvent).mockClear();
   const sent = f.service.sendPrepared(row.id);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(f.execute.mock.calls[1]![1]).toMatchObject({
@@ -902,6 +910,31 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   expect(action).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
   expect(f.onError).not.toHaveBeenCalled();
+  // Each press on the live item is the person's own action in the run
+  // trace, under the form they reviewed and the attempt that sends it; a
+  // press while it sends starts nothing.
+  const presses = vi
+    .mocked(traceEvent)
+    .mock.calls.filter(
+      ([event, detail]) =>
+        event === "operator_action" && detail.action === "send_application",
+    )
+    .map(([, detail]) => detail);
+  expect(presses).toEqual([
+    expect.objectContaining({
+      source: "person",
+      applicationKeys: [
+        `application_${row.id}_attempt_${row.attempt}`,
+        `application_${row.id}_attempt_${row.attempt + 1}`,
+      ],
+      outcome: "ok",
+    }),
+    expect.objectContaining({
+      source: "person",
+      applicationKeys: [`application_${row.id}_attempt_${row.attempt + 1}`],
+      outcome: "no new send",
+    }),
+  ]);
 });
 
 it("the person's Send on a Fill in for me form whose page is gone hands the model the reviewed answers, and a repeated sidebar call ID starts nothing", async () => {
@@ -2190,10 +2223,10 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
   await vi.waitFor(() =>
     expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
   );
-  // Fill always leaves the send to the person: nothing more to say.
-  expect(f.applications.getApplication(row.id)?.error).toBe(
-    "The model finished without sending: Filled form",
-  );
+  // Fill always leaves the send to the person: a clean finish is Ready with
+  // the run's summary, never an error.
+  expect(f.applications.getApplication(row.id)?.error).toBeNull();
+  expect(f.applications.getWork(row.id)?.execution.summary).toBeTruthy();
   preparation.answers = [];
 });
 

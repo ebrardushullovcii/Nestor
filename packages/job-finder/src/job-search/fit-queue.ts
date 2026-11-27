@@ -1,5 +1,6 @@
 import { abortable } from "./async";
 import { reportSelfLimitHit } from "@nestor/core";
+import { runTraceEnabled, withTraceScope } from "@nestor/core/run-trace";
 import {
   fitContextFingerprint,
   fitContextInput,
@@ -16,6 +17,32 @@ import type { JobDetail, JobSearchSettings } from "@nestor/contracts";
  */
 const BATCH_TOKENS = 50_000;
 const BATCH_JOBS = 48;
+
+/**
+ * A limit on fit scoring is recorded under the sources of the listings it
+ * concerns, as their fit calls are, so evidence for a run that shares the
+ * trace (an application beside the search) leaves it out.
+ */
+function reportFitLimit(
+  jobs: readonly (JobDetail | null | undefined)[],
+  hit: Parameters<typeof reportSelfLimitHit>[0],
+): void {
+  if (!runTraceEnabled()) return reportSelfLimitHit(hit);
+  withTraceScope(
+    {
+      sourceId: undefined,
+      sourceUrl: undefined,
+      sourceIds: [
+        ...new Set(
+          jobs.flatMap(
+            (job) => job?.sightings.map((sighting) => sighting.sourceId) ?? [],
+          ),
+        ),
+      ],
+    },
+    () => reportSelfLimitHit(hit),
+  );
+}
 
 /** Scores queued jobs in parallel batches. Unfinished work stays persisted. */
 export function createFitQueue(
@@ -171,7 +198,7 @@ export function createFitQueue(
       }
       const cost = estimate(job);
       if (jobs.length && tokens + cost > BATCH_TOKENS) {
-        reportSelfLimitHit({
+        reportFitLimit([...jobs, job], {
           limit: "fit_batch_tokens",
           kind: "input",
           value: BATCH_TOKENS,
@@ -185,7 +212,7 @@ export function createFitQueue(
       index++;
       if (jobs.length === BATCH_JOBS) {
         if (index < pending.length)
-          reportSelfLimitHit({
+          reportFitLimit(jobs, {
             limit: "fit_batch_jobs",
             kind: "jobs",
             value: BATCH_JOBS,
@@ -207,12 +234,17 @@ export function createFitQueue(
       return;
     }
     if (pending.length && active.size >= limit)
-      reportSelfLimitHit({
-        limit: "fit_concurrency",
-        kind: "concurrency",
-        value: limit,
-        where: "job-finder/fitQueue/pump",
-      });
+      reportFitLimit(
+        runTraceEnabled()
+          ? pending.slice(0, BATCH_JOBS).map((id) => deps.store.getJob(id))
+          : [],
+        {
+          limit: "fit_concurrency",
+          kind: "concurrency",
+          value: limit,
+          where: "job-finder/fitQueue/pump",
+        },
+      );
     while (active.size < limit && pending.length) {
       const jobs = takeBatch(drainers > 0);
       if (!jobs) break;
