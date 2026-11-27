@@ -10,6 +10,8 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/city-lookup/apply/1` is a Greenhouse-shaped "Location (City)" combobox. Typing shows "Loading...", and after a 300 ms pause one request goes to a local geocoder that answers 900 ms later. It knows "Pristina, Kosovo" only as "Pristina" or "Priština" and offers nothing for "Prishtina". Only a chosen row fills the hidden required value; blur clears an unchosen search.
 
+`http://127.0.0.1:47950/rich-text/apply/1` is a careers form whose required cover letter is a rich-text editor that keeps its own document, the way ProseMirror, Lexical and Quill do: it cancels the browser's edit, applies each typed text and paragraph itself, and submits its paragraphs joined by line breaks. `/rich-text/compose` is a mail compose window in Gmail's shape: a plain contenteditable "Message Body" where each line is the browser's own block, and Send posts its lines and its HTML.
+
 `http://127.0.0.1:47950/rendered-postings/workable/j/1/` and `/rendered-postings/workday/job/1` are postings in Workable's and Workday's shape: the served HTML is the page title and an empty app root, and the site's script renders the posting from a local endpoint that answers 1.5 seconds later. `/rendered-postings/board/jobs/view/1` is a board card for the Workday posting with no description, only "Apply on company website".
 
 `http://127.0.0.1:47950/greenhouse/` exercises resume attachments and a drop zone, optional cover-letter upload, custom questions, radio buttons and optional EEO selects.

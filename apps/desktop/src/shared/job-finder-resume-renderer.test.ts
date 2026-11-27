@@ -4,6 +4,7 @@ import type {
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
+import { listLocalResumeTemplates } from "./job-finder-resume-catalog";
 import { renderResumeTemplateHtml } from "./job-finder-resume-renderer";
 
 const settings = {
@@ -115,5 +116,59 @@ it.each(["classic_ats", "modern_split", "technical_matrix"] as const)(
     });
     expect(additionalOnly).toContain("<h3>Weitere Kenntnisse</h3>");
     expect(additionalOnly).not.toContain("Additional Skills");
+  },
+);
+
+// R7: every resume printed "Shipped · v1.8.0 Skills used: …" as one bullet.
+it.each(listLocalResumeTemplates().map((template) => template.id))(
+  "puts a project's status and its skills on separate lines in %s",
+  (templateId) => {
+    const project = (
+      summary: string,
+      bullets: Array<{ id: string; text: string }> = [],
+    ): ResumeRenderDocument["sections"][number]["entries"][number] => ({
+      id: `project_${bullets.length}`,
+      title: "Clip Tool",
+      subtitle: null,
+      location: null,
+      dateRange: null,
+      startDate: null,
+      endDate: null,
+      isCurrent: false,
+      heading: null,
+      summary,
+      bullets,
+    });
+    const withProjects = structuredClone(document);
+    withProjects.sections.push({
+      id: "section_projects",
+      kind: "projects",
+      label: "Projects",
+      text: null,
+      bullets: [],
+      entries: [
+        // A long description reads as bullets.
+        project(
+          "A free game-clipping app.\nA rolling buffer keeps the last two minutes.\nShipped · v1.8.0\nSkills used: C++, Electron.",
+        ),
+        // With bullets of its own, the description stays a paragraph.
+        project("A schedule tracker.\nLive on the web\nSkills used: Expo.", [
+          { id: "b1", text: "Built discovery" },
+          { id: "b2", text: "Built watchlists" },
+        ]),
+      ],
+    });
+    const html = renderResumeTemplateHtml({
+      renderDocument: withProjects,
+      settings,
+      templateId,
+    });
+    expect(html).not.toMatch(/v1\.8\.0\.? Skills used/u);
+    expect(html).not.toMatch(/Live on the web\.? Skills used/u);
+    expect(html).toContain(">Shipped · v1.8.0.</li>");
+    expect(html).toContain(">Skills used: C++, Electron.</li>");
+    expect(html).toContain(
+      ">A schedule tracker.<br />Live on the web<br />Skills used: Expo.</p>",
+    );
   },
 );

@@ -451,6 +451,13 @@ export function presentEntryNarrative(entry: {
   if (!summary) {
     return { summary: null, bullets: cleanedBullets };
   }
+  // A line break in a summary ends a line: a project's status and its
+  // "Skills used" line never run together.
+  const lines = summary
+    .split(/\s*\n\s*/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const paragraph = lines.map(stripBulletGlyphs).filter(Boolean).join("\n");
 
   const glyphCount = summary.match(INLINE_BULLET_GLYPH_PATTERN)?.length ?? 0;
   let lead: string | null = null;
@@ -460,8 +467,8 @@ export function presentEntryNarrative(entry: {
     const startsWithGlyph = new RegExp(
       `^[\\s${INLINE_BULLET_GLYPH_CLASS}]`,
     ).test(summary);
-    const segments = summary
-      .split(INLINE_BULLET_SPLIT_PATTERN)
+    const segments = lines
+      .flatMap((line) => line.split(INLINE_BULLET_SPLIT_PATTERN))
       .map(stripBulletGlyphs)
       .filter(Boolean);
     const [first, ...rest] = segments;
@@ -476,8 +483,8 @@ export function presentEntryNarrative(entry: {
       derived = segments;
     }
   } else if (cleanedBullets.length < 2) {
-    const sentences = summary
-      .split(SENTENCE_BOUNDARY_PATTERN)
+    const sentences = lines
+      .flatMap((line) => line.split(SENTENCE_BOUNDARY_PATTERN))
       .map((sentence) => sentence.trim())
       .filter(Boolean);
     if (sentences.length >= 3) {
@@ -489,10 +496,10 @@ export function presentEntryNarrative(entry: {
         derived = sentences;
       }
     } else {
-      return { summary: stripBulletGlyphs(summary), bullets: cleanedBullets };
+      return { summary: paragraph, bullets: cleanedBullets };
     }
   } else {
-    return { summary: stripBulletGlyphs(summary), bullets: cleanedBullets };
+    return { summary: paragraph, bullets: cleanedBullets };
   }
 
   const seen = new Set(
@@ -629,7 +636,7 @@ function renderStructuredSection(input: {
                           "summary",
                         ),
                       }),
-                    })}>${escapeHtml(entry.summary)}</p>`
+                    })}>${escapeHtml(entry.summary).replace(/\n/gu, "<br />")}</p>`
                   : ""
               }
               ${

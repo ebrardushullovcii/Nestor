@@ -595,6 +595,35 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             }
             return false;
           };
+          // What a rich-text editor holds, one line per paragraph or line
+          // break, so the model reads the paragraphs it wrote.
+          const editorText = (root: Element): string => {
+            let text = "";
+            const walk = (node: Node): void => {
+              for (const child of Array.from(node.childNodes)) {
+                if (child.nodeType === 3) {
+                  const data = (child as Text).data;
+                  // Source indentation between blocks is not text.
+                  if (!/^\s*\n\s*$/u.test(data))
+                    text += data.replace(/[\t\n\r]+/gu, " ");
+                } else if (child.nodeName === "BR") {
+                  text += "\n";
+                } else if (child.nodeType === 1) {
+                  const display = getComputedStyle(child as Element).display;
+                  if (display === "none") continue;
+                  const block = !display.startsWith("inline");
+                  if (block && text && !text.endsWith("\n")) text += "\n";
+                  walk(child);
+                  if (block && text && !text.endsWith("\n")) text += "\n";
+                }
+              }
+            };
+            walk(root);
+            return text
+              .replace(/\u00a0/gu, " ")
+              .replace(/[ \t]+$/gmu, "")
+              .trim();
+          };
           // The words a person sees in an element: no icons, nothing hidden from
           // assistive technology, no scripts or styles.
           const shownText = (element: HTMLElement): string => {
@@ -762,8 +791,12 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 // A custom checkbox or radio answers with its state; its
                 // text is its option at most, never an icon's fallback
                 // ("SVGs not supported by this browser.").
-                (role === "checkbox" || role === "radio"
-                  ? shownText(html)
+                // A rich-text editor answers with its lines, breaks kept, so
+                // the model sees the paragraphs it wrote.
+                (html.isContentEditable &&
+                role !== "checkbox" &&
+                role !== "radio"
+                  ? editorText(html)
                   : shownText(html)) ??
                 "",
               checked:
@@ -1854,6 +1887,35 @@ export function collectApplyDocumentSnapshot(
       }
       return false;
     };
+    // What a rich-text editor holds, one line per paragraph or line break,
+    // so the model reads the paragraphs it wrote.
+    const editorText = (root: Element): string => {
+      let text = "";
+      const walk = (node: Node): void => {
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === 3) {
+            const data = (child as Text).data;
+            // Source indentation between blocks is not text.
+            if (!/^\s*\n\s*$/u.test(data))
+              text += data.replace(/[\t\n\r]+/gu, " ");
+          } else if (child.nodeName === "BR") {
+            text += "\n";
+          } else if (child.nodeType === 1) {
+            const display = getComputedStyle(child as Element).display;
+            if (display === "none") continue;
+            const block = !display.startsWith("inline");
+            if (block && text && !text.endsWith("\n")) text += "\n";
+            walk(child);
+            if (block && text && !text.endsWith("\n")) text += "\n";
+          }
+        }
+      };
+      walk(root);
+      return text
+        .replace(/\u00a0/gu, " ")
+        .replace(/[ \t]+$/gmu, "")
+        .trim();
+    };
     // The words a person sees in an element: no icons, nothing hidden from
     // assistive technology, no scripts or styles.
     const shownText = (element: HTMLElement): string => {
@@ -1967,8 +2029,10 @@ export function collectApplyDocumentSnapshot(
           select?.value ??
           // A custom checkbox or radio answers with its state; its text is
           // its option at most, never an icon's fallback.
-          (role === "checkbox" || role === "radio"
-            ? shownText(html)
+          // A rich-text editor answers with its lines, breaks kept, so the
+          // model sees the paragraphs it wrote.
+          (html.isContentEditable && role !== "checkbox" && role !== "radio"
+            ? editorText(html)
             : shownText(html)) ??
           "",
         checked:

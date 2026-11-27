@@ -170,6 +170,11 @@ function pickProjectLink(
   );
 }
 
+/**
+ * A project's description, its status ("Shipped · v1.8.0", "Live on the web")
+ * and its skills each take their own line. Joined with spaces, a status with
+ * no full stop ran into "Skills used:" as one sentence on every resume.
+ */
 function formatProjectSummary(input: {
   summary: string | null | undefined;
   outcome: string | null | undefined;
@@ -177,12 +182,13 @@ function formatProjectSummary(input: {
 }): string | null {
   return joinCompact(
     [
-      joinCompact([input.summary, input.outcome], " "),
+      input.summary?.trim(),
+      input.outcome?.trim(),
       input.skills && input.skills.length > 0
         ? `Skills used: ${uniqueStrings(input.skills).join(", ")}.`
         : null,
     ],
-    " ",
+    "\n",
   );
 }
 
