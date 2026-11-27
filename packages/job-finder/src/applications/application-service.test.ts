@@ -11,6 +11,7 @@ import {
   ApplyExecutionResultSchema,
   CandidateProfileSchema,
   DiscoveryRunResultSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   ResumeDraftSectionSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SourceInstructionArtifactSchema,
@@ -26,6 +27,7 @@ import {
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   createJobSitesStore,
+  createActivityStore,
   createResumeStore,
   createSendGuards,
   openJobStore,
@@ -4210,4 +4212,65 @@ it("while the AI account refuses calls, queued applications wait in the queue an
 
   access.set("available");
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+});
+
+it("keeps a rejected AI request queued, then retries it once after restart", async () => {
+  const f = await setup(2, 1, { onDisk: true });
+  preparation.notReadyToSend = true;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      state: "paused",
+      requestRejected: true,
+      summary: "Nestor paused this application",
+      detail: NESTOR_REQUEST_REJECTED_MESSAGE,
+      submittedAt: null,
+      outcome: null,
+      nextActionLabel: null,
+    }),
+  );
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.forJobs(f.ids)).toEqual([
+      expect.objectContaining({
+        jobId: f.ids[0],
+        state: "queued",
+        attempt: 1,
+        error: NESTOR_REQUEST_REJECTED_MESSAGE,
+      }),
+      expect.objectContaining({ jobId: f.ids[1], state: "ready" }),
+    ]),
+  );
+  expect(createActivityStore(f.jobs).feed()).toMatchObject({
+    running: 0,
+    requestRejected: true,
+  });
+  expect(f.applications.needsYou.list().total).toBe(0);
+
+  f.service.stop();
+  const reopened = openJobStore(f.dbPath);
+  const applications = createApplicationStore(reopened);
+  const service = createApplicationService({
+    ...f.deps,
+    jobs: reopened,
+    applications,
+  });
+  cleanups.unshift(() => {
+    service.stop();
+    reopened.close();
+  });
+  await service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(applications.forJobs(f.ids)[0]).toMatchObject({
+      state: "ready",
+      attempt: 2,
+      error: null,
+    }),
+  );
+  expect(createActivityStore(reopened).feed().requestRejected).toBeUndefined();
 });

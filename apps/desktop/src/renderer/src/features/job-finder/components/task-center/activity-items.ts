@@ -4,6 +4,7 @@ import type {
   ApplicationWorkState,
   JobStage,
 } from "@nestor/contracts";
+import { NESTOR_REQUEST_REJECTED_MESSAGE } from "@nestor/contracts";
 
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
 import { APPLICATION_WORK_TONE } from "../../lib/application-status-tone";
@@ -104,6 +105,9 @@ export function toActivityItems(feed: ActivityFeed): {
 } {
   const items: ActivityItem[] = [];
   for (const search of feed.searches) {
+    const parked =
+      search.state === "running" &&
+      search.error === NESTOR_REQUEST_REJECTED_MESSAGE;
     const newJobs = plural(search.added, "new job");
     const status: ActivityStatus =
       search.state === "running"
@@ -122,8 +126,9 @@ export function toActivityItems(feed: ActivityFeed): {
           : search.state === "failed"
             ? (search.error ?? "The search could not finish")
             : newJobs,
-      badge:
-        status === "running"
+      badge: parked
+        ? "Paused"
+        : status === "running"
           ? "In progress"
           : status === "done"
             ? "Finished"
@@ -138,6 +143,9 @@ export function toActivityItems(feed: ActivityFeed): {
     });
   }
   for (const resume of feed.resumes) {
+    const parked =
+      resume.state === "queued" &&
+      resume.error === NESTOR_REQUEST_REJECTED_MESSAGE;
     const status: ActivityStatus =
       resume.state === "ready"
         ? "done"
@@ -158,8 +166,9 @@ export function toActivityItems(feed: ActivityFeed): {
               ? "Resume written"
               : (resume.error ?? "The resume could not be written")
       }`,
-      badge:
-        resume.state === "queued"
+      badge: parked
+        ? "Paused"
+        : resume.state === "queued"
           ? "Waiting"
           : resume.state === "writing"
             ? "Writing"
@@ -177,13 +186,16 @@ export function toActivityItems(feed: ActivityFeed): {
     // Waiting on the person belongs to Needs you; the store leaves it out.
     if (application.state === "needs_you") continue;
     const words = APPLICATION_WORDS[application.state];
+    const parked =
+      application.state === "queued" &&
+      application.error === NESTOR_REQUEST_REJECTED_MESSAGE;
     items.push({
       id: `application:${application.id}:${application.state}:${application.at}`,
       kind: "application",
       status: words.status,
       title: application.title,
       detail: `${application.company} · ${words.detail}`,
-      badge: words.badge,
+      badge: parked ? "Paused" : words.badge,
       tone: APPLICATION_WORK_TONE[application.state],
       href: `${JOB_FINDER_ROUTE_PATHS.applications}?jobId=${application.jobId}`,
       at: application.at,

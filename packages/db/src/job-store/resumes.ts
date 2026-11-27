@@ -71,7 +71,7 @@ export class ResumeChangedError extends Error {
 
 export interface ResumeStore {
   /** Shortlisted jobs whose resume still has to be written, oldest first. */
-  listUnwritten(limit: number): number[];
+  listUnwritten(limit: number, excludedIds?: ReadonlySet<number>): number[];
   /** The list rows' resume status, for the ids on screen. */
   statuses(ids: readonly number[]): Map<number, ResumeStatus>;
   /** Each job's newest application Apply has not finished, for the ids on screen. */
@@ -97,6 +97,7 @@ export interface ResumeStore {
    * write a closed app left behind.
    */
   requeue(jobId?: number): void;
+  parkWriting(jobId: number, error: string): void;
 
   /** The person's edit. It needs approving again. */
   saveDraft(
@@ -241,13 +242,14 @@ export function createResumeStore(store: JobStore): ResumeStore {
       ).get(identity) as { path: string; sha256: string } | undefined;
       return row ?? null;
     },
-    listUnwritten(limit) {
+    listUnwritten(limit, excludedIds = new Set()) {
       return (
         sql(
           `SELECT j.id FROM jobs j LEFT JOIN resumes r ON r.job_id = j.id
            WHERE j.stage = 'shortlisted' AND (r.job_id IS NULL OR r.state = 'queued')
+             AND j.id NOT IN (SELECT value FROM json_each(?))
            ORDER BY j.stage_at, j.id LIMIT ?`,
-        ).all(limit) as { id: number }[]
+        ).all(JSON.stringify([...excludedIds]), limit) as { id: number }[]
       ).map((row) => row.id);
     },
 
@@ -399,6 +401,16 @@ export function createResumeStore(store: JobStore): ResumeStore {
       sql(
         "UPDATE resumes SET state = 'queued' WHERE job_id = ? AND state = 'writing'",
       ).run(jobId);
+    },
+
+    parkWriting(jobId, error) {
+      store.transaction(() => {
+        const result = sql(
+          `UPDATE resumes SET state = 'queued', error = ?, updated_at = ?
+           WHERE job_id = ? AND state = 'writing'`,
+        ).run(error, Date.now(), jobId);
+        if (result.changes) changed(jobId);
+      });
     },
 
     saveDraft(jobId, draft, expectedUpdatedAt) {

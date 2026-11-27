@@ -10,6 +10,7 @@ import {
   AiBehaviorPreferenceSchema,
   ApplicationAuthorityEnvelopeSchema,
   ApplicationReviewCardSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   serializeApplicationAuthorityDecisionPolicyForDigest,
 } from "@nestor/contracts";
 import { createHash } from "node:crypto";
@@ -617,6 +618,51 @@ function modelThatGetsStuck(): LLMClient {
 }
 
 describe("agent application preparation seam", () => {
+  test("a provider rejecting Nestor's schema pauses preparation without a model outcome", async () => {
+    const openSession = session();
+    const readPage = vi.spyOn(openSession, "readPage");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { message: "tools.1.input_schema does not support oneOf" },
+        }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    try {
+      const result = await createApplyFormPreparer({
+        executionInput: executionInput(),
+        aiClient: createOpenAiCompatibleJobFinderAiClient({
+          apiKey: "synthetic-invalid-request",
+          baseUrl: "https://model.example.test/v1",
+          model: "synthetic",
+        }),
+        siteLabel: "Local replica",
+      })({
+        session: openSession,
+        currentUrl: PAGE_URL,
+        startedAt: new Date().toISOString(),
+      });
+      expect(result).toMatchObject({
+        state: "paused",
+        requestRejected: true,
+        detail: NESTOR_REQUEST_REJECTED_MESSAGE,
+        questions: [],
+        blocker: null,
+        outcome: null,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(readPage).toHaveBeenCalled();
+      expect(aiAccessBlocks()).toEqual([]);
+    } finally {
+      fetchMock.mockRestore();
+      resetAiAccessForTests();
+    }
+  });
+
   test("an application stays running through ten provider 429s and finishes ready", async () => {
     vi.useFakeTimers();
     const openSession = session();

@@ -20,7 +20,7 @@ import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
  *   have no deadline unless the operator explicitly supplies one.
  * - Retries with capped exponential backoff and `Retry-After` support for
  *   the failures that are worth retrying: network errors, idle timeouts,
- *   incomplete streams, 408/409/425/429 and 5xx. Never for 4xx validation
+ *   incomplete streams, 429 and 5xx. Never for rejected requests
  *   errors, never after a caller abort. An explicit operator deadline still applies.
  * - The result is the same normalized Chat Completions payload the rest of
  *   the package already reads, so callers do not care whether the bytes came
@@ -43,6 +43,7 @@ import {
 } from "./anthropic-messages";
 import {
   recordModelRequestEvent,
+  recordModelRequestRejection,
   finishModelRequestProgress,
 } from "./model-request-events";
 import {
@@ -60,10 +61,6 @@ import {
 export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 180_000;
 export const DEFAULT_MODEL_RETRY_BASE_DELAY_MS = 1_000;
 export const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 20_000;
-
-const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([
-  408, 409, 425, 429,
-]);
 
 const TRANSIENT_MESSAGE_PATTERN =
   /rate.?limit|overload|temporar|too many requests|try again|prefill_cap_refused|at capacity|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|socket hang up|network|fetch failed|terminated|premature|502|503|504/i;
@@ -144,6 +141,13 @@ export class ModelRequestHttpError extends Error {
     this.retryAfterMs = retryAfterMs;
     this.keyOwner = keyOwner;
   }
+}
+
+/** The provider rejected a request Nestor built, outside existing account, route and rate handling. */
+export function isRejectedModelRequestStatus(status: number): boolean {
+  return (
+    status >= 400 && status < 500 && ![401, 402, 403, 404, 429].includes(status)
+  );
 }
 
 export class ModelRequestTimeoutError extends Error {
@@ -814,7 +818,7 @@ function classifyRetry(
       : null;
   }
   if (error instanceof ModelRequestHttpError) {
-    return RETRYABLE_HTTP_STATUSES.has(error.status) || error.status >= 500
+    return error.status === 429 || error.status >= 500
       ? {
           reason: "http_status",
           retryAfterMs: error.retryAfterMs ?? advisedDelayMs(error.message),
@@ -951,6 +955,8 @@ export async function performModelRequest(
         rejections.set(credentials, { until: retryAt, error });
       }
       noteRefusal(error, retryAt);
+      if (isRejectedModelRequestStatus(error.status))
+        recordModelRequestRejection(error);
     }
     throw error;
   } finally {
@@ -1253,6 +1259,14 @@ async function performModelRequestAttempts(
         traceEvent("provider_error", {
           id: traceId,
           error,
+          ...(error instanceof ModelRequestHttpError
+            ? {
+                httpStatus: error.status,
+                rejectedNestorRequest: isRejectedModelRequestStatus(
+                  error.status,
+                ),
+              }
+            : {}),
           abortReason,
           durationMs: Date.now() - traceStarted,
         });

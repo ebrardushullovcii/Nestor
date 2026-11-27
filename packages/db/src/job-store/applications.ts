@@ -7,6 +7,7 @@ import {
   ApplicationListQuerySchema,
   ApplicationApplyModeSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   ApplicationPreparationUpdateSchema,
   ApplicationResumeArtifactSchema,
   ApplicationReviewCardSchema,
@@ -563,14 +564,15 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
-    /** A question answered from memory needs another preparation, without a task. */
-    continuePreparation(id: number, attempt: number): boolean {
+    /** Queues another preparation without asking the person. */
+    continuePreparation(id: number, attempt: number, error?: string): boolean {
       return store.transaction(() => {
         const row =
-          sql(`UPDATE applications SET state = 'queued', queued_at = ?, updated_at = ?
+          sql(`UPDATE applications SET state = 'queued', queued_at = ?, updated_at = ?, error = COALESCE(?, error)
           WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id`).get(
             Date.now(),
             Date.now(),
+            error ?? null,
             id,
             attempt,
           ) as { job_id: number } | undefined;
@@ -1042,16 +1044,25 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /** Claims one queued row. The attempt prevents an old callback overwriting a retry. */
-    claimNext(): ApplicationRow | null {
+    claimNext(
+      excludedIds: ReadonlySet<number> = new Set(),
+    ): ApplicationRow | null {
       return store.transaction(() => {
         const row = sql(
-          `UPDATE applications SET state = 'running', attempt = attempt + 1, updated_at = ?
+          `UPDATE applications SET state = 'running', attempt = attempt + 1, updated_at = ?,
+           error = CASE WHEN error = ? THEN NULL ELSE error END
            WHERE id = (
              SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
              WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND ${HAS_READY_RESUME}
+             AND (a.error IS NOT ? OR a.id NOT IN (SELECT value FROM json_each(?)))
              ORDER BY a.queued_at, a.id LIMIT 1
            ) RETURNING id, job_id`,
-        ).get(Date.now()) as { id: number; job_id: number } | undefined;
+        ).get(
+          Date.now(),
+          NESTOR_REQUEST_REJECTED_MESSAGE,
+          NESTOR_REQUEST_REJECTED_MESSAGE,
+          JSON.stringify([...excludedIds]),
+        ) as { id: number; job_id: number } | undefined;
         if (!row) return null;
         const application = getApplication(row.id)!;
         sql(`UPDATE application_needs_you SET attempt=? WHERE application_id=? AND attempt=?

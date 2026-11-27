@@ -2,6 +2,7 @@ import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
   createModelUsageRecorder,
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   isAiProviderAccessMessage,
 } from "@nestor/ai-providers";
 import { APP_AI_ACCESS, type AiAccessWatch } from "../internal/ai-access-watch";
@@ -29,6 +30,7 @@ import {
   isWebPageUrl,
   jobSiteTarget,
   normalizeFormQuestionPrompt,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   SubmissionOutcomeRecordSchema,
   UPLOAD_ATTACHED_ANSWER,
   type ApplicationAuthorityEnvelope,
@@ -329,6 +331,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     );
   const onError =
     deps.onError ?? ((error: unknown) => console.error("[Apply]", error));
+  // These requests cannot change until another start. Their rows stay queued.
+  const rejectedRequests = new Set<number>();
+  const parkRejectedRequest = (row: ApplicationRow) => {
+    rejectedRequests.add(row.id);
+    if (
+      !applications.continuePreparation(
+        row.id,
+        row.attempt,
+        NESTOR_REQUEST_REJECTED_MESSAGE,
+      )
+    )
+      rejectedRequests.delete(row.id);
+  };
   let stopped = true;
   let unsubscribe: (() => void) | null = null;
   let unsubscribePersonSend: (() => void) | null = null;
@@ -359,8 +374,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (stopped || active.size > 0) return false;
     const waitingRow =
       retryRefusedApplications("oldest") ||
-      applications.listApplications({ state: "queued", limit: 1 }).rows.length >
-        0;
+      applications
+        .listWorkInState("queued", rejectedRequests.size + 1)
+        .some(
+          (row) =>
+            row.error !== NESTOR_REQUEST_REJECTED_MESSAGE ||
+            !rejectedRequests.has(row.id),
+        );
     if (!waitingRow) return false;
     checksAllowed = 1;
     wake();
@@ -1452,6 +1472,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         await closePage(row.id, row.attempt);
       return;
     }
+    if (result.requestRejected) {
+      parkRejectedRequest(row);
+      return;
+    }
     const retainedTechnicalFailure = shouldRetainFailedApplicationPage(result);
     const finishTechnicalFailure = async () => {
       // Only this live, cancelled-checked attempt may retain its owned binding.
@@ -2000,7 +2024,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           if (checksAllowed === 0) break;
           checksAllowed--;
         }
-        const row = applications.claimNext();
+        const row = applications.claimNext(rejectedRequests);
         if (!row) break;
         void runClaimed(row, new AbortController());
       }
@@ -2024,7 +2048,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     return run(row, controller.signal)
       .catch(async (error) => {
         if (stopped) return;
-        if (await deps.isHoldingCurrent()) {
+        const requestRejected = getRejectedModelRequest(error);
+        if (!requestRejected && (await deps.isHoldingCurrent())) {
           applications.continuePreparation(row.id, row.attempt);
           return;
         }
@@ -2042,7 +2067,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         }
         if (applications.getApplication(row.id)?.state === "submitting")
           applications.submissionUnknown(row.id, row.attempt);
-        else
+        else if (requestRejected) {
+          parkRejectedRequest(row);
+          return;
+        } else
           applications.finishPreparation({
             id: row.id,
             attempt: row.attempt,
@@ -2090,6 +2118,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         else applications.submissionUnknown(row.id, row.attempt);
       }
       await followRecordedSends(applications, deps.authorityRepository);
+      rejectedRequests.clear();
       stopped = false;
       unsubscribePersonSend =
         browser.onApplicationSendPressed?.((press) => {

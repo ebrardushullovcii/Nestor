@@ -2,6 +2,9 @@ import type { ApplicationWorkState } from "./applications";
 import type { JobStage, TriageStage } from "./jobs";
 import type { ResumeState } from "./resumes";
 
+export const NESTOR_REQUEST_REJECTED_MESSAGE =
+  "Nestor sent an invalid request to the AI provider. Your work is queued and will be retried when Nestor restarts.";
+
 /**
  * What Job Finder is doing and what it just finished, read from the job
  * store for the Activity panel. It only reports: anything for the person to
@@ -64,6 +67,8 @@ export interface ActivityFeed {
   moves: ActivityMove[];
   /** Everything running now, beyond the rows listed: the button's count. */
   running: number;
+  /** Some queued work is waiting for Nestor to restart. */
+  requestRejected?: boolean;
 }
 
 export const ACTIVITY_FEED_CHANNEL = "activity:feed";

@@ -1,4 +1,5 @@
 import {
+  isRejectedModelRequestStatus,
   ModelRequestHttpError,
   ModelRequestTimeoutError,
   resetModelCredentialRejections,
@@ -94,24 +95,31 @@ export function getAiProviderAccessFailure(
   return null;
 }
 
+/** Website responses and arbitrary errors with a status field do not qualify. */
+export function getRejectedModelRequest(
+  error: unknown,
+): ModelRequestHttpError | null {
+  let rejected: ModelRequestHttpError | null = null;
+  hasCause(error, (cause) => {
+    if (
+      !(cause instanceof ModelRequestHttpError) ||
+      !isRejectedModelRequestStatus(cause.status)
+    )
+      return false;
+    rejected = cause;
+    return true;
+  });
+  return rejected;
+}
+
 function hasModelRequestStatus(
   error: unknown,
   matches: (status: number) => boolean,
 ): boolean {
-  const visited = new Set<Error>();
-  let current = error;
-  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
-    if (!(current instanceof Error) || visited.has(current)) return false;
-    visited.add(current);
-    try {
-      if (current instanceof ModelRequestHttpError && matches(current.status))
-        return true;
-      current = current.cause;
-    } catch {
-      return false;
-    }
-  }
-  return false;
+  return hasCause(
+    error,
+    (cause) => cause instanceof ModelRequestHttpError && matches(cause.status),
+  );
 }
 
 /**

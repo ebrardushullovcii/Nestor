@@ -9,6 +9,7 @@ import type {
   ResumeState,
   TriageStage,
 } from "@nestor/contracts";
+import { NESTOR_REQUEST_REJECTED_MESSAGE } from "@nestor/contracts";
 
 import type { JobStore } from "./job-store";
 import { toIso } from "./job-list";
@@ -112,15 +113,21 @@ export function createActivityStore(store: JobStore) {
           error: row.error,
         }),
       );
-      const running = (
-        sql(
-          `SELECT
-             (SELECT COUNT(*) FROM searches WHERE state = 'running')
-           + (SELECT COUNT(*) FROM resumes WHERE state IN ('queued', 'writing'))
-           + (SELECT COUNT(*) FROM applications
-              WHERE state IN ('queued', 'running', 'submitting')) AS n`,
-        ).get() as { n: number }
-      ).n;
+      const activity = sql(
+        `WITH work AS (
+          SELECT error FROM searches WHERE state = 'running'
+          UNION ALL
+          SELECT error FROM resumes WHERE state IN ('queued', 'writing')
+          UNION ALL
+          SELECT error FROM applications WHERE state IN ('queued', 'running', 'submitting')
+        )
+        SELECT COUNT(*) - COUNT(CASE WHEN error = ?1 THEN 1 END) AS running,
+               COUNT(CASE WHEN error = ?1 THEN 1 END) AS parked
+        FROM work`,
+      ).get(NESTOR_REQUEST_REJECTED_MESSAGE) as {
+        running: number;
+        parked: number;
+      };
       const moves = (
         sql(
           `SELECT m.id, m.at, m.to_stage,
@@ -157,7 +164,14 @@ export function createActivityStore(store: JobStore) {
           stillThere: row.still_there,
         }),
       );
-      return { searches, resumes, applications, moves, running };
+      return {
+        searches,
+        resumes,
+        applications,
+        moves,
+        running: activity.running,
+        ...(activity.parked > 0 ? { requestRejected: true } : {}),
+      };
     },
   };
 }

@@ -3,6 +3,7 @@ import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
   AI_ACCESS_MESSAGES,
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   isAiProviderRateLimited,
   resetAiAccessForTests,
 } from "./ai-provider-access-failure";
@@ -26,6 +27,33 @@ import {
 } from "./test-fixtures";
 
 describe("AI provider access failures", () => {
+  test.each([400, 408, 409, 410, 422, 425, 499])(
+    "classifies provider HTTP%i as a rejected Nestor request with the provider's words",
+    (status) => {
+      const rejected = new ModelRequestHttpError(
+        "Request schema rejected",
+        status,
+        null,
+      );
+      expect(
+        getRejectedModelRequest(new Error("wrapped", { cause: rejected })),
+      ).toBe(rejected);
+    },
+  );
+
+  test("leaves account, rate, route and transient errors in their existing flows", () => {
+    for (const status of [401, 402, 403, 404, 429, 500, 503])
+      expect(
+        getRejectedModelRequest(
+          new ModelRequestHttpError("Provider error", status, null),
+        ),
+      ).toBeNull();
+    expect(
+      getRejectedModelRequest(
+        Object.assign(new Error("Website error"), { status: 400 }),
+      ),
+    ).toBeNull();
+  });
   test.each([
     [402, "funding"],
     [401, "authentication"],

@@ -1,17 +1,31 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ModelRequestEvent } from "./model-request-transport";
+import type {
+  ModelRequestEvent,
+  ModelRequestHttpError,
+} from "./model-request-transport";
 
 const events = new AsyncLocalStorage<{
   waiting: Set<object>;
   onProgress: (waiting: boolean) => void;
+  onRequestRejected?: ((error: ModelRequestHttpError) => void) | undefined;
 }>();
 
 /** Progress for all model calls in an operation, including nested helpers. */
 export function withModelProviderProgress<T>(
   onProgress: (waiting: boolean) => void,
   work: () => T,
+  onRequestRejected?: (error: ModelRequestHttpError) => void,
 ): T {
-  return events.run({ waiting: new Set(), onProgress }, work);
+  return events.run(
+    { waiting: new Set(), onProgress, onRequestRejected },
+    work,
+  );
+}
+
+export function recordModelRequestRejection(
+  error: ModelRequestHttpError,
+): void {
+  events.getStore()?.onRequestRejected?.(error);
 }
 
 export function recordModelRequestEvent(
