@@ -1,4 +1,5 @@
 import {
+  applicationPageUrl,
   CLOSED_TRACKER_STATUSES,
   TRACKER_STATUS_LABEL,
   type TrackerEvent,
@@ -393,7 +394,7 @@ export function ApplicationDetail(props: {
         data-locked-pane-scroll-region={framed ? true : undefined}
       >
         <ApplicationWork
-          applyUrl={job.applyUrl ?? job.url}
+          applyUrl={applicationPageUrl(job)}
           details={work}
           showStop={row.status !== "applying"}
         />
