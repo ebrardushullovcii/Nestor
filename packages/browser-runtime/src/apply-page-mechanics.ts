@@ -368,468 +368,11 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
     ] = await Promise.all([
       snapshot
         .locator(APPLY_CONTROL_SELECTOR, "c")
-        .evaluateAll((elements, prefix): RawApplyControl[] => {
-          const labelText = (element: Element | null): string => {
-            if (!element) return "";
-            const clone = element.cloneNode(true) as Element;
-            clone
-              .querySelectorAll(
-                "input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox']",
-              )
-              .forEach((control) => control.remove());
-            return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
-          };
-          const hintFor = (element: Element, label: string): string => {
-            // Help text beside the field, such as "Please provide your GitHub
-            // username": what the field's own block says besides its label.
-            const described = (element.getAttribute("aria-describedby") ?? "")
-              .split(/\s+/u)
-              .filter(Boolean)
-              .map((id) => labelText(document.getElementById(id)))
-              .join(" ")
-              .trim();
-            let block: Element | null = null;
-            for (
-              let ancestor = element.parentElement, depth = 0;
-              ancestor && depth < 4;
-              ancestor = ancestor.parentElement, depth += 1
-            ) {
-              if (
-                ancestor.querySelectorAll(
-                  "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']",
-                ).length > 1
-              )
-                break;
-              block = ancestor;
-            }
-            const staticBlock = block?.cloneNode(true) as Element | undefined;
-            // Live feedback is page state, not the field's wording. It stays
-            // in the page text so new instructions there are still observed.
-            staticBlock
-              ?.querySelectorAll("[role='status'], [aria-live]")
-              .forEach((node) => node.remove());
-            const hint =
-              described ||
-              labelText(staticBlock ?? null)
-                .replace(label, "")
-                .replace(/\s+/gu, " ")
-                .trim();
-
-            return hint;
-          };
-          const roots = Array.from(
-            new Set(elements.map((element) => element.getRootNode())),
-          );
-          const scopeKeyFor = (element: Element): string => {
-            const root = element.getRootNode();
-            const rootIndex = roots.indexOf(root);
-            const form =
-              element instanceof HTMLInputElement ||
-              element instanceof HTMLTextAreaElement ||
-              element instanceof HTMLSelectElement
-                ? element.form
-                : element.closest("form");
-            const forms =
-              root instanceof Document || root instanceof ShadowRoot
-                ? Array.from(root.querySelectorAll("form"))
-                : [];
-            return `${prefix}r${rootIndex}${
-              form ? `form${forms.indexOf(form)}` : "root"
-            }`;
-          };
-          const phoneCallingCodeFor = (
-            element: Element,
-          ): string | undefined => {
-            if (
-              !(element instanceof HTMLInputElement) ||
-              element.type !== "tel"
-            )
-              return undefined;
-            const box = element.parentElement;
-            if (
-              !box ||
-              box.querySelectorAll(
-                "input:not([type='hidden']),textarea,select,[role='combobox']",
-              ).length !== 1
-            )
-              return undefined;
-            const buttons = Array.from(
-              box.querySelectorAll(
-                "button[aria-haspopup='dialog'][aria-expanded='false'][aria-controls]",
-              ),
-            );
-            if (buttons.length !== 1) return undefined;
-            const button = buttons[0];
-            if (
-              !(button instanceof HTMLButtonElement) ||
-              button.disabled ||
-              button.getAttribute("aria-disabled") === "true" ||
-              button.getAttribute("aria-invalid") === "true" ||
-              button.form !== element.form ||
-              !button.checkVisibility({
-                checkOpacity: true,
-                checkVisibilityCSS: true,
-              }) ||
-              button.closest('[aria-hidden="true"]')
-            )
-              return undefined;
-            const root = element.getRootNode();
-            const owned = button.getAttribute("aria-controls");
-            const dialog =
-              (root instanceof Document || root instanceof ShadowRoot) && owned
-                ? root.getElementById(owned)
-                : null;
-            if (
-              !dialog ||
-              !box.contains(dialog) ||
-              dialog.getAttribute("role") !== "dialog" ||
-              !dialog.querySelector("[role='listbox']") ||
-              dialog.checkVisibility({
-                checkOpacity: true,
-                checkVisibilityCSS: true,
-              })
-            )
-              return undefined;
-            const shown = [
-              ...button.innerText.matchAll(/\+[1-9]\d{0,2}(?!\d)/gu),
-            ];
-            const named = [
-              ...(button.getAttribute("aria-label") ?? "").matchAll(
-                /\+[1-9]\d{0,2}(?!\d)/gu,
-              ),
-            ];
-            return shown.length === 1 &&
-              named.length === 1 &&
-              shown[0]?.[0] === named[0]?.[0]
-              ? shown[0]?.[0]
-              : undefined;
-          };
-          // What a file input's own field shows about its upload: the site's
-          // message for it, the chip with the chosen name, or the browser's
-          // own widget. Help text further away is never read as a failure.
-          const readUpload = (input: HTMLInputElement): RawApplyUpload => {
-            const rendered = (node: Element | null): node is HTMLElement =>
-              node instanceof HTMLElement && node.getClientRects().length > 0;
-            const described = ["aria-describedby", "aria-errormessage"]
-              .flatMap((name) => (input.getAttribute(name) ?? "").split(/\s+/u))
-              .filter(Boolean)
-              .map((id) => document.getElementById(id))
-              .filter(rendered)
-              .map((node) => node.innerText.trim())
-              .filter(Boolean)
-              .join("\n");
-            let box: HTMLElement | null = null;
-            for (
-              let node = input.parentElement, depth = 0;
-              node && depth < 6;
-              node = node.parentElement, depth += 1
-            ) {
-              if (node.matches("form, body")) break;
-              const other = Array.from(
-                node.querySelectorAll("input, textarea, select"),
-              ).some(
-                (field) =>
-                  field !== input &&
-                  !(
-                    field instanceof HTMLInputElement && field.type === "hidden"
-                  ),
-              );
-              if (other) break;
-              box = node;
-            }
-            const style = window.getComputedStyle(input);
-            const rect = input.getBoundingClientRect();
-            return {
-              described: described,
-              ariaInvalid: input.getAttribute("aria-invalid") === "true",
-              nearby: (box?.innerText ?? "")
-                .replace(/[ \t]+/gu, " ")
-                .replace(/\s*\n\s*/gu, "\n")
-                .trim(),
-              shown:
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                Number(style.opacity) > 0.1 &&
-                rect.width >= 40 &&
-                rect.height >= 10,
-              ...(input.files?.[0]
-                ? {
-                    fileName: input.files[0].name,
-                    fileSize: input.files[0].size,
-                  }
-                : {}),
-              // HTML form submission sends a named file input's file.
-              ...(input.name &&
-              input.form?.getAttribute("method")?.toLowerCase() === "post" &&
-              input.form.enctype === "multipart/form-data"
-                ? {
-                    formSubmits: true,
-                    formAction: new URL(
-                      input.form.getAttribute("action") || window.location.href,
-                      document.baseURI,
-                    ).href,
-                  }
-                : {}),
-            };
-          };
-          // A question's title can say it is required when its control doesn't
-          // (Ashby marks the title with a "required" class and leaves its pickers
-          // bare): the nearest box with a title and no other field.
-          const titledRequired = (element: Element): boolean => {
-            for (
-              let box = element.parentElement, depth = 0;
-              box && box !== document.body && depth < 4;
-              box = box.parentElement, depth += 1
-            ) {
-              const title = box.querySelector(
-                "label, legend, [class*='question-title' i]",
-              );
-              if (!title) continue;
-              const alone = Array.from(
-                box.querySelectorAll(
-                  "input:not([type='hidden']), select, textarea",
-                ),
-              ).every((field) => field === element);
-              return (
-                alone &&
-                (/\*\s*$/u.test(title.textContent ?? "") ||
-                  box.querySelector(
-                    "[aria-required='true'], label[class*='required' i], [class*='question-title'][class*='required' i]",
-                  ) !== null)
-              );
-            }
-            return false;
-          };
-          // What a rich-text editor holds, one line per paragraph or line
-          // break, so the model reads the paragraphs it wrote.
-          const editorText = (root: Element): string => {
-            let text = "";
-            const walk = (node: Node): void => {
-              for (const child of Array.from(node.childNodes)) {
-                if (child.nodeType === 3) {
-                  const data = (child as Text).data;
-                  // Source indentation between blocks is not text.
-                  if (!/^\s*\n\s*$/u.test(data))
-                    text += data.replace(/[\t\n\r]+/gu, " ");
-                } else if (child.nodeName === "BR") {
-                  text += "\n";
-                } else if (child.nodeType === 1) {
-                  const display = getComputedStyle(child as Element).display;
-                  if (display === "none") continue;
-                  const block = !display.startsWith("inline");
-                  if (block && text && !text.endsWith("\n")) text += "\n";
-                  walk(child);
-                  if (block && text && !text.endsWith("\n")) text += "\n";
-                }
-              }
-            };
-            walk(root);
-            return text
-              .replace(/\u00a0/gu, " ")
-              .replace(/[ \t]+$/gmu, "")
-              .trim();
-          };
-          // The words a person sees in an element: no icons, nothing hidden from
-          // assistive technology, no scripts or styles.
-          const shownText = (element: HTMLElement): string => {
-            const clone = element.cloneNode(true) as HTMLElement;
-            for (const hidden of clone.querySelectorAll(
-              "svg, [aria-hidden='true'], script, style, noscript, template",
-            ))
-              hidden.remove();
-            return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
-          };
-          // A text box that is a calendar's (a date picker): its class or its
-          // picker's says date, or it asks for a date. It takes a date, read as
-          // one, never words like "Immediately". (An open calendar beside a field
-          // is also left out of the field's question, above and below.)
-          const datePicker = (element: Element): boolean =>
-            element instanceof HTMLInputElement &&
-            element.type === "text" &&
-            (/(?:^|[\s_-])date(?:picker)?(?:$|[\s_-])|datepicker/iu.test(
-              element.className,
-            ) ||
-              Boolean(
-                element.closest(
-                  "[class*='datepicker' i], [class*='date-picker' i]",
-                ),
-              ) ||
-              /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
-                element.placeholder,
-              ));
-          return elements.map((element, index) => {
-            const html = element as HTMLElement;
-            const input = element instanceof HTMLInputElement ? element : null;
-            const phoneCallingCode = phoneCallingCodeFor(element);
-            const textarea =
-              element instanceof HTMLTextAreaElement ? element : null;
-            const select =
-              element instanceof HTMLSelectElement ? element : null;
-            const style = window.getComputedStyle(html);
-            const ariaLabel = element.getAttribute("aria-label")?.trim() ?? "";
-            const labelledBy = (element.getAttribute("aria-labelledby") ?? "")
-              .split(/\s+/u)
-              .filter(Boolean)
-              .map((id) => labelText(document.getElementById(id)))
-              .join(" ")
-              .trim();
-            const labels =
-              input?.labels ?? textarea?.labels ?? select?.labels ?? null;
-            const nearbyQuestionText = (): string => {
-              let ancestor = element.parentElement;
-              for (let depth = 0; ancestor && depth < 5; depth += 1) {
-                const clone = ancestor.cloneNode(true) as HTMLElement;
-                clone
-                  .querySelectorAll(
-                    "input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
-                  )
-                  .forEach((candidate) => candidate.remove());
-                const text = (clone.textContent ?? "")
-                  .replace(/\s+/gu, " ")
-                  .trim();
-                if (text.length > 0 && text.length <= 500) return text;
-                ancestor = ancestor.parentElement;
-              }
-              return "";
-            };
-            const label =
-              ariaLabel ||
-              labelledBy ||
-              (labels
-                ? Array.from(labels)
-                    .map((item) => labelText(item))
-                    .filter(Boolean)
-                    .join(" ")
-                : "") ||
-              labelText(element.closest("label")) ||
-              nearbyQuestionText() ||
-              "";
-            // Nested question groups keep the outer form step's own label.
-            // Reading only the nearest legend dropped that context for skills
-            // and radio groups while other questions still showed the step.
-            const legends: string[] = [];
-            let fieldset = element.closest("fieldset");
-            while (fieldset) {
-              const legend = labelText(
-                fieldset.querySelector(":scope > legend"),
-              );
-              if (legend && !legends.includes(legend)) legends.unshift(legend);
-              fieldset = fieldset.parentElement?.closest("fieldset") ?? null;
-            }
-            const legend = legends.join(" — ");
-            const role = element.getAttribute("role")?.toLowerCase() ?? "";
-            const tagName = select
-              ? "select"
-              : textarea
-                ? "textarea"
-                : input
-                  ? "input"
-                  : "contenteditable";
-            return {
-              ref: `${prefix}c${index}`,
-              index,
-              tagName,
-              inputType: datePicker(element)
-                ? "date"
-                : (input?.type.toLowerCase() ?? (role || tagName)),
-              accept: input?.accept ?? "",
-              min: input?.min ?? "",
-              max: input?.max ?? "",
-              step: input?.step ?? "",
-              maxLength: input?.maxLength ?? textarea?.maxLength ?? -1,
-              role,
-              id: html.id,
-              name: input?.name ?? textarea?.name ?? select?.name ?? "",
-              scopeKey: scopeKeyFor(element),
-              ...((input?.form ?? textarea?.form ?? select?.form)
-                ? {
-                    formIndex: Array.from(document.forms).indexOf(
-                      (input?.form ?? textarea?.form ?? select?.form)!,
-                    ),
-                  }
-                : {}),
-              ...(phoneCallingCode ? { phoneCallingCode } : {}),
-              label,
-              hint: hintFor(element, label),
-              groupLabel: legend ?? "",
-              placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
-              autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
-              required:
-                Boolean(
-                  input?.required ?? textarea?.required ?? select?.required,
-                ) ||
-                element.getAttribute("aria-required") === "true" ||
-                titledRequired(element),
-              invalid:
-                element.getAttribute("aria-invalid") === "true" ||
-                Boolean(
-                  (input ?? textarea ?? select)?.validity &&
-                  !(input ?? textarea ?? select)?.validity.valid,
-                ),
-              validationMessage:
-                input?.validationMessage ??
-                textarea?.validationMessage ??
-                select?.validationMessage ??
-                "",
-              disabled:
-                Boolean(
-                  input?.disabled ?? textarea?.disabled ?? select?.disabled,
-                ) ||
-                element.matches(":disabled") ||
-                element.getAttribute("aria-disabled") === "true",
-              readOnly: Boolean(input?.readOnly ?? textarea?.readOnly),
-              secretValuePresent: Boolean(input?.value),
-              // A file input is almost always hidden behind a styled "Attach"
-              // button (Lever, Greenhouse, Workday). Attaching works on the
-              // hidden input, so it stays in the observation; without it the
-              // run saw only the button and could never attach the resume.
-              visible:
-                (input?.type === "file" && !input.matches(":disabled")) ||
-                (style.display !== "none" &&
-                  style.visibility !== "hidden" &&
-                  style.opacity !== "0" &&
-                  html.getClientRects().length > 0),
-              value:
-                input?.value ??
-                textarea?.value ??
-                select?.value ??
-                // A custom checkbox or radio answers with its state; its
-                // text is its option at most, never an icon's fallback
-                // ("SVGs not supported by this browser.").
-                // A rich-text editor answers with its lines, breaks kept, so
-                // the model sees the paragraphs it wrote.
-                (html.isContentEditable &&
-                role !== "checkbox" &&
-                role !== "radio"
-                  ? editorText(html)
-                  : shownText(html)) ??
-                "",
-              checked:
-                input?.checked ??
-                element.getAttribute("aria-checked") === "true",
-              multiple: select?.multiple ?? false,
-              options: select
-                ? Array.from(select.options)
-                    .filter(
-                      (option) =>
-                        !option.disabled &&
-                        !(
-                          option.parentElement instanceof HTMLOptGroupElement &&
-                          option.parentElement.disabled
-                        ) &&
-                        !(select.required && option.value === ""),
-                    )
-                    .map((option) => option.label.trim())
-                    .filter(Boolean)
-                : [],
-              selectedOptionLabel:
-                select?.selectedOptions.item(0)?.label.trim() ??
-                element.getAttribute("aria-valuetext")?.trim() ??
-                "",
-              ...(input?.type === "file" ? { upload: readUpload(input) } : {}),
-            };
-          });
-        }, `f${frameIndex}`),
+        .evaluateAll(collectApplyDocumentSnapshot, {
+          ...APPLY_PAGE_SELECTORS,
+          controlRefPrefix: `f${frameIndex}`,
+        })
+        .then(({ controls }) => controls),
       snapshot.locator(APPLY_ACTION_SELECTOR, "a").evaluateAll(
         (elements, prefix): RawApplyAction[] =>
           elements.map((element, index) => {
@@ -1251,7 +794,7 @@ export { personSubmissionObserverSource } from "./person-submission-observer";
 /** Pure DOM snapshot, also usable after the person detaches the automation connection. */
 export function collectApplyDocumentSnapshot(
   elements: Element[],
-  selectors: typeof APPLY_PAGE_SELECTORS,
+  selectors: typeof APPLY_PAGE_SELECTORS & { controlRefPrefix?: string },
   redactCredentials = false,
 ) {
   const matching = (selector: string) =>
@@ -1661,13 +1204,16 @@ export function collectApplyDocumentSnapshot(
         element.getClientRects().length > 0
       );
     };
-    const referencedText = (element: Element): string =>
-      (element.getAttribute("aria-labelledby") ?? "")
+    const referencedText = (element: Element): string => {
+      const root = element.getRootNode();
+      if (!(root instanceof Document || root instanceof ShadowRoot)) return "";
+      return (element.getAttribute("aria-labelledby") ?? "")
         .split(/\s+/u)
         .filter(Boolean)
-        .map((id) => labelText(document.getElementById(id)))
+        .map((id) => labelText(root.getElementById(id)))
         .join(" ")
         .trim();
+    };
     const directLabel = (element: Element): string => {
       const aria = element.getAttribute("aria-label")?.trim();
       if (aria) return aria;
@@ -1685,6 +1231,10 @@ export function collectApplyDocumentSnapshot(
       if (text) return text;
       const enclosing = labelText(element.closest("label"));
       if (enclosing) return enclosing;
+      if (element.matches("[role='radio'], [role='checkbox']")) {
+        const ownText = labelText(element);
+        if (ownText) return ownText;
+      }
       let ancestor = element.parentElement;
       for (let depth = 0; ancestor && depth < 5; depth += 1) {
         const clone = ancestor.cloneNode(true) as HTMLElement;
@@ -1776,7 +1326,7 @@ export function collectApplyDocumentSnapshot(
         root instanceof Document || root instanceof ShadowRoot
           ? Array.from(root.querySelectorAll("form"))
           : [];
-      return `r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
+      return `${selectors.controlRefPrefix ?? ""}r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
     };
     const rowScopeKeyFor = (element: Element): string | undefined => {
       const root = element.getRootNode();
@@ -1784,6 +1334,135 @@ export function collectApplyDocumentSnapshot(
       if (!row || !(root instanceof Document || root instanceof ShadowRoot))
         return undefined;
       return `${scopeKeyFor(element)}:group:${Array.from(root.querySelectorAll("fieldset, [role='group'], section")).indexOf(row)}`;
+    };
+    const choiceKind = (element: Element): string =>
+      element.getAttribute("role") ||
+      (element instanceof HTMLInputElement ? element.type : "");
+    const semanticGroup = "fieldset, [role='group'], [role='radiogroup']";
+    const nativeName = (element: Element): string =>
+      element instanceof HTMLInputElement ? element.name : "";
+    const ownedChoices = new Map<Element, { label: string; key: string }>();
+    const fieldsByBox = new Map<Element, Element[]>();
+    const indexes = new Map(elements.map((element, index) => [element, index]));
+    const namedRadios = new Map<string, number>();
+    for (const element of elements) {
+      const name = nativeName(element);
+      if (choiceKind(element) !== "radio" || !name) continue;
+      const key = `${scopeKeyFor(element)}:name:${name}`;
+      namedRadios.set(key, (namedRadios.get(key) ?? 0) + 1);
+    }
+    const precedingQuestion = (branch: Element, peers: Element[]): string => {
+      for (
+        let node = branch.previousSibling;
+        node;
+        node = node.previousSibling
+      ) {
+        if (node instanceof Text) {
+          const text = node.data.replace(/\s+/gu, " ").trim();
+          if (text) return text;
+        }
+        if (!(node instanceof HTMLElement)) continue;
+        // An option's separate label can precede its input. It still names
+        // that option, even when the question is an unbound label above it.
+        if (node instanceof HTMLLabelElement && node.control) {
+          if (peers.includes(node.control)) continue;
+          break;
+        }
+        if (
+          node.matches(`${selectors.controls}, ${selectors.actions}`) ||
+          node.querySelector(selectors.controls)
+        )
+          break;
+        if (
+          node.matches(
+            "script, style, template, [aria-hidden='true'], [aria-live], [role='alert'], [role='status']",
+          ) ||
+          (getComputedStyle(node).display !== "contents" && !isVisible(node))
+        )
+          continue;
+        const text = node.innerText.replace(/\s+/gu, " ").trim();
+        if (text) return text;
+      }
+      return "";
+    };
+    const ownedChoiceGroup = (element: Element) => {
+      const known = ownedChoices.get(element);
+      if (known) return known;
+      const kind = choiceKind(element);
+      if (kind !== "radio" && kind !== "checkbox") return;
+      const scope = scopeKeyFor(element);
+      const name = nativeName(element);
+      const radioKey = kind === "radio" && name ? `${scope}:name:${name}` : "";
+      const radioCount = namedRadios.get(radioKey) ?? 0;
+      const nearestGroup = element.closest(semanticGroup);
+      const boundary = element.closest(
+        "form, [role='form'], dialog, [role='dialog']",
+      );
+      let choiceList:
+        | { box: Element; peers: Element[]; key: string; semantic: boolean }
+        | undefined;
+      for (
+        let box = element.parentElement;
+        box && box !== boundary?.parentElement && !box.matches("html, body");
+        box = box.parentElement
+      ) {
+        let peers = fieldsByBox.get(box);
+        if (!peers) {
+          peers = Array.from(box.querySelectorAll(selectors.controls));
+          fieldsByBox.set(box, peers);
+        }
+        if (peers.length < Math.max(2, radioCount)) continue;
+        if (
+          peers.some(
+            (peer) =>
+              choiceKind(peer) !== kind ||
+              scopeKeyFor(peer) !== scope ||
+              peer.closest(semanticGroup) !== nearestGroup ||
+              (kind === "radio" && nativeName(peer) !== name),
+          )
+        )
+          break;
+
+        const first = peers[0]!;
+        const branch = Array.from(box.children).find((child) =>
+          child.contains(first),
+        );
+        if (!branch) continue;
+        const semantic = box.matches(semanticGroup);
+        const explicit =
+          (semantic &&
+            (referencedText(box) ||
+              box.getAttribute("aria-label")?.trim() ||
+              labelText(box.querySelector(":scope > legend")))) ||
+          "";
+        // Distinct checkbox names can belong to the same choice list. A
+        // shared wrapper or semantic group establishes that relationship.
+        const sharedName =
+          name && peers.every((peer) => nativeName(peer) === name);
+        const isChoiceList =
+          semantic ||
+          kind === "radio" ||
+          sharedName ||
+          peers.every((peer) => branch.contains(peer));
+        const label =
+          explicit || (isChoiceList ? precedingQuestion(branch, peers) : "");
+        const key = radioKey || `${scope}:choice:${indexes.get(first)}`;
+        if (!label) {
+          choiceList = { box, peers, key, semantic };
+          continue;
+        }
+        const group = { label, key };
+        for (const peer of peers) ownedChoices.set(peer, group);
+        return group;
+      }
+      if (choiceList) {
+        const { box, peers, key, semantic } = choiceList;
+        const label = box === boundary ? "" : precedingQuestion(box, peers);
+        if (!label && !semantic) return;
+        const group = { label, key };
+        for (const peer of peers) ownedChoices.set(peer, group);
+        return group;
+      }
     };
     const phoneCallingCodeFor = (element: Element): string | undefined => {
       if (!(element instanceof HTMLInputElement) || element.type !== "tel")
@@ -1995,6 +1674,10 @@ export function collectApplyDocumentSnapshot(
       const textarea = element instanceof HTMLTextAreaElement ? element : null;
       const select = element instanceof HTMLSelectElement ? element : null;
       const role = element.getAttribute("role")?.toLowerCase() ?? "";
+      const choice = ownedChoiceGroup(element);
+      const ancestors = sectionPath(element);
+      const enclosingLabel = groupLabel(element);
+      const label = directLabel(element);
       const tagName = select
         ? "select"
         : textarea
@@ -2004,6 +1687,9 @@ export function collectApplyDocumentSnapshot(
             : "contenteditable";
       return {
         index,
+        ...(selectors.controlRefPrefix
+          ? { ref: `${selectors.controlRefPrefix}c${index}` }
+          : {}),
         visibility: fieldVisibility(element),
         tagName,
         inputType: datePicker(element)
@@ -2026,11 +1712,19 @@ export function collectApplyDocumentSnapshot(
             }
           : {}),
         ...(phoneCallingCode ? { phoneCallingCode } : {}),
-        label: directLabel(element),
-        hint: hintFor(element, directLabel(element)),
-        groupLabel: groupLabel(element),
+        label,
+        hint: hintFor(element, label),
+        groupLabel:
+          choice?.label &&
+          !` — ${enclosingLabel} — `.includes(` — ${choice.label} — `)
+            ? [enclosingLabel, choice.label].filter(Boolean).join(" — ")
+            : enclosingLabel,
+        ...(choice ? { choiceGroupKey: choice.key } : {}),
         ...(rowScopeKey ? { rowScopeKey } : {}),
-        sectionPath: sectionPath(element),
+        sectionPath:
+          choice?.label && ancestors.at(-1) !== choice.label
+            ? [...ancestors, choice.label]
+            : ancestors,
         placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
         autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
         required:
@@ -2066,7 +1760,7 @@ export function collectApplyDocumentSnapshot(
           (input?.type === "password" ||
             input?.autocomplete === "one-time-code" ||
             /(?:verification|authentication|one.time) code|\botp\b/iu.test(
-              `${input?.name ?? ""} ${directLabel(element)}`,
+              `${input?.name ?? ""} ${label}`,
             ))
             ? ""
             : input?.value) ??
@@ -2265,10 +1959,11 @@ export function collectApplyDocumentSnapshot(
   );
   const bodyStyle = document.body ? getComputedStyle(document.body) : null;
   const bodyText =
-    bodyStyle &&
-    (bodyStyle.display === "none" ||
-      bodyStyle.contentVisibility === "hidden" ||
-      Number(bodyStyle.opacity || "1") === 0)
+    selectors.controlRefPrefix ||
+    (bodyStyle &&
+      (bodyStyle.display === "none" ||
+        bodyStyle.contentVisibility === "hidden" ||
+        Number(bodyStyle.opacity || "1") === 0))
       ? ""
       : renderedText(document.body ?? document);
   return {

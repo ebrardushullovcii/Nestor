@@ -43,20 +43,20 @@ function catalog(messages) {
 }
 
 function parseView(view) {
-  const fields = [...view.matchAll(/^- (c\S+) \[([^\]]+)\] · (.+)$/gmu)].map(
-    ([, ref, kind, rest]) => {
-      const parts = rest.split(" · ");
-      return {
-        ref,
-        kind,
-        label: parts[0] ?? "",
-        required: parts.includes("required"),
-        empty: parts.includes("empty"),
-        declaration: rest.includes("a declaration"),
-        editable: !rest.includes("cannot be edited"),
-      };
-    },
-  );
+  const fields = [
+    ...view.matchAll(/^(?:  )?- ([ac]\S*) \[([^\]]+)\] · (.+)$/gmu),
+  ].map(([, ref, kind, rest]) => {
+    const parts = rest.split(" · ");
+    return {
+      ref,
+      kind,
+      label: parts[0] ?? "",
+      required: parts.includes("required"),
+      empty: parts.includes("empty"),
+      declaration: rest.includes("a declaration"),
+      editable: !rest.includes("cannot be edited"),
+    };
+  });
   const buttons = [...view.matchAll(/^- (a\S+): (.+)$/gmu)].map(
     ([, ref, label]) => ({
       ref,
