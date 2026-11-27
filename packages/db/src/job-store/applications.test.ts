@@ -2141,46 +2141,109 @@ it("shares stable-key answers, kinds and proof references with Needs you and ign
   expect(applications.needsYou.savedAnswer(first.id)?.answer).toBe("6");
 });
 
-it("shares one access card per site through sign-in, CAPTCHA and MFA but verifies each application", () => {
+it("updates a posting's own handoff without changing another handoff on the same site", () => {
   const { jobs, applications } = open();
-  applications.applyJobs({ selection: { ids: add(jobs, 3) } });
-  const rows = [
-    applications.claimNext()!,
-    applications.claimNext()!,
-    applications.claimNext()!,
-  ];
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const first = applications.claimNext()!;
+  const second = applications.claimNext()!;
   const memory = applications.needsYou;
-  const tasks = rows.map((row, index) =>
-    memory.request({
+  const request = (
+    row: typeof first,
+    prompt: string,
+    kind: "sign_in" | "captcha" | "mfa",
+  ) => {
+    const requested = memory.request({
       applicationId: row.id,
       attempt: row.attempt,
       fieldKey: "site_access",
-      key: `different:${index}`,
-      kind: (["sign_in", "captcha", "mfa"] as const)[index]!,
+      key: "site_access",
+      kind,
       scope: { siteOrigin: "https://jobs.example.test" },
-      prompt: "Finish the site step",
+      prompt,
       input: "text",
       options: [],
-    }),
+    });
+    if (requested.status !== "needs_you")
+      throw new Error("Missing access task");
+    return requested.task;
+  };
+  const firstTask = request(first, "Sign in for the first posting", "sign_in");
+  const secondTask = request(
+    second,
+    "Solve the second posting's challenge",
+    "captcha",
   );
-  expect(tasks.every((task) => task.status === "needs_you")).toBe(true);
-  const task = memory.list().rows[0]!;
-  expect(memory.list().rows).toHaveLength(1);
-  expect(task.kind).toBe("mfa");
-  expect(memory.counts()).toMatchObject({ sign_in: 0, captcha: 0, mfa: 1 });
-  expect(memory.completeAccess(task.id, 999)).toBe(false);
-  expect(memory.completeAccess(task.id, rows[0]!.id)).toBe(true);
-  expect(applications.getApplication(rows[0]!.id)?.state).toBe("queued");
-  expect(applications.getApplication(rows[1]!.id)?.state).toBe("needs_you");
-  expect(memory.details(task.id)?.applications.map((row) => row.id)).toEqual(
-    rows.slice(1).map((row) => row.id),
+  const latest = request(first, "Enter the code on the first posting", "mfa");
+  expect(latest.id).toBe(firstTask.id);
+  expect(memory.list().rows).toMatchObject([latest, secondTask]);
+  expect(memory.counts()).toMatchObject({ sign_in: 0, captcha: 1, mfa: 1 });
+  expect(memory.applicationsToCheckForAccess(secondTask.id)).toEqual([
+    { id: second.id, attempt: second.attempt },
+  ]);
+  expect(memory.completeAccess(firstTask.id, second.id)).toBe(false);
+  expect(memory.completeAccess(firstTask.id, first.id)).toBe(true);
+  expect(applications.getApplication(first.id)?.state).toBe("queued");
+  expect(applications.getApplication(second.id)?.state).toBe("needs_you");
+  expect(memory.details(secondTask.id)?.applications).toMatchObject([
+    { id: second.id },
+  ]);
+});
+
+it("recovers each posting's instructions from a saved run linked to an old site card", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const rows = [applications.claimNext()!, applications.claimNext()!];
+  const origin = "https://jobs.example.test";
+  const oldTask = jobs
+    .sql(
+      `INSERT INTO needs_you
+    (kind,answer_key,country,site_origin,prompt,input,options_json,opened_at)
+    VALUES ('captcha',?,'',?,'Only the first posting instructions','text','[]',1)`,
+    )
+    .run(`access:${origin}`, origin).lastInsertRowid;
+
+  for (const [index, row] of rows.entries()) {
+    jobs
+      .sql("UPDATE applications SET state='needs_you' WHERE id=?")
+      .run(row.id);
+    jobs
+      .sql(
+        `INSERT INTO application_needs_you (application_id,attempt,field_key,task_id)
+      VALUES (?,?,'site_access',?)`,
+      )
+      .run(row.id, row.attempt, oldTask);
+    jobs
+      .sql(
+        `INSERT INTO application_details
+      (application_id,attempt,resume_artifact_json,execution_json,profile_digest) VALUES (?,?,'{}',?,'digest')`,
+      )
+      .run(
+        row.id,
+        row.attempt,
+        JSON.stringify({
+          blocker: {
+            userActionKind: "captcha",
+            detail: `Instructions for posting ${index}`,
+          },
+        }),
+      );
+  }
+
+  const memory = createApplicationStore(jobs).needsYou;
+  expect(memory.details(Number(oldTask))).toBeNull();
+  expect(memory.list().rows.map((task) => task.prompt)).toEqual(
+    rows.map((_, index) => `Instructions for posting ${index}`),
   );
-  expect(memory.completeAccess(task.id, rows[0]!.id)).toBe(false);
-  memory.completeAccess(task.id, rows[1]!.id);
-  expect(memory.list().total).toBe(1);
-  applications.stop(rows[2]!.id);
-  expect(memory.list().total).toBe(0);
-  expect(memory.listAnswers().total).toBe(0);
+  for (const [index, row] of rows.entries()) {
+    const [task] = memory.accessForApplication(row.id);
+    expect(task?.prompt).toBe(`Instructions for posting ${index}`);
+    expect(memory.details(task!.id)?.applications).toMatchObject([
+      { id: row.id },
+    ]);
+  }
+  expect(createApplicationStore(jobs).needsYou.list().rows).toEqual(
+    memory.list().rows,
+  );
 });
 
 it("keeps access checks scoped to a site and does not skip another unanswered question", () => {

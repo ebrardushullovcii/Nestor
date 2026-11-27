@@ -1595,26 +1595,29 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     // The raw engine's typed blockers distinguish access steps from technical failures.
     const prepared = agent as ApplyAgentResult | null;
-    const taskOrigin = new URL(
-      prepared?.finalUrl ?? result.replay.lastUrl ?? target,
-    ).origin;
     if (prepared && !prepared.pauses.some((pause) => pause.blocker))
       for (const task of applications.needsYou.accessForApplication(row.id))
         applications.needsYou.completeAccess(task.id, row.id);
-    for (const pause of prepared?.pauses ?? []) {
+    const steps = (prepared?.pauses ?? []).flatMap((pause) => {
       const kind = accessKind(pause.blocker);
-      if (kind)
-        applications.needsYou.request({
-          applicationId: row.id,
-          attempt: row.attempt,
-          fieldKey: "site_access",
-          kind,
-          key: `access:${taskOrigin}`,
-          scope: { siteOrigin: taskOrigin },
-          prompt: pause.summary,
-          input: "text",
-          options: [],
-        });
+      return kind ? [{ kind, instructions: pause.summary }] : [];
+    });
+    if (steps[0]) {
+      applications.needsYou.request({
+        applicationId: row.id,
+        attempt: row.attempt,
+        fieldKey: "site_access",
+        kind: steps[0].kind,
+        key: "site_access",
+        scope: {
+          siteOrigin: new URL(
+            prepared?.finalUrl ?? result.replay.lastUrl ?? target,
+          ).origin,
+        },
+        prompt: steps.map((step) => step.instructions).join("\n\n"),
+        input: "text",
+        options: [],
+      });
     }
     if (applications.getApplication(row.id)?.state === "needs_you") {
       waiting.set(row.id, row.attempt);
@@ -2232,24 +2235,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     },
     checkAccess(taskId: number): Promise<boolean> {
       return Promise.resolve().then(() => {
-        const details = applications.needsYou.details(taskId);
-        if (!details || details.task.kind === "question") return false;
+        if (!applications.needsYou.details(taskId)) return false;
         let retrying = false;
-        for (const row of details.applications) {
-          const app = applications.getApplication(row.id);
-          if (app?.state !== "needs_you") continue;
+        for (const app of applications.needsYou.applicationsToCheckForAccess(
+          taskId,
+        )) {
           watchClosely(app.id);
-          // The person says the sign-in is done, but this page still shows it:
-          // the account step often finishes in another window, or lands on the
-          // site's own account page. Run the application again from its own
-          // address with GET under the same item, as Open does for a lost page.
-          // No password or form is replayed; a site that still asks stops here.
-          if (
-            applications.needsYou
-              .accessForApplication(app.id)
-              .some((task) => task.id === taskId) &&
-            applications.retryAccessForPerson(app.id, app.attempt)
-          )
+          // Each application re-enters at its own address with GET. An account
+          // session can carry across pages, but each run observes its own result.
+          if (applications.retryAccessForPerson(app.id, app.attempt))
             retrying = true;
         }
         if (retrying) wake();
@@ -2316,8 +2310,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return { opened: true, retained: true };
     }
     const job = jobs.getJob(row.jobId);
+    const work = applications.getWork(id);
+    const accessPage =
+      row.state === "needs_you" &&
+      applications.needsYou.accessForApplication(id).length
+        ? (work?.execution.replay.lastUrl ?? work?.execution.blocker?.url)
+        : null;
     const url =
-      applications.getWork(id)?.reviewCard?.pageUrl ??
+      accessPage ??
+      work?.reviewCard?.pageUrl ??
       (job ? applicationPageUrl(job) : null);
     if (!url) return { opened: false, retained: false };
     await browser.openSession("target_site", { targetUrl: url });

@@ -53,6 +53,7 @@ import { describeFormQuestion, describeLegacyFormQuestion } from "./questions";
 const preparation = vi.hoisted(() => ({
   answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
+  blockersByListing: new Map<string, ApplyBlocker>(),
   /** The run filled the form but could not confirm its send was ready. */
   notReadyToSend: false,
   technicalFailure: false,
@@ -105,6 +106,10 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       preparation.uploadsConfirmed.push(
         (input.uploadsConfirmedByPerson ?? []).length > 0,
       );
+      const blocker =
+        preparation.blockersByListing.get(
+          input.executionInput.job.canonicalUrl,
+        ) ?? preparation.blocker;
       input.onPrepared?.({
         result: {
           outcome: preparation.technicalFailure ? "stuck" : "ready_to_send",
@@ -122,13 +127,13 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           finalUrl: input.executionInput.job.canonicalUrl,
           filled: [],
           attachments: [],
-          pauses: preparation.blocker
+          pauses: blocker
             ? [
                 {
                   code: "page_blocked",
                   question: null,
-                  summary: preparation.blocker.summary,
-                  blocker: preparation.blocker,
+                  summary: blocker.summary,
+                  blocker,
                 },
               ]
             : [],
@@ -527,6 +532,7 @@ it("records a posting the model found already sent as not sent, with no Send and
 });
 afterEach(async () => {
   preparation.blocker = null;
+  preparation.blockersByListing.clear();
   preparation.notReadyToSend = false;
   preparation.technicalFailure = false;
   preparation.answers = [];
@@ -2279,7 +2285,7 @@ it("concurrent Open calls share one URL open and never queue preparation", async
   expect(f.applications.getApplication(row.id)).toEqual(row);
 });
 
-it("reopens the original account entry after restart and keeps one shared task until both forms continue", async () => {
+it("checks two postings independently after one site sign-in", async () => {
   const f = await setup(2);
   preparation.blocker = {
     code: "site_login_required",
@@ -2313,9 +2319,9 @@ it("reopens the original account entry after restart and keeps one shared task u
   });
   expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
   expect(f.execute).toHaveBeenCalledTimes(2);
-  expect(f.applications.needsYou.list().total).toBe(1);
+  expect(f.applications.needsYou.list().total).toBe(2);
   expect(f.applications.needsYou.details(task.id)!.applications).toHaveLength(
-    2,
+    1,
   );
   preparation.blocker = null;
   f.browser.readApplicationPageBinding.mockResolvedValue({
@@ -2348,6 +2354,84 @@ it("reopens the original account entry after restart and keeps one shared task u
   );
   expect(f.applications.needsYou.list().total).toBe(0);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("opens each same-site CAPTCHA handoff on its own retained page or saved form URL", async () => {
+  const f = await setup(2);
+  const postings = [
+    {
+      prompt: "Reattach the resume on the first form.",
+      page: "https://replica.test/apply/first",
+    },
+    {
+      prompt: "Restore the location on the second form.",
+      page: "https://replica.test/apply/second",
+    },
+  ];
+  for (const [index, posting] of postings.entries()) {
+    preparation.blockersByListing.set(`https://replica.test/jobs/${index}`, {
+      code: "security_challenge",
+      requiresPerson: true,
+      summary: posting.prompt,
+      detail: posting.prompt,
+      nextActionLabel: "Open the application",
+    });
+  }
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  for (const [index, [, input]] of f.execute.mock.calls.entries()) {
+    const posting = postings.find((_, i) =>
+      input.job.canonicalUrl.endsWith(`/jobs/${i}`),
+    )!;
+    f.releases[index]!(
+      ApplyExecutionResultSchema.parse({
+        ...ready(),
+        state: "paused",
+        detail: posting.prompt,
+        replay: { lastUrl: posting.page },
+      }),
+    );
+  }
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(2));
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+
+  const tasks = f.applications.needsYou.list().rows;
+  const first = f.applications.needsYou.details(
+    tasks.find((task) => task.prompt === postings[0]!.prompt)!.id,
+  )!;
+  const second = f.applications.needsYou.details(
+    tasks.find((task) => task.prompt === postings[1]!.prompt)!.id,
+  )!;
+  expect(first.applications).toMatchObject([{ title: "Engineer 0" }]);
+  expect(second.applications).toMatchObject([{ title: "Engineer 1" }]);
+  const firstApplication = f.applications.getApplication(
+    first.applications[0]!.id,
+  )!;
+  const firstKey = `application_${firstApplication.id}_attempt_${firstApplication.attempt}`;
+  f.browser.focusRetainedApplicationPage
+    .mockClear()
+    .mockResolvedValueOnce(true);
+  expect(await restarted.open(firstApplication.id)).toEqual({
+    opened: true,
+    retained: true,
+  });
+  expect(f.browser.focusRetainedApplicationPage).toHaveBeenCalledWith(
+    "target_site",
+    firstKey,
+  );
+  expect(f.browser.openSession).not.toHaveBeenCalled();
+  expect(await restarted.open(second.applications[0]!.id)).toEqual({
+    opened: true,
+    retained: false,
+  });
+  expect(f.browser.openSession).toHaveBeenCalledExactlyOnceWith("target_site", {
+    targetUrl: postings[1]!.page,
+  });
+  expect(f.execute).toHaveBeenCalledTimes(2);
 });
 
 it("defaults to four preparations and leaves additional applications queued", async () => {

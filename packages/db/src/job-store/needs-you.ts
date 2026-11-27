@@ -260,8 +260,71 @@ function validateAnswer(
   return answer;
 }
 
+const applicationAccessKey = (id: number, field: string) =>
+  `application-access:${id}:${field}`;
+
+/** Recover posting-specific instructions from the saved run on older site cards. */
+function splitLegacyApplicationAccess(store: JobStore): void {
+  const { sql } = store;
+  store.transaction(() => {
+    const links = sql(`SELECT t.*, n.application_id, n.field_key,
+        json_extract(d.execution_json, '$.blocker.code') AS blocker_code,
+        json_extract(d.execution_json, '$.blocker.userActionKind') AS action_kind,
+        json_extract(d.execution_json, '$.blocker.detail') AS instructions
+      FROM needs_you t JOIN application_needs_you n ON n.task_id=t.id
+      JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+      LEFT JOIN application_details d ON d.application_id=a.id
+      WHERE t.resolved_at IS NULL AND t.kind<>'question' AND t.blocked_url IS NULL
+        AND t.answer_key='access:' || t.site_origin AND n.field_key='site_access'
+        AND a.state IN ('needs_you','failed','queued','running')`).all() as (Task & {
+      application_id: number;
+      field_key: string;
+      blocker_code: string | null;
+      action_kind: string | null;
+      instructions: string | null;
+    })[];
+    for (const row of links) {
+      const kind =
+        row.action_kind === "captcha"
+          ? "captcha"
+          : row.blocker_code === "site_login_required"
+            ? "sign_in"
+            : row.kind;
+      const prompt =
+        row.instructions ?? "Open this application to continue on the website.";
+      const created = sql(`INSERT INTO needs_you
+        (kind,answer_key,country,site_origin,prompt,input,options_json,opened_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(
+        kind,
+        applicationAccessKey(row.application_id, row.field_key),
+        row.country,
+        row.site_origin,
+        prompt,
+        row.input,
+        row.options_json,
+        row.opened_at,
+      );
+      sql(`UPDATE application_needs_you SET task_id=?
+        WHERE application_id=? AND field_key=?`).run(
+        created.lastInsertRowid,
+        row.application_id,
+        row.field_key,
+      );
+      sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN applications a
+          ON a.id=n.application_id AND a.attempt=n.attempt
+          WHERE n.task_id=? AND a.state IN ('needs_you','failed','queued','running'))`).run(
+        Date.now(),
+        row.id,
+        row.id,
+      );
+    }
+  });
+}
+
 export function createNeedsYouStore(store: JobStore, changed: () => void) {
   const { sql } = store;
+  splitLegacyApplicationAccess(store);
   const savedAnswersChanged = () =>
     store.notify({
       cause: "saved_answers",
@@ -1177,6 +1240,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
         if (value.kind !== "question" && !value.scope.siteOrigin)
           throw new Error("A browser access task needs a site origin.");
+        const taskKey =
+          value.kind === "question"
+            ? value.key
+            : applicationAccessKey(value.applicationId, value.fieldKey);
         let task = (
           value.kind === "question"
             ? sql(`SELECT * FROM needs_you WHERE kind = ? AND answer_key = ? AND country = ?
@@ -1186,9 +1253,12 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                 value.scope.country,
                 value.scope.siteOrigin,
               )
-            : sql(`SELECT * FROM needs_you t WHERE site_origin = ? AND kind <> 'question'
-              AND resolved_at IS NULL AND NOT EXISTS (SELECT 1 FROM source_needs_you s WHERE s.task_id=t.id)
-              ORDER BY id LIMIT 1`).get(value.scope.siteOrigin)
+            : sql(`SELECT * FROM needs_you WHERE answer_key=? AND country=? AND site_origin=?
+              AND kind<>'question' AND resolved_at IS NULL`).get(
+                taskKey,
+                value.scope.country,
+                value.scope.siteOrigin,
+              )
         ) as Task | undefined;
         if (
           !task &&
@@ -1222,19 +1292,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               value.scope.siteOrigin,
             ) as Task[]
           ).find((candidate) => compatibleYesNoQuestion(candidate, value));
-        // Keep one site card as sign-in advances to a challenge or MFA. An
-        // older waiting page must not turn its MFA card back into sign-in.
-        const priority = { question: 0, sign_in: 1, captcha: 2, mfa: 3 };
-        if (
-          task &&
-          value.kind !== "question" &&
-          priority[value.kind] > priority[task.kind]
-        ) {
-          sql("UPDATE needs_you SET kind=?,prompt=? WHERE id=?").run(
-            value.kind,
-            value.prompt,
-            task.id,
-          );
+        if (task && value.kind !== "question") {
+          sql(
+            `UPDATE needs_you SET kind=?,prompt=?,blocked_url=? WHERE id=?`,
+          ).run(value.kind, value.prompt, value.blockedUrl ?? null, task.id);
           task = get(task.id)!;
         }
         if (task && !sameFormat(task, value)) {
@@ -1258,7 +1319,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             value.kind,
-            value.key,
+            taskKey,
             value.scope.country,
             value.scope.siteOrigin,
             value.prompt,
@@ -1412,6 +1473,23 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ).map(toTask);
     },
 
+    /** A completed site sign-in can be checked from each waiting posting. */
+    applicationsToCheckForAccess(taskId: number): Array<{
+      id: number;
+      attempt: number;
+    }> {
+      return sql(`SELECT DISTINCT a.id,a.attempt FROM needs_you requested
+        JOIN needs_you t ON (t.id=requested.id OR
+          (requested.kind='sign_in' AND t.kind='sign_in' AND t.site_origin=requested.site_origin))
+        JOIN application_needs_you n ON n.task_id=t.id
+        JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+        WHERE requested.id=? AND requested.kind<>'question'
+          AND requested.resolved_at IS NULL AND requested.blocked_url IS NULL
+          AND t.resolved_at IS NULL AND t.blocked_url IS NULL AND a.state='needs_you'`).all(
+        taskId,
+      ) as Array<{ id: number; attempt: number }>;
+    },
+
     blockedSite(origin: string): NeedsYouTask | null {
       const row = sql(
         "SELECT * FROM needs_you WHERE site_origin=? AND blocked_url IS NOT NULL AND resolved_at IS NULL ORDER BY id LIMIT 1",
@@ -1419,7 +1497,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       return row ? toTask(row) : null;
     },
 
-    /** Verify each bound application; a shared cookie is never proof for another page. */
+    /** Complete the handoff only after its own application page was checked. */
     completeAccess(id: number, verifiedApplicationId: number): boolean {
       return store.transaction(() => {
         const task = get(id);
@@ -1437,14 +1515,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             verifiedApplicationId,
           );
         if (!linked) return false;
-        // Other waiting pages may now share the completed session. Re-read
-        // their GET checkpoint; never replay a credential, challenge or form POST.
-        sql(`UPDATE application_details SET access_recheck=1 WHERE application_id<>?
-          AND application_id IN (SELECT n.application_id FROM application_needs_you n
-          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','failed'))`).run(
-          verifiedApplicationId,
-          id,
-        );
         sql(
           "DELETE FROM application_needs_you WHERE task_id=? AND application_id=?",
         ).run(id, verifiedApplicationId);

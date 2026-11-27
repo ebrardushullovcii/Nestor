@@ -931,8 +931,8 @@ it("saves numeric answers before Apply and reuses the same facts in number or te
   expect(applications.needsYou.list().rows).toEqual([]);
 });
 
-it("keeps one blocked-site card with its manual job link and no retry or saved-answer controls", async () => {
-  for (const row of claimed.slice(0, 2)) {
+it("keeps each blocked posting's manual job link and offers no retry or saved-answer controls", async () => {
+  for (const [index, row] of claimed.slice(0, 2).entries()) {
     applications.needsYou.request({
       applicationId: row.id,
       attempt: row.attempt,
@@ -940,17 +940,17 @@ it("keeps one blocked-site card with its manual job link and no retry or saved-a
       key: "access:https://jobs.example.test",
       kind: "sign_in",
       scope: { siteOrigin: "https://jobs.example.test" },
-      prompt: "The site refused this browser.",
+      prompt: `The site refused this browser for posting ${index}.`,
       input: "text",
       options: [],
-      blockedUrl: "https://jobs.example.test/0",
+      blockedUrl: `https://jobs.example.test/${index}`,
     });
     applications.block(row.id, row.attempt, "The site refused this browser.");
   }
   const open = vi.spyOn(window.nestor.needsYou, "run");
   show();
   await screen.findByRole("heading", { name: "This site blocked the browser" });
-  expect(applications.needsYou.list().total).toBe(1);
+  expect(applications.needsYou.list().total).toBe(2);
   expect(screen.getByText("https://jobs.example.test/0")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
@@ -960,50 +960,56 @@ it("keeps one blocked-site card with its manual job link and no retry or saved-a
       id: applications.needsYou.list().rows[0]!.id,
     }),
   );
+  fireEvent.click(
+    screen.getByText("The site refused this browser for posting 1."),
+  );
+  expect(await screen.findByText("https://jobs.example.test/1")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open in my browser" }));
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith("open_need", {
+      id: applications.needsYou.list().rows[1]!.id,
+    }),
+  );
   expect(applications.listApplications({ state: "blocked" }).rows).toHaveLength(
     2,
   );
 });
 
-it("updates a single site card as sign-in reaches MFA and applications continue", async () => {
-  const request = (index: number, kind: "sign_in" | "mfa") =>
+it("shows each same-site challenge's instructions and opens the selected application", async () => {
+  const prompts = [
+    "Attach the resume again on the first posting.",
+    "Restore the location on the second posting.",
+  ];
+  const tasks = prompts.map((prompt, index) =>
     applications.needsYou.request({
       applicationId: claimed[index]!.id,
       attempt: claimed[index]!.attempt,
       fieldKey: "site_access",
-      key: "access",
-      kind,
+      key: "site_access",
+      kind: "captcha",
       scope: { siteOrigin: "https://jobs.example.test" },
-      prompt: kind === "mfa" ? "Enter the code sent to you" : "Sign in first",
+      prompt,
       input: "text",
       options: [],
-    });
-  const initial = request(0, "sign_in");
-  request(1, "sign_in");
-  request(2, "sign_in");
-  if (initial.status !== "needs_you") throw new Error("Missing task");
-  show();
-  await screen.findByRole("heading", { name: "Sign in to continue" });
-  act(() => {
-    request(0, "mfa");
-  });
-  await screen.findByRole("heading", { name: "Complete verification" });
-  expect(applications.needsYou.list().total).toBe(1);
-  expect(screen.queryByRole("textbox")).toBeNull();
-  act(() => {
-    applications.needsYou.completeAccess(initial.task.id, claimed[0]!.id);
-  });
-  await waitFor(() =>
-    expect(
-      applications.needsYou.details(initial.task.id)?.applications,
-    ).toHaveLength(2),
+    }),
   );
-  expect(screen.getByRole("button", { name: "Open in browser" })).toBeTruthy();
-  act(() => {
-    applications.needsYou.completeAccess(initial.task.id, claimed[1]!.id);
-    applications.needsYou.completeAccess(initial.task.id, claimed[2]!.id);
-  });
-  await waitFor(() => expect(applications.needsYou.list().total).toBe(0));
+  const open = vi.spyOn(window.nestor.needsYou, "run");
+  show();
+  for (const [index, requested] of tasks.entries()) {
+    if (requested.status !== "needs_you") throw new Error("Missing task");
+    if (index > 0) fireEvent.click(screen.getByText(prompts[index]!));
+    const pane = within(
+      await screen.findByRole("region", { name: "Task details" }),
+    );
+    expect(await pane.findByText(prompts[index]!)).toBeTruthy();
+    expect(
+      pane.getByText(`Engineer ${index} · Employer ${index} · Remote`),
+    ).toBeTruthy();
+    fireEvent.click(pane.getByRole("button", { name: "Open in browser" }));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith("open_need", { id: requested.task.id }),
+    );
+  }
 });
 
 it("keeps a resumed sign-in application's context and reports checking as status", async () => {
