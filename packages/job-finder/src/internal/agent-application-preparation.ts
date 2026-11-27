@@ -737,6 +737,7 @@ export async function runAgentApplicationPreparation(
     ...(input.signal ? { signal: input.signal } : {}),
   });
 
+  input.signal?.throwIfAborted();
   if (!outcome.ok) {
     if (outcome.requestRejected)
       return {
