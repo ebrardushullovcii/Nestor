@@ -1310,8 +1310,9 @@ describe("buildResumeRenderDocument", () => {
       isCurrent: false,
       heading:
         "Workflow OS — Design lead · https://alex.example.com/workflow-os-case-study",
+      // Description, status and skills each keep their own line.
       summary:
-        "Scaled a workflow design system. Reduced release churn. Skills used: Figma, React.",
+        "Scaled a workflow design system.\nReduced release churn.\nSkills used: Figma, React.",
       bullets: [],
     });
   });
