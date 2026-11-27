@@ -144,6 +144,12 @@ test.each(["conservative", "balanced", "aggressive"] as const)(
   (mode) => {
     const prompt = buildResumeRewriteProposalPrompt(mode);
     expect(prompt).toContain("merging imported sentence fragments");
+    expect(prompt).toContain(
+      "Keep the subject of any clause that needs one or recast the sentence",
+    );
+    expect(prompt).toContain(
+      "avoid unnecessary repetition within each sentence or bullet",
+    );
     expect(prompt).toContain("use resumeHeadline as the title in the summary");
     expect(prompt).toContain(
       "a Staff posting does not make a Senior candidate Staff",
