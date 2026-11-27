@@ -175,9 +175,13 @@ test("the apply model can tell apart and answer the questions in a Lever-shaped 
             )!;
             const facts = JSON.parse(
               profile.slice(profile.indexOf("\n") + 1),
-            ) as Pick<CandidateProfile, "workEligibility" | "skills"> & {
-              savedAnswers: { question: string; answer: string }[];
-            };
+            ) as Pick<CandidateProfile, "workEligibility" | "skills">;
+            const library = inputs.find((input) =>
+              input.startsWith("The person's saved answers "),
+            )!;
+            const savedAnswers = JSON.parse(
+              library.slice(library.indexOf("\n") + 1),
+            ) as { question: string; answer: string }[];
             const view = inputs.find((input) =>
               input.includes(`\nPage: ${url}\n`),
             )!;
@@ -208,7 +212,7 @@ test("the apply model can tell apart and answer the questions in a Lever-shaped 
               [
                 "Gender",
                 [
-                  facts.savedAnswers.find(
+                  savedAnswers.find(
                     (answer) => answer.question === "Gender",
                   )!.answer,
                 ],
