@@ -109,24 +109,36 @@ describe("reading the choices of lists the page draws itself", () => {
     const page = await browser.newPage();
     try {
       await page.setContent(`<form><div><p>Resume / CV *</p><button type="button">Attach resume</button>
-        <input name="resume" type="file" aria-label="Resume / CV"><span aria-live="polite" id="feedback">No file selected</span>
+        <input name="resume" type="file" multiple aria-label="Resume / CV"><span aria-live="polite" id="feedback">No file selected</span>
         <p id="instruction">PDF only</p></div><label>Name<input name="name"></label></form>`);
       const before = await readRawApplyPage(page);
       const hint = before.controls.find(
         (control) => control.inputType === "file",
       )!.hint;
-      await page.locator("input[type=file]").setInputFiles({
-        name: "synthetic.pdf",
-        mimeType: "application/pdf",
-        buffer: Buffer.from("synthetic"),
-      });
+      await page.locator("input[type=file]").setInputFiles([
+        {
+          name: "synthetic.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("synthetic"),
+        },
+        {
+          name: "appendix.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("synthetic appendix"),
+        },
+      ]);
       await page.locator("#feedback").evaluate((element) => {
         element.textContent = "synthetic.pdf";
       });
       const uploaded = await readRawApplyPage(page);
-      expect(
-        uploaded.controls.find((control) => control.inputType === "file")!.hint,
-      ).toBe(hint);
+      const uploadedFile = uploaded.controls.find(
+        (control) => control.inputType === "file",
+      );
+      expect(uploadedFile?.hint).toBe(hint);
+      expect(uploadedFile?.upload?.inputFiles).toEqual([
+        { name: "synthetic.pdf", size: 9 },
+        { name: "appendix.pdf", size: 18 },
+      ]);
       expect(uploaded.bodyText).toContain("synthetic.pdf");
       await page.locator("#feedback").evaluate((element) => {
         element.textContent = "Write this in your own words";
@@ -498,6 +510,7 @@ describe("reading the choices of lists the page draws itself", () => {
           described: "Upload rejected by server",
           nearby: "Resume\nAttach\nTaylor-Resume.pdf",
           shown: false,
+          inputFiles: [],
         });
         expect(
           controls.find((control) => control.id === "letter")?.upload,
@@ -506,6 +519,7 @@ describe("reading the choices of lists the page draws itself", () => {
           nearby: "Cover letter",
           shown: true,
           ariaInvalid: false,
+          inputFiles: [],
         });
         expect(
           controls.find((control) => control.id === "")?.upload,

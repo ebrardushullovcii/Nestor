@@ -133,7 +133,7 @@ export interface ApplyFormControl {
   selectedItems?: string[];
   invalid: boolean;
   validationMessage: string;
-  /** What a file input's own field shows about its upload, when the page said. */
+  /** The browser's file selection and the site's upload display and responses. */
   upload?: RawApplyUpload;
   /** What the question is about, so an answer can be sourced for it. */
   questionKind: ApplicationQuestionKind;

@@ -1555,6 +1555,11 @@ export function collectApplyDocumentSnapshot(
       }
       const style = window.getComputedStyle(input);
       const rect = input.getBoundingClientRect();
+      const inputFiles = Array.from(input.files ?? [], ({ name, size }) => ({
+        name,
+        size,
+      }));
+      const firstFile = inputFiles[0];
       return {
         described: described,
         ariaInvalid: input.getAttribute("aria-invalid") === "true",
@@ -1568,8 +1573,9 @@ export function collectApplyDocumentSnapshot(
           Number(style.opacity) > 0.1 &&
           rect.width >= 40 &&
           rect.height >= 10,
-        ...(input.files?.[0]
-          ? { fileName: input.files[0].name, fileSize: input.files[0].size }
+        inputFiles,
+        ...(firstFile
+          ? { fileName: firstFile.name, fileSize: firstFile.size }
           : {}),
         // HTML form submission sends a named file input's file.
         ...(input.name &&
