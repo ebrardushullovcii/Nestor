@@ -321,9 +321,9 @@ export function readAgentTaskState(
   const opening = JSON.parse(
     messages.find((message) => message.role === "user")?.content ?? "{}",
   ) as Record<string, unknown>;
-  const carrier = messages.findLast((message) =>
-    message.content.includes(TASK_STATE_UPDATE_LEAD),
-  );
+  const carrier = [...messages]
+    .reverse()
+    .find((message) => message.content.includes(TASK_STATE_UPDATE_LEAD));
   if (!carrier) return opening;
   const update = JSON.parse(
     carrier.content.slice(
