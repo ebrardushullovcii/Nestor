@@ -211,8 +211,14 @@ function describeControl(
       "a declaration: use set_checkbox to carry out your decision from the person's declaration settings and facts",
     );
   }
-  if (control.upload)
+  if (control.upload) {
+    parts.push(
+      control.upload.fileName === undefined
+        ? "browser file input: empty"
+        : `browser file input holds: ${control.upload.fileName}`,
+    );
     parts.push(`upload facts: ${JSON.stringify(control.upload)}`);
+  }
   if (control.invalid) {
     parts.push(
       `the page says: ${control.validationMessage || "This control is invalid."}`,

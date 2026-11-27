@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ActivityFeed, ActivityMove } from "@nestor/contracts";
+import { NESTOR_REQUEST_REJECTED_MESSAGE } from "@nestor/contracts";
 
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
@@ -208,9 +209,20 @@ export function ActivityPanel(props: {
 
   return (
     <div className="grid gap-4">
-      <section aria-label="Running now" className="grid gap-2">
+      {props.feed.requestRejected ? (
+        <p
+          className="px-1 text-(length:--text-small) text-foreground-soft"
+          role="status"
+        >
+          {NESTOR_REQUEST_REJECTED_MESSAGE}
+        </p>
+      ) : null}
+      <section
+        aria-label={props.feed.requestRejected ? "Current work" : "Running now"}
+        className="grid gap-2"
+      >
         <h3 className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
-          Running now
+          {props.feed.requestRejected ? "Current work" : "Running now"}
         </h3>
         {running.length === 0 ? (
           <p className="text-(length:--text-small) text-foreground-soft">

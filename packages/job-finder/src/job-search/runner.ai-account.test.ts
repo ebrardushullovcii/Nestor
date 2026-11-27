@@ -15,6 +15,7 @@ import {
   CandidateProfileSchema,
   JobDiscoveryTargetSchema,
   JobSearchPreferencesSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   type FoundJob,
   type JobSearchStatus,
   type ListingCard,
@@ -135,14 +136,17 @@ function setup(aiAccess?: AiAccessWatch) {
       ),
     ),
   };
-  const runner = createJobSearchRunner({
-    store,
-    engine,
-    readContext: () => Promise.resolve(context),
-    ...(aiAccess ? { aiAccess } : {}),
-  });
-  runners.push(runner);
-  return { store, runner, engine };
+  const createRunner = () => {
+    const runner = createJobSearchRunner({
+      store,
+      engine,
+      readContext: () => Promise.resolve(context),
+      ...(aiAccess ? { aiAccess } : {}),
+    });
+    runners.push(runner);
+    return runner;
+  };
+  return { store, runner: createRunner(), engine, createRunner };
 }
 
 function settledStatus(
@@ -275,6 +279,76 @@ test("Stop on a parked search ends it as stopped", async () => {
   runner.stop();
   expect(runner.status().search?.state).toBe("stopped");
   expect(runner.status().parked ?? null).toBeNull();
+});
+
+test("a rejected AI search request keeps its queue and resumes the same search on startup", async () => {
+  const { store, runner, engine, createRunner } = setup();
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: { message: "Request schema rejected" } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      ),
+    )
+    .mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: '{"keep":{"0":1,"1":1,"2":1}}' },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+  vi.stubGlobal("fetch", request);
+  const client = createOpenAiCompatibleJobFinderAiClient({
+    baseUrl: "https://model.example.test/v1",
+    apiKey: "scripted",
+    model: "scripted",
+  });
+  engine.screenCards.mockImplementation((input) =>
+    screenListingCards({
+      client: { chatWithTools: client.chatWithTools.bind(client) },
+      cards: input.cards,
+      signal: input.signal,
+      goals: {
+        targetRoles: ["Backend Engineer"],
+        relatedRoles: [],
+        strategy: "wide_net",
+      },
+    }),
+  );
+  const started = await runner.start({ postedWithin: "any" });
+  const parked = await settledStatus(runner, (status) => !!status.parked);
+  expect(parked.parked).toMatchObject({
+    requestRejected: true,
+    message: NESTOR_REQUEST_REJECTED_MESSAGE,
+  });
+  expect(store.searches.get(started.id)).toMatchObject({
+    state: "running",
+    error: NESTOR_REQUEST_REJECTED_MESSAGE,
+  });
+  expect(parked.progress?.failed).toBe(0);
+  expect(request).toHaveBeenCalledOnce();
+  expect(engine.readListings).not.toHaveBeenCalled();
+  expect(aiAccessBlocks()).toEqual([]);
+  expect(checkAiAccessAgain()).toBe(false);
+
+  runner.suspend();
+  const restarted = createRunner();
+  const done = await settledStatus(
+    restarted,
+    (status) => status.search?.state === "done",
+  );
+  expect(done.search).toMatchObject({ id: started.id, error: null });
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(3);
+  expect(request).toHaveBeenCalledTimes(2);
 });
 
 /** The AI account as a scripted transport leaves it, driven by the test. */

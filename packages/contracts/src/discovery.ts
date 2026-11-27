@@ -2426,6 +2426,7 @@ export type ApplyStepReceipt = z.infer<typeof ApplyStepReceiptSchema>;
 export type StoredApplyPickerAttempt = z.input<typeof ApplyPickerAttemptSchema>;
 
 export const ApplyExecutionResultSchema = z.object({
+  requestRejected: z.literal(true).optional(),
   pickerAttempts: optionalStoredField(z.array(ApplyPickerAttemptSchema), []),
   formPath: optionalStoredField(z.array(ApplyFormPathStepSchema), []),
   stepReceipts: optionalStoredField(z.array(ApplyStepReceiptSchema), []),

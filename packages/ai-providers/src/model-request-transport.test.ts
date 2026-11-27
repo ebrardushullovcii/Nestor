@@ -3,10 +3,12 @@ import {
   ModelRequestHttpError,
   ModelRequestTimeoutError,
   computeRetryDelayMs,
+  isRejectedModelRequest,
   parseRetryAfterMs,
   performModelRequest,
   resetModelCredentialRejections,
 } from "./model-request-transport";
+import { withModelProviderProgress } from "./model-request-events";
 
 beforeEach(() => {
   resetModelCredentialRejections();
@@ -523,6 +525,83 @@ describe("performModelRequest", () => {
 
     expect(payload.choices?.[0]?.message?.content).toBe("plain");
   });
+
+  test.each([408, 409, 425])(
+    "retries HTTP%i with the existing backoff",
+    async (status) => {
+      vi.useFakeTimers();
+      try {
+        const fetchImpl = vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(
+            jsonResponse(
+              { error: { message: "Retry this request" } },
+              { status, headers: { "Retry-After": "1" } },
+            ),
+          )
+          .mockResolvedValueOnce(
+            jsonResponse({ choices: [{ message: { content: "done" } }] }),
+          );
+        const onEvent = vi.fn();
+        const onRejected = vi.fn<(error: ModelRequestHttpError) => void>();
+        const pending = withModelProviderProgress(
+          () => {},
+          () => performModelRequest({ ...baseInput, fetchImpl, onEvent }),
+          onRejected,
+        );
+
+        await vi.advanceTimersByTimeAsync(999);
+        expect(fetchImpl).toHaveBeenCalledOnce();
+        expect(onEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "retry_scheduled",
+            reason: "http_status",
+            delayMs: 1000,
+          }),
+        );
+        await vi.advanceTimersByTimeAsync(1);
+        expect((await pending).choices?.[0]?.message?.content).toBe("done");
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+        expect(onRejected).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test.each([
+    () =>
+      jsonResponse(
+        {
+          error: {
+            code: "invalid_request_error",
+            message: "One of the fields was rejected",
+          },
+        },
+        { status: 424 },
+      ),
+    () =>
+      jsonResponse({ detail: "Request body is malformed" }, { status: 424 }),
+    () => new Response("Invalid JSON payload", { status: 424 }),
+  ])(
+    "attributes an otherwise ambiguous 4xx using its response body",
+    async (response) => {
+      const onRejected = vi.fn<(error: ModelRequestHttpError) => void>();
+      await expect(
+        withModelProviderProgress(
+          () => {},
+          () =>
+            performModelRequest({
+              ...baseInput,
+              fetchImpl: vi.fn().mockResolvedValueOnce(response()),
+            }),
+          onRejected,
+        ),
+      ).rejects.toMatchObject({ status: 424 });
+      expect(onRejected).toHaveBeenCalledOnce();
+      expect(isRejectedModelRequest(onRejected.mock.calls[0]![0])).toBe(true);
+    },
+  );
 
   test("retries a 503 and a network error, then succeeds", async () => {
     const fetchImpl = vi

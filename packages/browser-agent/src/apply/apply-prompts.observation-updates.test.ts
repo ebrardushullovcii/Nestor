@@ -77,6 +77,29 @@ test("cleared page errors, loading and removed buttons do not linger as current 
   expect(update).toContain("Buttons: (no longer shown).");
 });
 
+test("page observations distinguish a site's old upload label from the browser's current file", () => {
+  const current = observation();
+  const file = current.controls.find((control) => control.kind === "file")!;
+  file.upload = { described: "resume.pdf", nearby: "resume.pdf", shown: true };
+  const before = structuredClone(current);
+  before.controls.find((control) => control.ref === file.ref)!.upload = {
+    ...file.upload,
+    fileName: "resume.pdf",
+    fileSize: 256,
+  };
+
+  expect(describeObservation(before)).toContain(
+    "browser file input holds: resume.pdf",
+  );
+  for (const text of [
+    describeObservation(current),
+    describeObservationUpdate(current, before),
+  ]) {
+    expect(text).toContain("browser file input: empty");
+    expect(text).toContain('"nearby":"resume.pdf"');
+  }
+});
+
 test("an updated option replaces its whole group and removed option handles are explicit", () => {
   const before = observation();
   const after = structuredClone(before);

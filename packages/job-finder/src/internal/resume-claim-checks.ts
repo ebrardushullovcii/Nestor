@@ -1,6 +1,7 @@
 import {
   RESUME_CLAIM_CHECK_BATCH_SIZE,
   getAiProviderAccessFailure,
+  getRejectedModelRequest,
   type JobFinderAiClient,
   type ResumeClaimCheckInput,
 } from "@nestor/ai-providers";
@@ -262,7 +263,11 @@ export async function withResumeClaimChecks(input: {
         request,
         checkResumeClaims,
       ).catch((error: unknown) => {
-        if (input.signal?.aborted || getAiProviderAccessFailure(error) !== null)
+        if (
+          input.signal?.aborted ||
+          getAiProviderAccessFailure(error) ||
+          getRejectedModelRequest(error)
+        )
           throw error;
         return [];
       });

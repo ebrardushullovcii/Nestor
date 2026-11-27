@@ -24,7 +24,7 @@ export interface JobSearchControl {
   keepReading(id?: number): Promise<unknown>;
   status(): JobSearchStatus;
   /** Scores new jobs and saved jobs that are due for a refresh. */
-  scoreUnscored(): Promise<number>;
+  scoreUnscored(explicit?: boolean): Promise<number>;
   prioritizeFit?(ids: readonly number[]): void;
 }
 
@@ -219,7 +219,7 @@ export function createJobCommandRunner(deps: {
     },
     retry_fit: async () => {
       const runner = await search();
-      void runner.scoreUnscored().catch(() => undefined);
+      void runner.scoreUnscored(true).catch(() => undefined);
       return runner.status();
     },
     search_status: () => status(),

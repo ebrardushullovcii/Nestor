@@ -50,7 +50,8 @@ export function createResumeListingReader(deps: {
       return await readListing(job, signal);
     } catch (error) {
       signal.throwIfAborted();
-      if (error instanceof PostingClosedError) throw error;
+      if (error instanceof PostingClosedError || getRejectedModelRequest(error))
+        throw error;
       // A failed read never blocks a job whose own text is saved; the
       // writer sees that this text may be partial.
       if (saved) return job;
@@ -100,3 +101,4 @@ export function createResumeListingReader(deps: {
     return { ...job, description: posting.description, facts };
   }
 }
+import { getRejectedModelRequest } from "@nestor/ai-providers";
