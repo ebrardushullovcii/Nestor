@@ -184,13 +184,15 @@ export function createResumeCommandReads(
 ): ResumeCommandReads {
   const resumes = createResumeStore(store);
   return {
-    list(query) {
-      const page = store.listJobs(JobListQuerySchema.parse(query));
+    list(input) {
+      const query = JobListQuerySchema.parse(input);
+      const page = store.listJobs(query);
       const ids = page.rows.map((row) => row.id);
       const statuses = resumes.statuses(ids);
       const applications = resumes.openApplications(ids);
       return {
         ...page,
+        readyResumeCount: resumes.countReady(query),
         rows: page.rows.map((row) => ({
           ...row,
           resume: statuses.get(row.id) ?? null,

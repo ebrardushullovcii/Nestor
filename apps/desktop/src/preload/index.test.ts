@@ -83,17 +83,23 @@ describe("preload desktop test API boundary", () => {
 });
 
 it("exposes the store Apply selection and paged applications without a workspace response", async () => {
+  const queued = {
+    queued: 2,
+    unchanged: 0,
+    notReady: 0,
+    queuedJobIds: [1, 2],
+    skipped: [],
+  };
   mockInvoke.mockReset();
   mockInvoke.mockImplementation((channel: string) => {
-    if (channel === "job-finder:apply-jobs")
-      return Promise.resolve({ queued: 2, unchanged: 0, notReady: 0 });
+    if (channel === "job-finder:apply-jobs") return Promise.resolve(queued);
     if (channel === "job-finder:list-applications")
       return Promise.resolve({ rows: [], nextCursor: null });
     return Promise.resolve({ ready: true });
   });
   expect(
     await exposedJobFinder.applyJobs({ selection: { ids: [1, 2] } }),
-  ).toEqual({ queued: 2, unchanged: 0, notReady: 0 });
+  ).toEqual(queued);
   expect(mockInvoke).toHaveBeenCalledWith("job-finder:apply-jobs", {
     selection: { ids: [1, 2] },
   });

@@ -30,7 +30,8 @@ import {
   type ApplicationAutomationMode,
   type ApplicationPreparationUpdate,
   type ApplyJobsInput,
-  type ApplyJobsResult,
+  type ApplyJobsQueueResult,
+  type ApplyJobSkip,
   type ApplicationResumeArtifact,
   type ApplicationReviewCard,
   type ApplyExecutionResult,
@@ -42,6 +43,7 @@ import type { JobStore } from "./job-store";
 import { createProfileStore } from "./profile-store";
 import { toFilterSql, toIso } from "./job-list";
 import { createNeedsYouStore } from "./needs-you";
+import { HAS_READY_RESUME } from "./resumes";
 
 export interface ApplicationWork {
   attempt: number;
@@ -107,14 +109,6 @@ function historyOutcome(
  */
 export const HAS_APPROVED_RESUME = `EXISTS (
   SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
-
-/**
- * Job `j` is shortlisted (To review or Approved) and its resume at the chosen
- * level is written. Apply takes these, approved or not; for Original that is
- * the ready row with no draft (the imported file).
- */
-export const HAS_READY_RESUME = `j.stage IN ('shortlisted', 'resume') AND EXISTS (
-  SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.state = 'ready')`;
 
 /** Apply's filter choices: one Shortlisted tab, exactly as stored. */
 const APPLY_FILTER_STAGES: ReadonlySet<string> = new Set([
@@ -245,7 +239,7 @@ export function createApplicationStore(store: JobStore) {
       input: ApplyJobsInput,
       requestedMode: ApplicationApplyMode = DEFAULT_APPLICATION_APPLY_MODE,
       instruction?: { conversationId: string; mode: ApplicationAutomationMode },
-    ): ApplyJobsResult {
+    ): ApplyJobsQueueResult {
       const mode = ApplicationApplyModeSchema.parse(requestedMode);
       const { selection, bulk } = ApplyJobsInputSchema.parse(input);
       if (
@@ -270,7 +264,6 @@ export function createApplicationStore(store: JobStore) {
         ...filter.params,
         ...("ids" in selection ? [] : [JSON.stringify(selection.except)]),
       ];
-      // A job whose resume is still being written is reported as not ready.
       const readyWhere = `${where} AND ${HAS_READY_RESUME}`;
       return store.transaction(() => {
         const count = (condition: string) =>
@@ -292,9 +285,10 @@ export function createApplicationStore(store: JobStore) {
              updated_at = excluded.updated_at, error = NULL, disposition = NULL, posting_closed = 0
            WHERE applications.state IN ('stopped', 'failed')
              AND (applications.disposition IS NULL OR ? = 1)
-             AND applications.submitted_at IS NULL RETURNING id`,
+             AND applications.submitted_at IS NULL RETURNING id, job_id`,
         ).all(mode, now, now, ...params, selected && !bulk ? 1 : 0) as {
           id: number;
+          job_id: number;
         }[];
         for (const { id } of result) {
           if (instruction)
@@ -310,12 +304,53 @@ export function createApplicationStore(store: JobStore) {
             ).run(id);
         }
         const queued = result.length;
+        const queuedJobIds = result.map((row) => row.job_id);
+        const total = selected ? selected.length : count(where);
+        let skipped: ApplyJobSkip[] = [];
+        if (queued < total) {
+          skipped = sql(`SELECT j.id AS jobId, j.title, j.company,
+              CASE
+                WHEN j.stage NOT IN ('shortlisted', 'resume') THEN 'job_moved'
+                WHEN r.state = 'failed' THEN 'resume_failed'
+                WHEN r.state IS NOT 'ready' THEN 'resume_waiting'
+                ELSE 'application_exists'
+              END AS reason,
+              CASE WHEN a.posting_closed = 1 THEN 'closed'
+                ELSE COALESCE(a.disposition, a.state) END AS applicationState,
+              CASE WHEN r.state IS NOT 'ready' THEN r.error ELSE a.error END AS detail
+              FROM jobs j
+              LEFT JOIN resumes r ON r.job_id = j.id
+              LEFT JOIN applications a ON a.job_id = j.id
+              WHERE ${where} AND j.id NOT IN (SELECT value FROM json_each(?))
+              ORDER BY j.id`).all(
+            ...params,
+            JSON.stringify(queuedJobIds),
+          ) as ApplyJobSkip[];
+          if (selected) {
+            const handled = new Set([
+              ...queuedJobIds,
+              ...skipped.map(({ jobId }) => jobId),
+            ]);
+            for (const jobId of selected)
+              if (!handled.has(jobId))
+                skipped.push({
+                  jobId,
+                  title: null,
+                  company: null,
+                  reason: "job_missing",
+                  applicationState: null,
+                  detail: null,
+                });
+          }
+        }
         if (queued > 0)
-          changed(selected && selected.length <= 200 ? selected : null);
+          changed(queuedJobIds.length <= 200 ? queuedJobIds : null);
         return {
           queued,
           unchanged: ready - queued,
-          notReady: (selected ? selected.length : count(where)) - ready,
+          notReady: total - ready,
+          queuedJobIds,
+          skipped,
         };
       });
     },

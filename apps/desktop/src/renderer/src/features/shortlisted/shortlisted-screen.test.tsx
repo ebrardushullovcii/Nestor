@@ -448,14 +448,62 @@ it("applies from To review with a written resume nobody approved: one job, the t
 
   // Apply to all of To review: the written one is queued, the one still
   // being written stays here, and the toast says so.
-  fireEvent.click(screen.getByRole("button", { name: "Apply to all 3 jobs" }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all 2 jobs" }));
   await screen.findByText("Applying to 1 job");
   expect(applyJobs.mock.calls[1]![0]).toEqual({
     selection: { filter: { stage: "shortlisted", text: "" }, except: [] },
   });
-  expect(
-    await screen.findByText("1 resume still being written stayed here."),
-  ).toBeTruthy();
+  fireEvent.click(await screen.findByText("2 jobs weren’t queued"));
+  expect(screen.getByText("Instructional Designer 1 at Acorn 1")).toBeTruthy();
+  expect(screen.getByText("Its resume is still being written.")).toBeTruthy();
+  expect(screen.getByText("This application is already queued.")).toBeTruthy();
   expect(applications.forJobs([two])[0]?.state).toBe("queued");
   expect(applications.forJobs([writing])).toEqual([]);
+});
+
+it("updates the header as original resumes become ready and queues both in one click", async () => {
+  const applications = createApplicationStore(store);
+  const resumes = createResumeStore(store);
+  const [first, second, failed] = ids as [number, number, number];
+  for (const id of ids) resumes.startWriting(id, "original");
+  resumes.failWriting(failed, "Could not read the source file.");
+  Object.assign(window.nestor, {
+    jobFinder: {
+      applyJobs: (input: Parameters<typeof applications.applyJobs>[0]) =>
+        Promise.resolve(applications.applyJobs(input)),
+      applicationsForJobs: () => Promise.resolve([]),
+      onApplicationsChange: () => () => undefined,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "No resumes ready to apply" }),
+  ).toHaveProperty("disabled", true);
+  act(() => {
+    expect(resumes.finishWriting(first, null)).toBe(true);
+    expect(resumes.finishWriting(second, null)).toBe(true);
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Apply to all 2 jobs" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Applying to 2 jobs" }),
+  ).toHaveProperty("disabled", true);
+  expect(
+    applications
+      .forJobs(ids)
+      .map((row) => row.jobId)
+      .sort(),
+  ).toEqual([first, second]);
+  fireEvent.click(await screen.findByText("1 job wasn’t queued"));
+  expect(screen.getByText("Instructional Designer 3 at Acorn 3")).toBeTruthy();
+  expect(
+    screen.getByText("Resume writing failed. Could not read the source file."),
+  ).toBeTruthy();
 });

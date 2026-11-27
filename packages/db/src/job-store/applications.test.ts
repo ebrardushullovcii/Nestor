@@ -1,5 +1,8 @@
 import reviewFixture from "./stored-json/application-review-card.full.json";
-import { SubmissionOutcomeRecordSchema } from "@nestor/contracts";
+import {
+  JobFilterSchema,
+  SubmissionOutcomeRecordSchema,
+} from "@nestor/contracts";
 import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import type {
   FoundJob,
@@ -20,6 +23,7 @@ import {
 } from "./applications";
 import {
   approveOriginalResumesForTests,
+  createResumeStore,
   openJobStore,
   type JobStore,
 } from "./job-store";
@@ -411,7 +415,7 @@ it("revokes retired approvals before Apply even when Profile has never been cons
     INSERT INTO resumes(job_id,level,state,updated_at,approved_at,pdf_path)
     VALUES(1,'tailored','ready',1,1,'C:/synthetic/approved.pdf');`);
   const applications = createApplicationStore(jobs);
-  expect(applications.applyJobs({ selection: { ids: [1] } })).toEqual({
+  expect(applications.applyJobs({ selection: { ids: [1] } })).toMatchObject({
     queued: 0,
     unchanged: 0,
     notReady: 1,
@@ -1572,23 +1576,70 @@ describe("applications on the job store", () => {
           ids: [approved!, unapproved!, writing!, noResume!, found!],
         },
       }),
-    ).toEqual({ queued: 2, unchanged: 0, notReady: 3 });
+    ).toMatchObject({ queued: 2, unchanged: 0, notReady: 3 });
     expect(
       applications.applyJobs({
         selection: { filter: { stage: "shortlisted" }, except: [] },
       }),
-    ).toEqual({ queued: 0, unchanged: 1, notReady: 1 });
+    ).toMatchObject({ queued: 0, unchanged: 1, notReady: 1 });
     expect(
       applications.applyJobs({
         selection: { filter: { stage: "resume" }, except: [] },
       }),
-    ).toEqual({ queued: 0, unchanged: 1, notReady: 1 });
+    ).toMatchObject({ queued: 0, unchanged: 1, notReady: 1 });
     expect(
       new Set([
         applications.claimNext()?.jobId,
         applications.claimNext()?.jobId,
       ]),
     ).toEqual(new Set([approved, unapproved]));
+  });
+
+  it("uses the same ready count and Apply selection across the whole filtered tab", () => {
+    const { jobs, applications } = open();
+    const [first, second, approved, writing, failed] = add(jobs, 5);
+    const review = [first!, second!, writing!, failed!];
+    jobs.setStage(review, "shortlisted");
+    jobs
+      .sql(
+        "UPDATE resumes SET approved_at = NULL WHERE job_id IN (SELECT value FROM json_each(?))",
+      )
+      .run(JSON.stringify(review));
+    jobs
+      .sql("UPDATE resumes SET state = 'writing' WHERE job_id = ?")
+      .run(writing!);
+    jobs
+      .sql("UPDATE resumes SET state = 'failed', error = ? WHERE job_id = ?")
+      .run("Could not read the source file.", failed!);
+    const resumes = createResumeStore(jobs);
+    const filter = JobFilterSchema.parse({
+      stage: "shortlisted",
+      text: "Engineer",
+    });
+
+    expect(resumes.countReady(filter)).toBe(2);
+    expect(resumes.countReady({ ...filter, stage: "resume" })).toBe(1);
+    const result = applications.applyJobs({ selection: { filter } });
+    expect(result).toMatchObject({
+      queued: 2,
+      unchanged: 0,
+      notReady: 2,
+      skipped: [
+        { jobId: writing, reason: "resume_waiting" },
+        {
+          jobId: failed,
+          reason: "resume_failed",
+          detail: "Could not read the source file.",
+        },
+      ],
+    });
+    expect(
+      applications
+        .forJobs(review)
+        .map((row) => row.jobId)
+        .sort(),
+    ).toEqual([first, second]);
+    expect(applications.forJobs([approved!])).toEqual([]);
   });
 
   it("claims a job whose approval was taken away, and waits while its resume is written again", () => {
@@ -1629,7 +1680,7 @@ describe("applications on the job store", () => {
       applications.applyJobs({
         selection: { ids: [ids[0]!, ids[1]!, ids[1]!, 999] },
       }),
-    ).toEqual({ queued: 1, unchanged: 0, notReady: 2 });
+    ).toMatchObject({ queued: 1, unchanged: 0, notReady: 2 });
     expect(
       applications.applyJobs({
         selection: {
@@ -1637,7 +1688,7 @@ describe("applications on the job store", () => {
           except: [ids[6]!],
         },
       }),
-    ).toEqual({ queued: 4, unchanged: 1, notReady: 0 });
+    ).toMatchObject({ queued: 4, unchanged: 1, notReady: 0 });
     expect(() =>
       applications.applyJobs({ selection: { filter: { stage: "found" } } }),
     ).toThrow("To review or Approved");

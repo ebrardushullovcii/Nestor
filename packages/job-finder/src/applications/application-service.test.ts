@@ -732,7 +732,7 @@ it.each([
         { selection: { ids: [id] } },
         "autonomous_submit",
       ),
-    ).toEqual({ queued: 1, unchanged: 0, notReady: 0 });
+    ).toMatchObject({ queued: 1, unchanged: 0, notReady: 0 });
     await f.service.start();
     await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
     const attached = f.execute.mock.calls[0]![1].resumeArtifact;

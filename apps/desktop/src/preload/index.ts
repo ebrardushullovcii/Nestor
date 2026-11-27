@@ -18,7 +18,7 @@ import type {
   ResolveUncertainSendInput,
   ApplicationsForJobsInput,
   ApplyJobsInput,
-  ApplyJobsResult,
+  ApplyJobsQueueResult,
   JobChange,
   NeedsYouListQuery,
   NeedsYouPage,
@@ -418,7 +418,7 @@ const desktopApi = {
       ipcRenderer.invoke(
         "job-finder:apply-jobs",
         input,
-      ) as Promise<ApplyJobsResult>,
+      ) as Promise<ApplyJobsQueueResult>,
     listApplications: (input: ApplicationListQuery = {}) =>
       ipcRenderer.invoke(
         "job-finder:list-applications",

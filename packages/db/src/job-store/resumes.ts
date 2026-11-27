@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ResumeDraftSchema,
+  type JobFilter,
   type JobListingFacts,
   type JobStage,
   type ResumeDraft,
@@ -13,6 +14,11 @@ import {
 } from "@nestor/contracts";
 
 import type { JobStore } from "./job-store";
+import { toFilterSql } from "./job-list";
+
+/** Apply takes a ready resume from either Shortlisted tab, including Original. */
+export const HAS_READY_RESUME = `j.stage IN ('shortlisted', 'resume') AND EXISTS (
+  SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.state = 'ready')`;
 
 type ResumeRow = {
   job_id: number;
@@ -74,6 +80,8 @@ export interface ResumeStore {
   listUnwritten(limit: number, excludedIds?: ReadonlySet<number>): number[];
   /** The list rows' resume status, for the ids on screen. */
   statuses(ids: readonly number[]): Map<number, ResumeStatus>;
+  /** Ready resumes matching the whole filter, including beyond the loaded page. */
+  countReady(filter: JobFilter): number;
   /** Each job's newest application Apply has not finished, for the ids on screen. */
   openApplications(ids: readonly number[]): Map<number, ShortlistedApplication>;
   get(jobId: number): StoredResume | null;
@@ -272,6 +280,15 @@ export function createResumeStore(store: JobStore): ResumeStore {
           },
         ]),
       );
+    },
+
+    countReady(filter) {
+      const { where, params } = toFilterSql(filter);
+      return (
+        sql(
+          `SELECT count(*) AS n FROM jobs j WHERE ${where} AND ${HAS_READY_RESUME}`,
+        ).get(...params) as { n: number }
+      ).n;
     },
 
     openApplications(ids) {

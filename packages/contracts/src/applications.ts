@@ -55,6 +55,29 @@ export const applicationWorkStates = [
 export const ApplicationWorkStateSchema = z.enum(applicationWorkStates);
 export type ApplicationWorkState = z.infer<typeof ApplicationWorkStateSchema>;
 
+const ApplyJobSkipSchema = z.object({
+  jobId: JobIdSchema,
+  title: z.string().nullable(),
+  company: z.string().nullable(),
+  reason: z.enum([
+    "job_missing",
+    "job_moved",
+    "resume_waiting",
+    "resume_failed",
+    "application_exists",
+  ]),
+  applicationState: ApplicationWorkStateSchema.nullable(),
+  detail: z.string().nullable(),
+});
+export type ApplyJobSkip = z.infer<typeof ApplyJobSkipSchema>;
+
+/** The queue decision, including the jobs Shortlisted needs to report. */
+export const ApplyJobsQueueResultSchema = ApplyJobsResultSchema.extend({
+  queuedJobIds: z.array(JobIdSchema),
+  skipped: z.array(ApplyJobSkipSchema),
+});
+export type ApplyJobsQueueResult = z.infer<typeof ApplyJobsQueueResultSchema>;
+
 export const ApplicationIdSchema = z.number().int().positive();
 export const ApplicationRowSchema = z.object({
   id: ApplicationIdSchema,
