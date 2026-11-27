@@ -212,9 +212,8 @@ test("the apply model can tell apart and answer the questions in a Lever-shaped 
               [
                 "Gender",
                 [
-                  savedAnswers.find(
-                    (answer) => answer.question === "Gender",
-                  )!.answer,
+                  savedAnswers.find((answer) => answer.question === "Gender")!
+                    .answer,
                 ],
               ],
               [tools, facts.skills],
