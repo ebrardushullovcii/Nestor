@@ -73,9 +73,11 @@ export function buildJobFitJudgingPrompt(structured = false): string {
     "These batch inputs are bounded excerpts and saved facts, without the raw imported resume. An evidenceOmitted flag or excerpt marker means some listing text was omitted: say that in the summary, treat requirements as provisional and request a full read for decisive unknowns. Missing wording in an excerpt is not proof of missing candidate ability.",
     "You judge how well each job fits one person who is looking for work.",
     "Input jobs are row arrays: jobColumns names each field in order. Each row contains the same listing evidence as an object with those field names.",
-    structured
-      ? 'Return JSON {"judgments": {"jobId": {...}}}: one object keyed by every supplied jobId, with no missing or extra keys. Each value is that job\'s independent verdict, matching the response schema. Write rubricStep first, then rolePoints (R), essentialPoints (E), goalPoints (G), and finally the score calculated from that step and those points. For step 1 all points are zero. Choose the step before calculating points.'
-      : 'Return JSON {"judgments": [...]} with one entry per job, each with the jobId exactly as given.',
+    `Return JSON {"judgments": [...]} with one entry per job, each with the jobId exactly as given.${
+      structured
+        ? " Match the response schema for each verdict. After jobId, write rubricStep first, then rolePoints (R), essentialPoints (E), goalPoints (G), and finally the score calculated from that step and those points. For step 1 all points are zero. Choose the step before calculating points."
+        : ""
+    }`,
     'role: "exact" when the job is the kind of work the person is looking for, in any wording or language; "adjacent" when it is related work they could credibly do; "conflict" when it is a different occupation, or a level far from theirs; "unknown" when the listing says too little.',
     'preferences: compare the job\'s place, work mode, level, employment type and pay with the person\'s goals: "aligned", "mixed", "conflict" when it contradicts a goal the person set, "unknown" when the listing is silent, "not_configured" when the person set no goals.',
     'locationReach: "in_area" when the job is in or near one of the person\'s places, "remote_preferred" when it is remote and the person accepts remote work from where they are (when Remote work can be outside preferred places is No, a remote job counts only when it is open to people in one of their places), "outside_area" when it needs presence outside their places or is remote only for other countries, "unknown" otherwise. Read place names and country codes in context: "Berlin, DE" is Germany.',
@@ -86,8 +88,7 @@ export function buildJobFitJudgingPrompt(structured = false): string {
   ].join(" ");
 }
 
-/** A required key per job prevents silently dropped or duplicated verdicts. */
-export function buildJobFitJudgingResponseSchema(jobIds: readonly string[]) {
+export function buildJobFitJudgingResponseSchema() {
   const nullableText = { anyOf: [{ type: "string" }, { type: "null" }] };
   const fields = {
     role: {
@@ -116,48 +117,43 @@ export function buildJobFitJudgingResponseSchema(jobIds: readonly string[]) {
       type: "object",
       properties: {
         judgments: {
-          type: "object",
-          properties: Object.fromEntries(
-            jobIds.map((id) => [id, { $ref: "#/$defs/judgment" }]),
-          ),
-          required: [...jobIds],
-          additionalProperties: false,
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              jobId: { type: "string" },
+              rubricStep: { type: "integer", minimum: 1, maximum: 8 },
+              rolePoints: { type: "integer", enum: [0, 2, 4] },
+              essentialPoints: { type: "integer", minimum: 0, maximum: 4 },
+              goalPoints: { type: "integer", minimum: 0, maximum: 2 },
+              score: { type: "integer", minimum: 0, maximum: 100 },
+              recommendation: {
+                type: "string",
+                enum: [
+                  "skip",
+                  "review_before_applying",
+                  "apply_with_original",
+                  "strong_fit",
+                ],
+              },
+              ...fields,
+            },
+            required: [
+              "jobId",
+              "rubricStep",
+              "rolePoints",
+              "essentialPoints",
+              "goalPoints",
+              "score",
+              "recommendation",
+              ...Object.keys(fields),
+            ],
+            additionalProperties: false,
+          },
         },
       },
       required: ["judgments"],
       additionalProperties: false,
-      $defs: {
-        judgment: {
-          type: "object",
-          properties: {
-            rubricStep: { type: "integer", minimum: 1, maximum: 8 },
-            rolePoints: { type: "integer", enum: [0, 2, 4] },
-            essentialPoints: { type: "integer", minimum: 0, maximum: 4 },
-            goalPoints: { type: "integer", minimum: 0, maximum: 2 },
-            score: { type: "integer", minimum: 0, maximum: 100 },
-            recommendation: {
-              type: "string",
-              enum: [
-                "skip",
-                "review_before_applying",
-                "apply_with_original",
-                "strong_fit",
-              ],
-            },
-            ...fields,
-          },
-          required: [
-            "rubricStep",
-            "rolePoints",
-            "essentialPoints",
-            "goalPoints",
-            "score",
-            "recommendation",
-            ...Object.keys(fields),
-          ],
-          additionalProperties: false,
-        },
-      },
     },
   };
 }

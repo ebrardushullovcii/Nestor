@@ -110,6 +110,55 @@ function batches<T>(
   return result;
 }
 
+const screenVerdictRow = z.object({
+  index: z.number().int().nonnegative(),
+  verdict: z.unknown(),
+});
+
+function screenVerdicts(raw: unknown, titleCount: number) {
+  const object = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  const isIndex = (key: string) => /^(?:0|[1-9]\d*)$/u.test(key);
+  // Retain support for recordings and JSON replies using the old index map.
+  const candidate = object(raw)
+    ? (raw.keep ??
+      (Object.keys(raw).every(isIndex)
+        ? raw
+        : Object.keys(raw).length === 1
+          ? Object.values(raw)[0]
+          : null))
+    : null;
+  if (Array.isArray(candidate)) {
+    const verdicts = new Map<number, unknown>();
+    for (const entry of candidate) {
+      const row = screenVerdictRow.safeParse(entry);
+      if (!row.success || row.data.index >= titleCount) continue;
+      const { index, verdict } = row.data;
+      verdicts.set(index, verdicts.has(index) ? undefined : verdict);
+    }
+    return verdicts;
+  }
+  if (
+    object(candidate) &&
+    Object.keys(candidate).every(
+      (key) => isIndex(key) && Number(key) < titleCount,
+    )
+  )
+    return new Map(
+      Object.entries(candidate).map(([index, verdict]) => [
+        Number(index),
+        verdict,
+      ]),
+    );
+  throw new z.ZodError([
+    {
+      code: "custom",
+      path: ["keep"],
+      message: "Role screen returned no unambiguous title-index map.",
+    },
+  ]);
+}
+
 async function ask<Output, Input>(
   model: ListingEngineModel,
   instruction: string,
@@ -721,52 +770,25 @@ export async function screenCards(
             required: ["keep"],
             properties: {
               keep: {
-                type: "object",
-                additionalProperties: false,
-                required: titles.map((_, index) => String(index)),
-                properties: Object.fromEntries(
-                  titles.map((_, index) => [
-                    String(index),
-                    { type: "integer", enum: choices },
-                  ]),
-                ),
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["index", "verdict"],
+                  properties: {
+                    index: { type: "integer" },
+                    verdict: { type: "integer", enum: choices },
+                  },
+                },
               },
             },
           },
         },
       );
-      // A JSON request does not guarantee the requested wrapper. Accept only
-      // one unambiguous index map, never infer or coerce a profession verdict.
-      const object = (value: unknown): value is Record<string, unknown> =>
-        value !== null && typeof value === "object" && !Array.isArray(value);
-      const candidate =
-        object(raw) && object(raw.keep)
-          ? raw.keep
-          : object(raw) &&
-              Object.keys(raw).every((key) => /^(?:0|[1-9]\d*)$/u.test(key))
-            ? raw
-            : object(raw) &&
-                Object.keys(raw).length === 1 &&
-                object(Object.values(raw)[0])
-              ? Object.values(raw)[0]
-              : null;
-      if (
-        !object(candidate) ||
-        Object.keys(candidate).some(
-          (key) =>
-            !/^(?:0|[1-9]\d*)$/u.test(key) || Number(key) >= titles.length,
-        )
-      )
-        throw new z.ZodError([
-          {
-            code: "custom",
-            path: ["keep"],
-            message: "Role screen returned no unambiguous title-index map.",
-          },
-        ]);
+      const verdicts = screenVerdicts(raw, titles.length);
       remaining = [];
       for (const [index, key] of titles.entries()) {
-        const keep = candidate[index];
+        const keep = verdicts.get(index);
         if (keep === 2 && stage === "card") {
           readRequests.add(key);
           failedTitles.delete(key);

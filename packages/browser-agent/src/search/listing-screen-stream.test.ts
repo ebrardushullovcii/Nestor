@@ -48,8 +48,8 @@ test("published vacancy duties are supplied separately from an unmarked menu wit
         return Promise.resolve({
           content:
             calls.length === 1
-              ? '{"keep":{"0":2,"1":2}}'
-              : '{"keep":{"0":1,"1":1}}',
+              ? '{"keep":[{"index":0,"verdict":2},{"index":1,"verdict":2}]}'
+              : '{"keep":[{"index":0,"verdict":1},{"index":1,"verdict":1}]}',
         });
       },
     },
@@ -127,29 +127,48 @@ test("completed model batches stream while another batch is still pending", asyn
   const onRelated = vi.fn<
     NonNullable<Parameters<typeof screenCards>[0]["onRelated"]>
   >(() => Promise.resolve());
-  let calls = 0;
+  const chatWithTools = vi
+    .fn<LLMClient["chatWithTools"]>()
+    .mockResolvedValueOnce({
+      content: JSON.stringify({
+        keep: cards.slice(0, 120).map((_, index) => ({ index, verdict: 1 })),
+      }),
+    })
+    .mockImplementationOnce(() => last.promise);
   const work = screenCards({
     cards,
     goals,
     onRelated,
-    client: {
-      chatWithTools: () =>
-        ++calls === 1
-          ? Promise.resolve({
-              content: JSON.stringify({
-                keep: Object.fromEntries(
-                  Array.from({ length: 120 }, (_, i) => [i, 1]),
-                ),
-              }),
-            })
-          : last.promise,
-    },
+    client: { chatWithTools },
   });
   await vi.waitFor(() =>
     expect(onRelated).toHaveBeenCalledWith(cards.slice(0, 120)),
   );
-  last.resolve({ content: '{"keep":{"0":1}}' });
+  last.resolve({ content: '{"keep":[{"index":0,"verdict":1}]}' });
   expect((await work).related).toEqual(cards);
+  const [[full, , fullOptions], [tail, , tailOptions]] =
+    chatWithTools.mock.calls;
+  const titleIndices = (messages: typeof full) =>
+    (
+      JSON.parse(messages[1].content) as { titles: [number, string][] }
+    ).titles.map(([index]) => index);
+  expect(titleIndices(full)).toEqual(Array.from({ length: 120 }, (_, i) => i));
+  expect(titleIndices(tail)).toEqual([0]);
+  expect(full[0].content).toContain(
+    'Return {"keep":[{"index":0,"verdict":1},{"index":1,"verdict":0}]}',
+  );
+  expect(fullOptions?.jsonSchema).toEqual(tailOptions?.jsonSchema);
+  expect(fullOptions?.jsonSchema?.schema).toMatchObject({
+    properties: {
+      keep: {
+        type: "array",
+        items: {
+          required: ["index", "verdict"],
+          properties: { verdict: { enum: [0, 1, 2] } },
+        },
+      },
+    },
+  });
   expect(onRelated).toHaveBeenCalledTimes(2);
 });
 

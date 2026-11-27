@@ -640,11 +640,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor("fit_batch"),
           ...(structured
-            ? {
-                jsonSchema: buildJobFitJudgingResponseSchema(
-                  jobs.map((job) => job.jobId),
-                ),
-              }
+            ? { jsonSchema: buildJobFitJudgingResponseSchema() }
             : {}),
         },
       );
