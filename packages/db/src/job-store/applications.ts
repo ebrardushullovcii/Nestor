@@ -619,6 +619,55 @@ export function createApplicationStore(store: JobStore) {
       ).get(id);
     },
 
+    /**
+     * The person pressed Send on a Ready form (or the sidebar sent one, with
+     * its call ID). This starts the next attempt now, as claimNext would,
+     * and marks it as the person's send: that run is told to send the form
+     * they reviewed, on its retained page. A sidebar call ID that already
+     * started one never starts another.
+     */
+    claimPersonSend(
+      id: number,
+      attempt: number,
+      callId: string | null,
+    ): ApplicationRow | null {
+      return store.transaction(() => {
+        const row =
+          sql(`UPDATE applications SET state='running', attempt=attempt+1,
+          person_send=1, review_refill=0, send_request=COALESCE(?, send_request),
+          error=NULL, updated_at=?
+          WHERE id=? AND attempt=? AND submitted_at IS NULL
+          AND (? IS NULL OR COALESCE(send_request,'')<>?)
+          AND (state='ready' OR (state='uncertain' AND ? IS NOT NULL))
+          RETURNING id, job_id`).get(
+            callId,
+            Date.now(),
+            id,
+            attempt,
+            callId,
+            callId,
+            callId,
+          ) as { id: number; job_id: number } | undefined;
+        if (!row) return null;
+        const application = getApplication(row.id)!;
+        sql(`UPDATE application_needs_you SET attempt=? WHERE application_id=? AND attempt=?
+          AND task_id IN (SELECT id FROM needs_you WHERE kind<>'question' AND resolved_at IS NULL)`).run(
+          application.attempt,
+          row.id,
+          application.attempt - 1,
+        );
+        changed([row.job_id]);
+        return application;
+      });
+    },
+
+    /** True while this application's run is the one the person's Send started. */
+    isPersonSend(id: number): boolean {
+      return !!sql(
+        "SELECT 1 FROM applications WHERE id = ? AND person_send = 1",
+      ).get(id);
+    },
+
     /** Only an explicit Try again / Apply again queues another preparation. */
     retryPreparation(id: number, attempt: number): boolean {
       return store.transaction(() => {
@@ -629,8 +678,7 @@ export function createApplicationStore(store: JobStore) {
           AND submitted_at IS NULL
           AND COALESCE(json_extract(submission_outcome_json,'$.outcome'),'not_submitted')='not_submitted'
           RETURNING job_id`).get(Date.now(), Date.now(), id, attempt) as
-            | { job_id: number }
-            | undefined;
+            { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
@@ -1028,8 +1076,7 @@ export function createApplicationStore(store: JobStore) {
         const row = sql(
           "UPDATE applications SET state='stopped', disposition='skipped', error=?, updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
         ).get(reason, Date.now(), id, attempt) as
-          | { job_id: number }
-          | undefined;
+          { job_id: number } | undefined;
         if (row) {
           const detached = sql(
             "DELETE FROM application_needs_you WHERE application_id=? RETURNING task_id",
@@ -1052,8 +1099,7 @@ export function createApplicationStore(store: JobStore) {
         const row = sql(
           "UPDATE applications SET state='needs_you',disposition='blocked',error=?,updated_at=? WHERE id=? AND attempt=? AND state IN ('running','needs_you') RETURNING job_id",
         ).get(reason, Date.now(), id, attempt) as
-          | { job_id: number }
-          | undefined;
+          { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;
       });
