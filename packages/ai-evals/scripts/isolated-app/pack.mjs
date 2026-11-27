@@ -333,6 +333,21 @@ const countBy = (items, key) => {
   }
   return counts;
 };
+
+function attemptTiming(attempts) {
+  const spans = attempts.map(({ first, last }) => [
+    Date.parse(first),
+    Date.parse(last),
+  ]);
+  if (!spans.length) return null;
+  const start = Math.min(...spans.map(([first]) => first));
+  const end = Math.max(...spans.map(([, last]) => last));
+  return {
+    minutes: spans.reduce((ms, [first, last]) => ms + last - first, 0) / 60000,
+    wallMinutes: (end - start) / 60000,
+  };
+}
+
 /** Distinct values with how often and when they were recorded. */
 function grouped(entries, key) {
   const groups = new Map();
@@ -583,9 +598,12 @@ async function writePack(options) {
   }
   // Every attempt of this application belongs to it: an interrupted run
   // resumes as the next attempt, and both are the run.
+  const attemptPrefix = app
+    ? `application_${app.id}_attempt_`
+    : applicationKey?.match(/^application_\d+_attempt_(?=\d+$)/u)?.[0];
   const ownKey = (key) =>
-    app
-      ? String(key).startsWith(`application_${app.id}_attempt_`)
+    attemptPrefix
+      ? String(key).startsWith(attemptPrefix)
       : key === applicationKey;
   const inRun = (at) =>
     (!Number.isFinite(startMs) || at >= startMs) &&
@@ -853,7 +871,7 @@ async function writePack(options) {
     const attempts = [];
     for (const e of relevant) {
       const key = e.applicationKey;
-      if (!key || !app || !ownKey(key) || !e.at) continue;
+      if (!key || !applicationKey || !ownKey(key) || !e.at) continue;
       const known = attempts.find((a) => a.applicationKey === key);
       if (known) {
         known.last = e.at;
@@ -944,6 +962,13 @@ async function writePack(options) {
       );
     const first = relevant.find((e) => e.at)?.at;
     const last = relevant.findLast((e) => e.at)?.at;
+    const traceMinutes =
+      first && last ? (Date.parse(last) - Date.parse(first)) / 60000 : null;
+    const storedMinutes =
+      Number.isFinite(startMs) && Number.isFinite(endMs)
+        ? (endMs - startMs) / 60000
+        : null;
+    const timing = attemptTiming(attempts);
     const stopEvent = ours.find((e) =>
       ["blocked", "timed_out", "asked_person"].includes(e.kind),
     );
@@ -979,16 +1004,11 @@ async function writePack(options) {
         (kind === "search" && searches.length
           ? searches.map((s) => s.state).join(", ")
           : "unknown"),
-      // A search can be stopped and resumed days later; its minutes are the
-      // recorded span, and its stored start and finish are kept beside them.
       minutes:
-        kind === "search" && first && last
-          ? (Date.parse(last) - Date.parse(first)) / 60000
-          : Number.isFinite(startMs) && Number.isFinite(endMs)
-            ? (endMs - startMs) / 60000
-            : first && last
-              ? (Date.parse(last) - Date.parse(first)) / 60000
-              : null,
+        kind === "application"
+          ? (timing?.minutes ?? null)
+          : (traceMinutes ?? storedMinutes),
+      wallMinutes: timing?.wallMinutes ?? storedMinutes ?? traceMinutes,
       searchWindow:
         kind === "search" && Number.isFinite(startMs)
           ? {
@@ -1321,6 +1341,8 @@ async function writePack(options) {
       "",
       "## Operator and timeline",
       "",
+      `Active minutes: ${manifest.minutes?.toFixed(2) ?? "unknown"}. Wall minutes: ${manifest.wallMinutes?.toFixed(2) ?? "unknown"}.`,
+      "",
       operatorActions.length
         ? `The operator acted ${operatorActions.length} times during this run. Times are when each action started.`
         : "No operator action was recorded during this run.",
@@ -1534,6 +1556,10 @@ export function generateRound(dir) {
       return {
         name: e.name,
         ...manifest,
+        ...(manifest.kind === "application" &&
+        manifest.wallMinutes === undefined
+          ? attemptTiming(manifest.attempts ?? [])
+          : null),
         oursKinds: kinds,
         oursTotal: Object.values(kinds).reduce((n, v) => n + v, 0),
       };
@@ -1554,11 +1580,11 @@ export function generateRound(dir) {
     "",
     "Generated from each run's manifest. Raw packs win over this index. Ours counts every recorded intervention by our code, by kind (blocked, rewritten, capped, timed_out, asked_person).",
     "",
-    "| Run | Kind | ATS | Build | Outcome | Minutes | Needs you | Ours | Recorded stop-related event / application error |",
-    "| --- | --- | --- | --- | --- | ---: | ---: | --- | --- |",
+    "| Run | Kind | ATS | Build | Outcome | Active min | Wall min | Needs you | Ours | Recorded stop-related event / application error |",
+    "| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |",
     ...packs.map(
       (p) =>
-        `| [${p.name}](${p.name}/pack.md) | ${cell(p.kind)} | ${cell(p.ats)} | ${cell((p.header?.build?.head ?? p.header?.raw?.build?.head)?.slice(0, 9))} | ${cell(p.outcome)} | ${p.minutes?.toFixed(2) ?? "unknown"} | ${p.needsYouCount} | ${ours(p)} | ${cell(p.firstStopReason)} |`,
+        `| [${p.name}](${p.name}/pack.md) | ${cell(p.kind)} | ${cell(p.ats)} | ${cell((p.header?.build?.head ?? p.header?.raw?.build?.head)?.slice(0, 9))} | ${cell(p.outcome)} | ${p.minutes?.toFixed(2) ?? "unknown"} | ${p.wallMinutes?.toFixed(2) ?? "unknown"} | ${p.needsYouCount} | ${ours(p)} | ${cell(p.firstStopReason)} |`,
     ),
     "",
   ].join("\n");

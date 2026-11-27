@@ -108,16 +108,18 @@ export function applicationFacts(
 ) {
   return {
     ...applicationOwnerFacts(sources),
+    savedAnswers: applicationSavedAnswers(sources.reusableAnswers),
     ...applicationJobFacts(sources, options),
+    applicationHistory: sources.history ?? { applications: [], tracker: [] },
   };
 }
 
 export function applicationSavedAnswers(
   answers: readonly CandidateReusableAnswer[],
 ) {
-  return answers.map((saved) => ({
+  return answers.map(({ id, ...saved }) => ({
     ...saved,
-    storedFactId: `answerLibrary.${saved.id}`,
+    storedFactId: `answerLibrary.${id}`,
   }));
 }
 
@@ -174,7 +176,6 @@ export function applicationOwnerFacts(sources: ApplyAnswerSources) {
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    savedAnswers: applicationSavedAnswers(sources.reusableAnswers),
     spokenLanguages: profile.spokenLanguages,
     skills: profile.skills,
     skillGroups: profile.skillGroups,
@@ -199,7 +200,6 @@ export function applicationJobFacts(
     listingDiscovery: sources.listingDiscovery,
     taskGuidance: sources.taskInstructions,
     applicationAutomationMode: sources.applicationAutomationMode,
-    applicationHistory: sources.history ?? { applications: [], tracker: [] },
   };
 }
 

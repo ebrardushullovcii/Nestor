@@ -2649,16 +2649,22 @@ it.each([
       id: row.id,
       url: jobs.getJob(row.jobId)?.url,
       applyUrl: jobs.getJob(row.jobId)?.applyUrl,
-      submissionOutcome: {
-        outcome,
-        attemptedAt: at,
-        verifiedAt: receipt.verifiedAt,
-        evidence: receipt.evidence,
-        retry: receipt.retry,
-      },
     });
-    expect(history?.submissionOutcome?.browserAction).toEqual({
-      reason: "model_observed_outcome",
+    expect(history?.submissionOutcome).toEqual({
+      outcome,
+      attemptedAt: at,
+      verifiedAt: receipt.verifiedAt,
+      evidence: [
+        {
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: {
+            origin: "https://employer.example.test",
+            safePath: "/apply",
+          },
+          summary: "The application model's quoted page observation.",
+        },
+      ],
     });
   },
 );

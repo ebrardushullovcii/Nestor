@@ -395,6 +395,11 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       path.join(legacy, "manifest.json"),
       JSON.stringify({
         kind: "application",
+        minutes: 1,
+        attempts: [
+          { first: "2026-11-26T20:30:00Z", last: "2026-11-26T20:32:00Z" },
+          { first: "2026-11-26T20:35:00Z", last: "2026-11-26T20:36:00Z" },
+        ],
         oursCount: 0,
         needsYouCount: 0,
         header: { raw: { build: { head: "abcdef1234" } } },
@@ -415,7 +420,10 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       roundText,
       /01-greenhouse-acme.*commit.*needs_you.*\| 2 \(asked_person 1, timed_out 1\) \|/,
     );
-    assert.match(roundText, /03-legacy.*abcdef123.*\| 1 \(timed_out 1\) \|/);
+    assert.match(
+      roundText,
+      /03-legacy.*abcdef123.*\| 3\.00 \| 6\.00 \| 0 \| 1 \(timed_out 1\) \|/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -467,6 +475,13 @@ test("an interrupted run's pack holds both attempts and every operator action wi
         name: "fill_fields",
         result: "filled",
       },
+      {
+        event: "tool_call",
+        at: at("47.000"),
+        applicationKey: "application_40_attempt_1",
+        name: "observe",
+        result: "observed",
+      },
       header("49.398", driverRecords ? { generation: 2, by: "restart" } : null),
       ...(driverRecords
         ? [
@@ -499,6 +514,13 @@ test("an interrupted run's pack holds both attempts and every operator action wi
         name: "fill_fields",
         result: "other run",
       },
+      {
+        event: "tool_call",
+        at: at("56.000"),
+        applicationKey: "application_40_attempt_2",
+        name: "observe",
+        result: "observed",
+      },
     ];
     const evidence = path.join(root, "evidence");
     mkdirSync(evidence);
@@ -530,6 +552,8 @@ test("an interrupted run's pack holds both attempts and every operator action wi
         state: {},
       });
       assert.equal(manifest.header.operatorActed, true);
+      assert.equal(manifest.minutes, 6 / 60);
+      assert.equal(manifest.wallMinutes, 11 / 60);
       assert.deepEqual(
         manifest.attempts.map((a) => [a.applicationKey, a.first]),
         [
@@ -550,6 +574,7 @@ test("an interrupted run's pack holds both attempts and every operator action wi
         driverRecords ? "driver drive" : "driver drive (steps.log)",
       );
       const pack = readFileSync(path.join(out, "pack.md"), "utf8");
+      assert.match(pack, /Active minutes: 0\.10\. Wall minutes: 0\.18\./);
       assert.match(pack, /OPERATOR ACTED: 2 operator actions/);
       assert.match(
         pack,

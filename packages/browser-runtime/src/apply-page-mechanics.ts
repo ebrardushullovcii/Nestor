@@ -1735,6 +1735,14 @@ export function collectApplyDocumentSnapshot(
       const phoneCallingCode = phoneCallingCodeFor(element);
       const rowScopeKey = rowScopeKeyFor(element);
       const textarea = element instanceof HTMLTextAreaElement ? element : null;
+      // These textareas carry the widget's verification token, not a form answer.
+      const challengeResponse =
+        textarea &&
+        [
+          "g-recaptcha-response",
+          "h-captcha-response",
+          "cf-turnstile-response",
+        ].includes(textarea.name);
       const select = element instanceof HTMLSelectElement ? element : null;
       const listboxTrigger = element.matches(selectors.listboxTriggers);
       const button = element instanceof HTMLButtonElement ? element : null;
@@ -1754,7 +1762,9 @@ export function collectApplyDocumentSnapshot(
       const choice = ownedChoiceGroup(element);
       const ancestors = sectionPath(element);
       const enclosingLabel = groupLabel(element);
-      const label = directLabel(element, triggerText);
+      const label = challengeResponse
+        ? "Site verification response"
+        : directLabel(element, triggerText);
       const tagName = select
         ? "select"
         : textarea
@@ -1832,10 +1842,11 @@ export function collectApplyDocumentSnapshot(
         // hidden input, so it stays in the observation; without it the
         // run saw only the button and could never attach the resume.
         visible:
-          (input?.type === "file" && !input.matches(":disabled")) ||
-          isVisible(html),
+          !challengeResponse &&
+          ((input?.type === "file" && !input.matches(":disabled")) ||
+            isVisible(html)),
         value:
-          selectedTriggerValue ??
+          (challengeResponse ? "" : selectedTriggerValue) ??
           (redactCredentials &&
           (input?.type === "password" ||
             input?.autocomplete === "one-time-code" ||
