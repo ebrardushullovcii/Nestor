@@ -43,8 +43,10 @@ import {
 } from "./model-request-events";
 import {
   ACCOUNT_REFUSAL_PATTERN,
+  aiKeyOwnerOf,
   noteAiProviderAccessFailure,
   noteAiProviderRequestSucceeded,
+  type AiKeyOwner,
 } from "./ai-provider-access-state";
 import {
   recordModelRequestAttempt,
@@ -122,12 +124,20 @@ export interface PerformModelRequestInput extends ModelRequestResilienceOptions 
 export class ModelRequestHttpError extends Error {
   readonly status: number;
   readonly retryAfterMs: number | null;
+  /** Whose key the refused call used; set by the transport. */
+  keyOwner: AiKeyOwner;
 
-  constructor(message: string, status: number, retryAfterMs: number | null) {
+  constructor(
+    message: string,
+    status: number,
+    retryAfterMs: number | null,
+    keyOwner: AiKeyOwner = "person",
+  ) {
     super(message);
     this.name = "ModelRequestHttpError";
     this.status = status;
     this.retryAfterMs = retryAfterMs;
+    this.keyOwner = keyOwner;
   }
 }
 
@@ -904,6 +914,7 @@ export async function performModelRequest(
   const rejections = rejectionsFor(input.fetchImpl ?? fetch);
   const credentials = credentialKey(input.url, input.headers);
   const rejection = rejections.get(credentials);
+  const keyOwner = aiKeyOwnerOf(input.headers);
   const noteRefusal = (error: ModelRequestHttpError, retryAt: number) =>
     noteAiProviderAccessFailure({
       credentials,
@@ -911,6 +922,7 @@ export async function performModelRequest(
       status: error.status,
       providerMessage: error.message,
       retryAt,
+      owner: keyOwner,
     });
   if (rejection && rejection.until > Date.now()) {
     noteRefusal(rejection.error, rejection.until);
@@ -918,6 +930,7 @@ export async function performModelRequest(
       rejection.error.message,
       rejection.error.status,
       null,
+      keyOwner,
     );
   }
   try {
@@ -926,6 +939,7 @@ export async function performModelRequest(
     return payload;
   } catch (error) {
     if (error instanceof ModelRequestHttpError) {
+      error.keyOwner = keyOwner;
       let retryAt = Date.now();
       if (error.status === 401 || error.status === 402) {
         retryAt += MODEL_AUTH_FAILURE_PAUSE_MS;

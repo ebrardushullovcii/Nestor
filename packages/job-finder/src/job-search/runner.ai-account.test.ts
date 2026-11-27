@@ -1,5 +1,7 @@
 import {
   AI_ACCESS_MESSAGES,
+  AI_SERVICE_PAUSED_MESSAGE,
+  markAiKeyAsNestors,
   aiAccessBlocks,
   checkAiAccessAgain,
   createOpenAiCompatibleJobFinderAiClient,
@@ -204,6 +206,7 @@ test("a search the AI account refuses stops taking cards at the first refusal, k
   // One refused call, then nothing more is leased or read.
   expect(request).toHaveBeenCalledOnce();
   expect(parked.parked).toEqual({
+    owner: "person",
     message: AI_ACCESS_MESSAGES.funding,
     providerMessage: OUT_OF_CREDIT,
   });
@@ -301,6 +304,7 @@ function scriptedAccess() {
           id: "scripted",
           provider: "https://model.example.test",
           reason: "funding",
+          owner: "person",
           message: AI_ACCESS_MESSAGES.funding,
           providerMessage: OUT_OF_CREDIT,
           actionUrl: TOP_UP,
@@ -338,4 +342,44 @@ test("fit the account refused keeps its jobs unscored, says why, and scores them
     timeout: 5_000,
   });
   expect(engine.fitJobs).toHaveBeenCalledTimes(2);
+});
+
+test("with Nestor's bundled key the parked search says Nestor's AI is paused and shows no account words", async () => {
+  markAiKeyAsNestors("nestor-bundled");
+  const { runner, engine } = setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Response(JSON.stringify({ error: { message: OUT_OF_CREDIT } }), {
+          status: 402,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
+  );
+  const client = createOpenAiCompatibleJobFinderAiClient({
+    baseUrl: "https://model.example.test/v1",
+    apiKey: "nestor-bundled",
+    model: "scripted",
+  });
+  engine.screenCards.mockImplementation((input) =>
+    screenListingCards({
+      client: { chatWithTools: client.chatWithTools.bind(client) },
+      cards: input.cards,
+      signal: input.signal,
+      goals: {
+        targetRoles: ["Backend Engineer"],
+        relatedRoles: [],
+        strategy: "wide_net",
+      },
+    }),
+  );
+  await runner.start({ postedWithin: "any" });
+  const parked = await settledStatus(runner, (status) => !!status.parked);
+  expect(parked.parked).toEqual({
+    owner: "nestor",
+    message: AI_SERVICE_PAUSED_MESSAGE,
+    providerMessage: null,
+  });
+  expect(parked.search?.state).toBe("running");
 });

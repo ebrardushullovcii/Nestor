@@ -188,7 +188,9 @@ function describeModelFailure(error: unknown): string {
   // The AI account refused the call: only the person can fix that.
   const access = getAiProviderAccessFailure(error);
   if (access)
-    return `${AI_ACCESS_STEPS[access.reason]} Your message is kept; send it again once that is done.`;
+    return access.owner === "nestor"
+      ? "Nestor's AI service is paused. Your message is kept; send it again when it is back."
+      : `${AI_ACCESS_STEPS[access.reason]} Your message is kept; send it again once that is done.`;
   const message =
     error instanceof Error
       ? error.message

@@ -207,6 +207,11 @@ export const AiAccountNeedSchema = z.object({
   /** The AI service's origin. */
   provider: z.string(),
   reason: z.enum(["funding", "authentication", "permission"]),
+  /**
+   * `person`: their own key, a Needs you step. `nestor`: Nestor's bundled
+   * key; nothing for the person to do, the app says its AI is paused.
+   */
+  owner: z.enum(["person", "nestor"]),
   providerMessage: z.string().nullable(),
   actionUrl: z.string().url().nullable(),
   since: z.string(),

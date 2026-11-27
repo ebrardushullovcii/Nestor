@@ -8,11 +8,15 @@ import {
   resetAiAccessState,
   runAiAccessRechecks,
   type AiAccessReason,
+  type AiKeyOwner,
 } from "./ai-provider-access-state";
 
 export {
   AI_ACCESS_MESSAGES,
   AI_ACCESS_STEPS,
+  AI_SERVICE_PAUSED_MESSAGE,
+  aiAccessMessage,
+  markAiKeyAsNestors,
   AI_ACCESS_RECHECK_MS,
   aiAccessBlocks,
   aiAccessStatus,
@@ -23,10 +27,13 @@ export {
   type AiAccessBlock,
   type AiAccessReason,
   type AiAccessStatus,
+  type AiKeyOwner,
 } from "./ai-provider-access-state";
 
 export interface AiProviderAccessFailure {
   readonly reason: AiAccessReason;
+  /** The person's own key, or Nestor's bundled one (no step for the person). */
+  readonly owner: AiKeyOwner;
   /** Plain, and the same for every call: what failed work records. */
   readonly message: string;
   /** The AI service's own words, when it gave any. */
@@ -75,6 +82,7 @@ export function getAiProviderAccessFailure(
         const failure = describeAiAccessFailure(
           current.status,
           current.message,
+          current.keyOwner,
         );
         if (failure) return failure;
       }

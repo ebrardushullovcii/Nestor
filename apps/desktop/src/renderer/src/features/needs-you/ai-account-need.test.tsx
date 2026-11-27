@@ -12,6 +12,7 @@ import type { AiAccountNeed, JobChange } from "@nestor/contracts";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { AiAccountNeedItem } from "./ai-account-need";
+import { AiServicePausedLine } from "./ai-service-paused-line";
 import { useNeedsYouCount } from "./use-needs-you-count";
 
 // Synthetic: no real service or account.
@@ -19,6 +20,7 @@ const outOfCredit: AiAccountNeed = {
   id: "0123456789abcdef",
   provider: "https://model.example.test",
   reason: "funding",
+  owner: "person",
   providerMessage:
     "Insufficient balance. Top up at https://model.example.test/console/account-test/billing?credits=1.",
   actionUrl:
@@ -115,4 +117,26 @@ test("the Needs you badge counts the AI account step once, and drops it when it 
   aiAccount.list.mockResolvedValue([]);
   act(() => change());
   await waitFor(() => expect(result.current).toBe(1));
+});
+
+test("Nestor's bundled key is no Needs you step: the badge leaves it out and the app says its AI is paused", async () => {
+  bridge([
+    {
+      ...outOfCredit,
+      owner: "nestor",
+      providerMessage: null,
+      actionUrl: null,
+    },
+  ]);
+  const { result } = renderHook(() => useNeedsYouCount());
+  render(<AiServicePausedLine />);
+  expect(
+    await screen.findByText(
+      "Nestor's AI service is paused. Your work continues by itself when it is back.",
+    ),
+  ).toBeTruthy();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(result.current).toBe(1);
 });

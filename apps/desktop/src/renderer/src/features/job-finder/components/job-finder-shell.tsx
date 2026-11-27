@@ -89,6 +89,10 @@ import {
 
 // The reset notice reads its state after the first screen, so its code (and
 // the schema it checks that state with) loads then too.
+const AiServicePausedLine = lazy(async () => ({
+  default: (await import("../../needs-you/ai-service-paused-line"))
+    .AiServicePausedLine,
+}));
 const StartupResetRecoveryBanner = lazy(async () => ({
   default: (await import("./startup-reset-recovery-banner"))
     .StartupResetRecoveryBanner,
@@ -1265,6 +1269,7 @@ export function JobFinderShell({
                 the kept lists, so the container itself is not keyed. */}
             <Suspense fallback={null}>
               <StartupResetRecoveryBanner key={location.pathname} />
+              <AiServicePausedLine />
             </Suspense>
             {children}
           </div>

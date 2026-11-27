@@ -114,6 +114,7 @@ export function aiAccountNeeds(): AiAccountNeed[] {
       id: block.id,
       provider: block.provider,
       reason: block.reason,
+      owner: block.owner,
       providerMessage: block.providerMessage,
       actionUrl: block.actionUrl,
       since: block.since,

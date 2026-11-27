@@ -10,6 +10,8 @@ import {
   onAiAccessChange,
   onAiAccessRecheck,
   onAiAccessRefused,
+  AI_SERVICE_PAUSED_MESSAGE,
+  markAiKeyAsNestors,
   resetAiAccessForTests,
 } from "./ai-provider-access-failure";
 import {
@@ -68,6 +70,7 @@ describe("an AI account that refuses calls", () => {
     expect(failure).toBeInstanceOf(ModelRequestHttpError);
     expect(getAiProviderAccessFailure(failure)).toEqual({
       reason: "funding",
+      owner: "person",
       message: AI_ACCESS_MESSAGES.funding,
       providerMessage: OUT_OF_CREDIT,
       actionUrl: TOP_UP,
@@ -117,6 +120,7 @@ describe("an AI account that refuses calls", () => {
       const failure = await call(fetchImpl).catch((error: unknown) => error);
       expect(getAiProviderAccessFailure(failure)).toEqual({
         reason,
+        owner: "person",
         message: AI_ACCESS_MESSAGES[reason],
         providerMessage: words,
         actionUrl: null,
@@ -162,6 +166,44 @@ describe("an AI account that refuses calls", () => {
       providerMessage: "You exceeded your current quota.",
     });
     expect(isAiServiceBusy(quota)).toBe(false);
+  });
+
+  test("Nestor's own bundled key out of credit asks nothing of the person: it says the AI is paused and shows none of the account's words or links", async () => {
+    markAiKeyAsNestors("nestor-bundled-key");
+    const fetchImpl = vi.fn<typeof fetch>(() =>
+      Promise.resolve(reply(402, { error: { message: OUT_OF_CREDIT } })),
+    );
+    const failure = await call(fetchImpl, "nestor-bundled-key").catch(
+      (error: unknown) => error,
+    );
+    expect(getAiProviderAccessFailure(failure)).toEqual({
+      reason: "funding",
+      owner: "nestor",
+      message: AI_SERVICE_PAUSED_MESSAGE,
+      providerMessage: null,
+      actionUrl: null,
+    });
+    expect(aiAccessStatus()).toBe("blocked");
+    expect(aiAccessBlocks()).toEqual([
+      expect.objectContaining({
+        owner: "nestor",
+        message: AI_SERVICE_PAUSED_MESSAGE,
+        providerMessage: null,
+        actionUrl: null,
+      }),
+    ]);
+    expect(JSON.stringify(aiAccessBlocks())).not.toContain("account-test");
+    // Work recorded with the paused sentence waits on the account too.
+    expect(isAiProviderAccessMessage(AI_SERVICE_PAUSED_MESSAGE)).toBe(true);
+    // A cached refusal in the transport's pause keeps the owner.
+    expect(
+      getAiProviderAccessFailure(
+        await call(fetchImpl, "nestor-bundled-key").catch(
+          (error: unknown) => error,
+        ),
+      )?.owner,
+    ).toBe("nestor");
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   test("an empty balance sent as 401 is the top-up, not a key to fix", () => {

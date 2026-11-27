@@ -484,6 +484,8 @@ export const JobSearchStatusSchema = z.object({
    */
   parked: z
     .object({
+      /** `nestor`: Nestor's bundled AI key; the person has nothing to do. */
+      owner: z.enum(["person", "nestor"]).default("person"),
       message: z.string(),
       providerMessage: z.string().nullable(),
     })

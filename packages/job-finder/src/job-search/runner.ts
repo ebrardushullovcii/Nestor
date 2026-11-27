@@ -115,8 +115,13 @@ export function createJobSearchRunner(
    * unfinished site keeps its queued listings, so nothing reads as done or
    * failed for the refusal.
    */
-  let parked: { message: string; providerMessage: string | null } | null = null;
-  const park = (block: { message: string; providerMessage: string | null }) => {
+  type Parked = {
+    owner: "person" | "nestor";
+    message: string;
+    providerMessage: string | null;
+  };
+  let parked: Parked | null = null;
+  const park = (block: Parked) => {
     if (recovery) {
       fitRefused = true;
       recoveryError = block.message;
@@ -125,7 +130,11 @@ export function createJobSearchRunner(
     const run = active;
     if (!run || run.controller.signal.aborted || run.suspended) return;
     fitRefused = true;
-    parked = { message: block.message, providerMessage: block.providerMessage };
+    parked = {
+      owner: block.owner,
+      message: block.message,
+      providerMessage: block.providerMessage,
+    };
     run.flush?.();
     run.suspended = true;
     run.controller.abort();

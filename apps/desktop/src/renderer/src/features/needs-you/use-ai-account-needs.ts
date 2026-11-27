@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AiAccountNeed } from "@nestor/contracts";
 
-/** The AI account step only the person can take, read again on every change. */
-export function useAiAccountNeeds(): AiAccountNeed[] {
+/**
+ * Every refused AI account, read again on every change: the person's own
+ * key (a Needs you step) and Nestor's bundled one (a paused status only).
+ */
+export function useAiAccountRefusals(): AiAccountNeed[] {
   const [needs, setNeeds] = useState<AiAccountNeed[]>([]);
   useEffect(() => {
     let live = true;
@@ -15,13 +18,27 @@ export function useAiAccountNeeds(): AiAccountNeed[] {
       }
     };
     void load();
-    const unsubscribe = window.nestor.jobs.onChange((change) => {
-      if (change.cause === "application") void load();
-    });
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = window.nestor.jobs.onChange((change) => {
+        if (change.cause === "application") void load();
+      });
+    } catch {
+      /* No change feed here: the first read stands. */
+    }
     return () => {
       live = false;
       unsubscribe();
     };
   }, []);
   return needs;
+}
+
+/** The AI account step only the person can take: their own key's refusals. */
+export function useAiAccountNeeds(): AiAccountNeed[] {
+  const refusals = useAiAccountRefusals();
+  return useMemo(
+    () => refusals.filter((need) => need.owner === "person"),
+    [refusals],
+  );
 }

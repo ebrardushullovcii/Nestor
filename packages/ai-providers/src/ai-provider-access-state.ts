@@ -4,13 +4,19 @@ import { createHash } from "node:crypto";
  * Whether the AI account behind Nestor's model calls lets them through.
  *
  * A 402 (out of credit), 401 (key not accepted) or 403 (no access to the
- * model) is a step only the account holder can take, so it reaches the
- * person once, in Needs you, with the provider's own words and link. Work
- * that failed for it waits here and is picked up again when a later call
- * succeeds. An outage (429, 5xx, a timeout) is not an access failure and
- * stays an ordinary retry.
+ * model) refuses calls until the account holder acts. When the key is the
+ * person's own (from their settings or local environment), that is a step
+ * only they can take: it reaches them once, in Needs you, with the
+ * provider's own words and link. When the key is Nestor's bundled one, the
+ * person has nothing to do: the app says Nestor's AI service is paused.
+ * Either way the work that failed for it waits here, its queue kept, and is
+ * picked up again when a later call succeeds. An outage (429, 5xx, a
+ * timeout) is not an access failure and stays an ordinary retry.
  */
 export type AiAccessReason = "funding" | "authentication" | "permission";
+
+/** Whose key a call used: the person's own, or the one Nestor ships with. */
+export type AiKeyOwner = "person" | "nestor";
 
 export interface AiAccessBlock {
   /** Stable for one endpoint and key; never the key itself. */
@@ -18,6 +24,8 @@ export interface AiAccessBlock {
   /** The AI service's origin, for example `https://opencode.ai`. */
   readonly provider: string;
   readonly reason: AiAccessReason;
+  /** The person's own key, or Nestor's bundled one (no step for the person). */
+  readonly owner: AiKeyOwner;
   /** What failed work records: plain, and the same for every call. */
   readonly message: string;
   /** The service's own words, when it gave any. */
@@ -47,6 +55,47 @@ export const AI_ACCESS_MESSAGES: Readonly<Record<AiAccessReason, string>> = {
 };
 
 /**
+ * What failed work records when Nestor's own bundled key is refused: the
+ * person has nothing to do, and the work continues once it is back.
+ */
+export const AI_SERVICE_PAUSED_MESSAGE =
+  "Nestor's AI service is paused, so nothing was changed. Your work continues by itself when it is back.";
+
+/** The sentence a refusal records for this reason and key owner. */
+export function aiAccessMessage(
+  reason: AiAccessReason,
+  owner: AiKeyOwner,
+): string {
+  return owner === "nestor"
+    ? AI_SERVICE_PAUSED_MESSAGE
+    : AI_ACCESS_MESSAGES[reason];
+}
+
+/**
+ * Keys Nestor ships with, as opposed to keys the person set. Today every
+ * key comes from the person's settings or local environment, so none is
+ * registered; a distribution that embeds a key registers it where it
+ * creates its clients.
+ */
+const nestorKeys = new Set<string>();
+
+/** Marks a key as Nestor's bundled one: its refusals ask nothing of the person. */
+export function markAiKeyAsNestors(apiKey: string): void {
+  const key = apiKey.trim();
+  if (key) nestorKeys.add(key);
+}
+
+/** Whose key these request headers carry. */
+export function aiKeyOwnerOf(headers: Record<string, string>): AiKeyOwner {
+  for (const [name, value] of Object.entries(headers)) {
+    if (!/^(authorization|x-api-key|api-key)$/iu.test(name)) continue;
+    if (nestorKeys.has(value.replace(/^Bearer\s+/iu, "").trim()))
+      return "nestor";
+  }
+  return "person";
+}
+
+/**
  * What earlier versions recorded for the same failures. Work saved with it
  * is still waiting on the account and is picked up the same way.
  */
@@ -62,6 +111,7 @@ export function isAiProviderAccessMessage(
   const value = text.trim();
   return (
     Object.values(AI_ACCESS_MESSAGES).includes(value) ||
+    value === AI_SERVICE_PAUSED_MESSAGE ||
     EARLIER_ACCESS_MESSAGES.includes(value)
   );
 }
@@ -79,6 +129,7 @@ export const ACCOUNT_REFUSAL_PATTERN =
 export function describeAiAccessFailure(
   status: number,
   providerMessage: string,
+  owner: AiKeyOwner = "person",
 ): Omit<AiAccessBlock, "id" | "provider" | "since"> | null {
   const outOfCredit = ACCOUNT_REFUSAL_PATTERN.test(providerMessage);
   const reason: AiAccessReason | null =
@@ -91,10 +142,13 @@ export function describeAiAccessFailure(
           ? "permission"
           : null;
   if (!reason) return null;
-  const words = providerWords(providerMessage);
+  // Nestor's own account is not the person's to fix: its words and links
+  // (an account id, a billing page) are not shown to them.
+  const words = owner === "person" ? providerWords(providerMessage) : null;
   return {
     reason,
-    message: AI_ACCESS_MESSAGES[reason],
+    owner,
+    message: aiAccessMessage(reason, owner),
     providerMessage: words,
     actionUrl: words ? firstWebLink(words) : null,
   };
@@ -153,6 +207,7 @@ function publicBlock(block: AiAccessBlock): AiAccessBlock {
     id: block.id,
     provider: block.provider,
     reason: block.reason,
+    owner: block.owner,
     message: block.message,
     providerMessage: block.providerMessage,
     actionUrl: block.actionUrl,
@@ -213,8 +268,13 @@ export function noteAiProviderAccessFailure(input: {
   status: number;
   providerMessage: string;
   retryAt: number;
+  owner?: AiKeyOwner;
 }): void {
-  const failure = describeAiAccessFailure(input.status, input.providerMessage);
+  const failure = describeAiAccessFailure(
+    input.status,
+    input.providerMessage,
+    input.owner,
+  );
   if (!failure) return;
   const existing = blocks.get(input.credentials);
   const next = {
@@ -316,5 +376,6 @@ export function resetAiAccessState(): void {
   listeners.clear();
   refusalListeners.clear();
   rechecks.length = 0;
+  nestorKeys.clear();
   lastAttemptAt = 0;
 }
