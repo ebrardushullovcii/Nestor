@@ -6,27 +6,39 @@ import {
   JobSearchPreferencesSchema,
   type FoundJob,
   type ListingCard,
+  type SavedFitAnswer,
   type JobSearchStatus,
   type JobFitUpdate,
 } from "@nestor/contracts";
 import {
+  approveOriginalResumesForTests,
   createJobSitesStore,
   createSearchSourcesStore,
   createSourceAccessStore,
   type JobStore,
   openJobStore,
 } from "@nestor/db/job-store";
+import {
+  createApplicationStore,
+  readSavedFitAnswers,
+} from "@nestor/db/applications";
 import { afterEach, expect, test, vi } from "vitest";
-import type { JobSearchEngine } from "./engine";
+import { createListingSearchEngine, type JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import { createFitQueue } from "./fit-queue";
 import {
   fitContextInput,
+  fitContextFingerprint,
+  fitContextFingerprints,
   fitInputFingerprint,
   LISTING_FIT_SCORER_VERSION,
 } from "./fit-input";
 import { screenCards as screenListingCards } from "@nestor/browser-agent";
-import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  createDeterministicJobFinderAiClient,
+  createOpenAiCompatibleJobFinderAiClient,
+  type JobFinderAiClient,
+} from "@nestor/ai-providers";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import type { JobSearchContext, JobSearchRunner } from "./types";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -1929,17 +1941,73 @@ test("one pass scores the whole backlog, visible jobs first, in bounded batches"
   expect(store.unscoredJobIds(200)).toHaveLength(0);
 });
 
+test.each(["matching", "mismatched"] as const)(
+  "first fit pass upgrades a %s legacy fingerprint",
+  async (legacy) => {
+    const { runner, store, context, engine } = setup();
+    const currentFingerprint = fitContextFingerprint(context);
+    const storedInput = fitContextInput(context);
+    if (legacy === "mismatched") storedInput.scorerVersion--;
+    // A pre-upgrade database has just the one combined fingerprint.
+    store
+      .sql("INSERT INTO fit_context(id,fingerprint) VALUES (1,?)")
+      .run(
+        createHash("sha256").update(JSON.stringify(storedInput)).digest("hex"),
+      );
+    const ids = seedBacklog(store, 5, "Complete listing: requires SQL.");
+    const [high, visible, shortlisted, ready, low] = ids;
+    store.setFit(
+      ids.map((id) => ({
+        id,
+        score: id === high ? 40 : 39,
+        summary: "Earlier verdict",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    store.setStage([shortlisted!], "shortlisted");
+    store.setStage([ready!], "resume");
+    runner.prioritizeFit([visible!]);
+
+    await runner.scoreUnscored();
+
+    const asked = engine.fitJobs.mock.calls.flatMap(([input]) =>
+      input.jobs.map(({ id }) => id),
+    );
+    if (legacy === "matching") {
+      expect(engine.fitJobs).not.toHaveBeenCalled();
+      expect(ids.map((id) => store.getJob(id)?.fitStale)).toEqual(
+        ids.map(() => false),
+      );
+    } else {
+      expect(engine.fitJobs).toHaveBeenCalledOnce();
+      expect(asked[0]).toBe(visible);
+      expect(asked.toSorted((a, b) => a - b)).toEqual(ids.slice(0, -1));
+      expect(store.getJob(low!)?.fitStale).toBe(true);
+    }
+    expect(store.sql("SELECT * FROM fit_context WHERE id=1").get()).toEqual({
+      id: 1,
+      fingerprint: currentFingerprint,
+      scoring_fingerprint: fitContextFingerprints(context).scoringFingerprint,
+    });
+    expect(store.unscoredJobIds(10)).toEqual([]);
+  },
+);
+
 test("a scorer bump refreshes only priority jobs, then takes displayed or opened jobs once", async () => {
   const { runner, context, engine, store } = setup();
+  const previousInput = {
+    ...fitContextInput(context),
+    scorerVersion: LISTING_FIT_SCORER_VERSION - 1,
+  };
   const previousContext = createHash("sha256")
-    .update(
-      JSON.stringify({
-        ...fitContextInput(context),
-        scorerVersion: LISTING_FIT_SCORER_VERSION - 1,
-      }),
-    )
+    .update(JSON.stringify(previousInput))
     .digest("hex");
-  store.syncFitContext(previousContext);
+  const { scorerVersion, person, goals } = previousInput;
+  const previousScoring = createHash("sha256")
+    .update(JSON.stringify({ scorerVersion, person, goals }))
+    .digest("hex");
+  store.syncFitContext(previousContext, previousScoring);
   const ids = seedBacklog(store, 3400, "Complete listing: requires SQL.");
   const visible = ids[600]!;
   const scrolledTo = ids[601]!;
@@ -2019,6 +2087,139 @@ test("a scorer bump refreshes only priority jobs, then takes displayed or opened
       fitStale: true,
     });
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("saving a Needs you answer waits for a job view and sends the full answer bank", async () => {
+  const { runner, context, engine, store } = setup();
+  const applications = createApplicationStore(store);
+  const [opened, high, ready, shortlisted, low] = seedBacklog(
+    store,
+    5,
+    "Complete listing: requires SQL.",
+  ) as [number, number, number, number, number];
+  store.setStage([shortlisted], "shortlisted");
+  approveOriginalResumesForTests(store, [ready]);
+  applications.applyJobs({ selection: { ids: [ready] } });
+  const application = applications.claimNext()!;
+  const task = applications.needsYou.request({
+    applicationId: application.id,
+    attempt: application.attempt,
+    kind: "question",
+    fieldKey: "notice-period",
+    key: "notice-period",
+    scope: {},
+    prompt: "What is your notice period?",
+    input: "text",
+    options: [],
+  });
+  if (task.status !== "needs_you") throw new Error("Expected a question");
+  const chatWithTools = vi.fn<NonNullable<JobFinderAiClient["chatWithTools"]>>(
+    ([, message]) => {
+      const { listings } = JSON.parse(message!.content) as {
+        listings: { id: number }[];
+      };
+      return Promise.resolve({
+        content: JSON.stringify({
+          fits: listings.map(({ id }) => ({
+            id,
+            s: 72,
+            why: "Your experience matches the SQL work",
+            r: ["related", "SQL work"],
+            p: ["aligned", "Remote"],
+            c: ["strong", "SQL experience"],
+          })),
+        }),
+      });
+    },
+  );
+  const scriptedEngine = createListingSearchEngine({
+    aiClient: { ...createDeterministicJobFinderAiClient(), chatWithTools },
+    browserRuntime: {},
+  });
+  engine.fitJobs.mockImplementation((input) => scriptedEngine.fitJobs(input));
+
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const priorAnswer = { question: "Do you need sponsorship?", answer: "No" };
+    applications.needsYou.remember({
+      key: "sponsorship",
+      prompt: priorAnswer.question,
+      answer: priorAnswer.answer,
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    context.savedAnswers = readSavedFitAnswers(store);
+    // The legacy store has the same full fingerprint and can adopt the split
+    // without making any of its scores stale.
+    store.syncFitContext(fitContextFingerprint(context));
+    store.setFit(
+      [opened, high, ready, shortlisted, low].map((id) => ({
+        id,
+        score: id === high ? 82 : 25,
+        summary: "Earlier score",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    expect(await runner.scoreUnscored()).toBe(0);
+    expect(store.getJob(high)?.fitStale).toBe(false);
+
+    expect(
+      applications.needsYou.answer({
+        id: task.task.id,
+        answer: "Two weeks",
+        remember: true,
+      }).resolved,
+    ).toBe(true);
+    context.savedAnswers = readSavedFitAnswers(store);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(chatWithTools).not.toHaveBeenCalled();
+    expect(store.unscoredJobIds(10)).toEqual([]);
+    for (const id of [opened, high, ready, shortlisted, low]) {
+      expect(store.getJob(id)).toMatchObject({
+        fitStale: true,
+        fit: { summary: "Earlier score" },
+      });
+    }
+
+    runner.prioritizeFit([opened]);
+    runner.prioritizeFit([]);
+    runner.prioritizeFit([opened]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(chatWithTools).toHaveBeenCalledOnce();
+    const [, message] = chatWithTools.mock.calls[0]![0];
+    const input = JSON.parse(message!.content) as {
+      listings: { id: number }[];
+      savedAnswers: SavedFitAnswer[];
+    };
+    expect(input.listings.map(({ id }) => id)).toEqual([opened]);
+    expect(input.savedAnswers).toEqual([
+      priorAnswer,
+      { question: "What is your notice period?", answer: "Two weeks" },
+    ]);
+    expect(store.getJob(opened)).toMatchObject({
+      fitScore: 72,
+      fitStale: false,
+    });
+    expect(store.getJob(high)).toMatchObject({ fitScore: 82, fitStale: true });
+
+    runner.prioritizeFit([]);
+    engine.fitJobs.mockClear();
+    context.profile.headline = "SQL database engineer";
+    await runner.scoreUnscored();
+    const requested = engine.fitJobs.mock.calls.flatMap(([input]) =>
+      input.jobs.map(({ id }) => id),
+    );
+    expect(requested.toSorted((a, b) => a - b)).toEqual(
+      [opened, high, ready, shortlisted].toSorted((a, b) => a - b),
+    );
+    expect(store.getJob(low)?.fitStale).toBe(true);
+    expect(store.unscoredJobIds(10)).toEqual([]);
+  } finally {
+    runner.suspend();
     vi.useRealTimers();
   }
 });

@@ -25,7 +25,7 @@ import {
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
 import { createFitQueue, createFitRequests } from "./fit-queue";
-import { fitContextFingerprint } from "./fit-input";
+import { fitContextFingerprints } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
 import {
   settledState,
@@ -80,7 +80,8 @@ export function createJobSearchRunner(
   const providerWaits = new Set<object>();
   let visibleIds: readonly number[] = [];
   const syncFitContextForView = (context: JobSearchContext) => {
-    deps.store.syncFitContext(fitContextFingerprint(context));
+    const { fingerprint, scoringFingerprint } = fitContextFingerprints(context);
+    deps.store.syncFitContext(fingerprint, scoringFingerprint);
     deps.store.requestDeferredFits(visibleIds);
   };
   const enqueueSavedFits = (fits: FitQueue) => {
@@ -185,7 +186,12 @@ export function createJobSearchRunner(
     if (resumed) await resumed;
   };
   deps.store.onChange((change) => {
-    if (change.cause === "profile" || change.cause === "settings") {
+    if (fitLifetime.signal.aborted) return;
+    if (
+      change.cause === "profile" ||
+      change.cause === "settings" ||
+      change.cause === "saved_answers"
+    ) {
       if (recovery) {
         const pending = recovery;
         const continueFit = () => {

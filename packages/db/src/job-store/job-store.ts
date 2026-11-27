@@ -102,7 +102,7 @@ export interface JobStore {
    */
   mergeSamePostings(): SamePostingMergeReport;
   setFit(updates: readonly JobFitUpdate[]): void;
-  syncFitContext(fingerprint: string): boolean;
+  syncFitContext(fingerprint: string, scoringFingerprint?: string): boolean;
   requestDeferredFits(ids: readonly number[]): number[];
   fitCounts(): { checking: number; rechecking: number };
   fitRevision(): string;
@@ -273,9 +273,13 @@ export function openJobStore(
   const notify = (change: JobChange) => {
     if (
       change.stages.length === 0 &&
-      !["sites", "profile", "profile_activity", "settings"].includes(
-        change.cause,
-      )
+      ![
+        "sites",
+        "profile",
+        "profile_activity",
+        "settings",
+        "saved_answers",
+      ].includes(change.cause)
     )
       return;
     if (depth > 0) {
@@ -468,9 +472,9 @@ export function openJobStore(
       });
     },
 
-    syncFitContext(fingerprint) {
+    syncFitContext(fingerprint, scoringFingerprint) {
       return transaction(() => {
-        const changed = syncFitContext(sql, fingerprint);
+        const changed = syncFitContext(sql, fingerprint, scoringFingerprint);
         if (changed)
           notify({
             cause: "fit",
