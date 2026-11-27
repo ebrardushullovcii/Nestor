@@ -183,8 +183,14 @@ test("Settings preserve Apply choices and a deliberately cleared declaration lis
   ).toEqual([]);
 });
 
-test("browser permissions start off, save one at a time and survive reader recreation", () => {
+test("a new profile starts with every browser permission on and pay answered; each saves alone and survives reader recreation", () => {
   const { store, preferences } = setup();
+  const on = {
+    solveCaptchas: true,
+    signIn: true,
+    googleSignIn: true,
+    createAccounts: true,
+  };
   const off = {
     solveCaptchas: false,
     signIn: false,
@@ -192,37 +198,29 @@ test("browser permissions start off, save one at a time and survive reader recre
     createAccounts: false,
   };
   expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual(
-    off,
+    on,
+  );
+  expect(preferences.settings.read().salaryDisclosure).toBe(
+    "answer_from_profile",
   );
   preferences.settings.patch({
-    fields: { "aiBehavior.browserPermissions.signIn": true },
+    fields: { "aiBehavior.browserPermissions.signIn": false },
   });
   const again = createPreferencesStore(store);
   expect(again.settings.read().aiBehavior?.browserPermissions).toEqual({
-    ...off,
-    signIn: true,
+    ...on,
+    signIn: false,
   });
-  // Turning another one on leaves the first as it was, and the rest off.
+  // Turning another one off leaves the first as it was, and the rest on.
   again.settings.patch({
-    fields: { "aiBehavior.browserPermissions.createAccounts": true },
+    fields: { "aiBehavior.browserPermissions.createAccounts": false },
   });
   again.settings.patch({
-    fields: { "aiBehavior.browserPermissions.signIn": false },
+    fields: { "aiBehavior.browserPermissions.signIn": true },
   });
   expect(again.settings.read().aiBehavior?.browserPermissions).toEqual({
-    ...off,
-    createAccounts: true,
-  });
-  again.settings.patch({
-    fields: { "aiBehavior.browserPermissions.googleSignIn": true },
-  });
-  expect(
-    createPreferencesStore(store).settings.read().aiBehavior
-      ?.browserPermissions,
-  ).toEqual({
-    ...off,
-    createAccounts: true,
-    googleSignIn: true,
+    ...on,
+    createAccounts: false,
   });
   // A file from before the permissions has empty columns: all off.
   store

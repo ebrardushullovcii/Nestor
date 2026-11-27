@@ -355,22 +355,25 @@ test("Settings saves Apply mode and appearance independently and follows other w
   );
 });
 
-test("Settings saves one in-app browser permission without touching the others", async () => {
+test("Settings turns off one in-app browser permission of a new profile without touching the others", async () => {
   const preferences = createPreferencesStore(store);
   render(
     <MemoryRouter>
       <StoredSettingsScreen />
     </MemoryRouter>,
   );
-  fireEvent.click(
-    await screen.findByRole("switch", { name: "Sign in to websites" }),
-  );
+  const toggle = await screen.findByRole("switch", {
+    name: "Sign in to websites",
+  });
+  // A new profile starts with full access.
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
   await waitFor(() =>
     expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual({
-      solveCaptchas: false,
-      googleSignIn: false,
-      signIn: true,
-      createAccounts: false,
+      solveCaptchas: true,
+      googleSignIn: true,
+      signIn: false,
+      createAccounts: true,
     }),
   );
   expect(
@@ -379,23 +382,23 @@ test("Settings saves one in-app browser permission without touching the others",
       .map((call) => call.input),
   ).toEqual([
     {
-      fields: { "aiBehavior.browserPermissions.signIn": true },
-      expected: { "aiBehavior.browserPermissions.signIn": false },
+      fields: { "aiBehavior.browserPermissions.signIn": false },
+      expected: { "aiBehavior.browserPermissions.signIn": true },
     },
   ]);
 });
 
 test("Settings can enable Google's default-off permission in an upgraded workspace", async () => {
   const preferences = createPreferencesStore(store);
+  // A file from before the permissions: every column is empty (off).
+  store
+    .sql(
+      "UPDATE profile_settings SET ai_behavior_browser_permissions_solve_captchas=NULL,ai_behavior_browser_permissions_sign_in=NULL,ai_behavior_browser_permissions_google_sign_in=NULL,ai_behavior_browser_permissions_create_accounts=NULL",
+    )
+    .run();
   preferences.settings.patch({
     fields: { "aiBehavior.browserPermissions.signIn": true },
   });
-  // An existing settings row gets NULL when this permission is added.
-  store
-    .sql(
-      "UPDATE profile_settings SET ai_behavior_browser_permissions_google_sign_in=NULL",
-    )
-    .run();
   const view = render(
     <MemoryRouter>
       <StoredSettingsScreen />

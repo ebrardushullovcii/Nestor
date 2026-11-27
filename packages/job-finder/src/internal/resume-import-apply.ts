@@ -82,6 +82,8 @@ type ResolvedResumeImportSelection = {
       };
       authorizedWorkCountries?: { values: string[]; explicit: boolean };
       requiresVisaSponsorship?: { value: boolean; explicit: boolean };
+      noticePeriodDays?: { value: number; explicit: boolean };
+      availableStartDate?: { value: string; explicit: boolean };
     };
     applicationIdentity?: {
       preferredEmail?: string | null;
@@ -412,6 +414,7 @@ function buildResolvedSelection(
         ] = typeof value === "string" ? value : null;
         break;
       case "location.timeZone":
+      case "identity.timeZone":
         selection.scalarFields.timeZone =
           typeof value === "string" ? value : null;
         break;
@@ -515,6 +518,33 @@ function buildResolvedSelection(
         }
         break;
       }
+      case "work_eligibility.noticePeriodDays": {
+        const days =
+          typeof value === "number"
+            ? value
+            : typeof value === "string" && /^\d+$/u.test(value.trim())
+              ? Number(value.trim())
+              : null;
+        if (days !== null && Number.isInteger(days) && days >= 0)
+          selection.scalarFields.workEligibility = {
+            ...(selection.scalarFields.workEligibility ?? {}),
+            noticePeriodDays: {
+              value: days,
+              explicit: candidate.id === confirmedCandidateId,
+            },
+          };
+        break;
+      }
+      case "work_eligibility.availableStartDate":
+        if (typeof value === "string" && value.trim())
+          selection.scalarFields.workEligibility = {
+            ...(selection.scalarFields.workEligibility ?? {}),
+            availableStartDate: {
+              value: value.trim(),
+              explicit: candidate.id === confirmedCandidateId,
+            },
+          };
+        break;
       case "work_eligibility.requiresVisaSponsorship":
         if (typeof value === "boolean") {
           selection.scalarFields.workEligibility = {
@@ -559,6 +589,18 @@ function mergeImportedWorkEligibility(
       (sponsorship.explicit || current.requiresVisaSponsorship === null)
         ? sponsorship.value
         : current.requiresVisaSponsorship,
+    // Stated availability only fills an empty answer, as the others do.
+    noticePeriodDays:
+      imported.noticePeriodDays &&
+      (imported.noticePeriodDays.explicit || current.noticePeriodDays === null)
+        ? imported.noticePeriodDays.value
+        : current.noticePeriodDays,
+    availableStartDate:
+      imported.availableStartDate &&
+      (imported.availableStartDate.explicit ||
+        current.availableStartDate === null)
+        ? imported.availableStartDate.value
+        : current.availableStartDate,
   };
 }
 

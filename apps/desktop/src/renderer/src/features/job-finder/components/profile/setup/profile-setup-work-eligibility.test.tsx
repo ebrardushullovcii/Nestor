@@ -18,6 +18,10 @@ import {
   parseWorkCountriesDraft,
 } from "./profile-setup-step-sections";
 
+// Its own test covers it against a real store.
+vi.mock("./setup-agent-permissions", () => ({
+  SetupAgentPermissions: () => null,
+}));
 vi.mock("@renderer/features/job-lists/setup-sites", () => ({
   SetupSites: () => null,
 }));
@@ -90,13 +94,13 @@ describe("Job targets asks the two questions every application form asks", () =>
     // Where the person lives is offered, never assumed.
     expect(latestProfileValues?.eligibility.authorizedWorkCountries).toBe("");
     fireEvent.click(
-      screen.getByRole("button", { name: "I can work in Germany" }),
+      screen.getByRole("button", { name: "I'm allowed to work in Germany" }),
     );
     expect(latestProfileValues?.eligibility.authorizedWorkCountries).toBe(
       "Germany",
     );
     expect(
-      screen.queryByRole("button", { name: "I can work in Germany" }),
+      screen.queryByRole("button", { name: "I'm allowed to work in Germany" }),
     ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "No" }));

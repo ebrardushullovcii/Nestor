@@ -57,10 +57,15 @@ export interface ScalarTable {
 }
 export const scalarSchema = (table: ScalarTable) =>
   `CREATE TABLE IF NOT EXISTS ${table.name}(id INTEGER PRIMARY KEY CHECK(id=1),${table.fields.map((field) => `${quote(column(field))} ${table.booleans.includes(field) || table.numbers.includes(field) ? "INTEGER" : "TEXT"}`).join(",")});`;
+/**
+ * `defaults` is what an empty (older) column reads as; `initial` is what a
+ * new row stores, when a new profile starts differently from an old file.
+ */
 export function createScalarValues(
   store: JobStore,
   table: ScalarTable,
   defaults: Fields,
+  initial: Fields = defaults,
 ) {
   const allowed = new Set(table.fields);
   const created = Boolean(
@@ -70,7 +75,7 @@ export function createScalarValues(
           .sql(
             `INSERT OR IGNORE INTO ${table.name}(id,${table.fields.map((field) => quote(column(field))).join(",")}) VALUES (1,${table.fields.map(() => "?").join(",")})`,
           )
-          .run(...table.fields.map((field) => encode(defaults[field]))).changes,
+          .run(...table.fields.map((field) => encode(initial[field]))).changes,
     ),
   );
   const read = (keys: readonly string[] = table.fields): Fields => {

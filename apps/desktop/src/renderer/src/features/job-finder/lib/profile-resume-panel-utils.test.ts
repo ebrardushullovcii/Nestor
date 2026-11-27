@@ -248,7 +248,9 @@ for (const status of ["applied", "review_ready"] as const) {
         startedAt: "2026-10-29T00:00:00Z",
         modelRoles: { [role]: { status: "running" } },
       });
-      expect(getRunningResumeImportProgress(run)?.stage).toBe("saving_results");
+      const progress = getRunningResumeImportProgress(run);
+      expect(progress?.stage).toBe("building_profile");
+      expect(progress?.message).toMatch(/filled in and ready to review/);
       const settled = ResumeImportRunSchema.parse({
         ...run,
         modelRoles: { [role]: { status: "completed" } },

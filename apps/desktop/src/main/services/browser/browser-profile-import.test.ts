@@ -20,6 +20,7 @@ import {
   firefoxCookieToDetails,
   importSignInsByName,
   importSignInsFromBrowser,
+  isGoogleAccountHost,
   listBrowserImportSources,
   listSignInSourcesByName,
   readChromiumCookies,
@@ -402,8 +403,9 @@ describe("Windows cookie import accounting", () => {
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("synthetic-private-value"));
+    const takeControl = vi.fn();
     const host = {
-      takeControl: vi.fn(),
+      takeControl,
       getSession: () => ({ cookies: { set, flushStore: vi.fn() } }),
     } as unknown as EmbeddedBrowser;
     const source = (await listBrowserImportSources(env)).sources[0]!;
@@ -420,9 +422,13 @@ describe("Windows cookie import accounting", () => {
       siteCount: 1,
     });
     expect(result.message).toMatch(
-      /Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*Imported 1.*1 rejected/,
+      /^Imported 1 cookies for 1 site.*Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*1 rejected/,
     );
     expect(result.message).toContain("do not guarantee a working sign-in");
+    // Running searches and applications are left alone during an import.
+    expect(takeControl).not.toHaveBeenCalled();
+    // No Google cookies in this profile, so no Google sentence.
+    expect(result.message).not.toContain("Google accounts");
     expect(JSON.stringify(result)).not.toMatch(/synthetic|example|legacy/);
     expect(unwrapped.every((byte) => byte === 0)).toBe(true);
     const traceFile = (await readdir(traceDir)).find((file) =>
@@ -918,4 +924,18 @@ describe("browser profile import", () => {
     expect(result.message).toMatch(/more than one profile.*Say which one/);
     expect(takeControl).not.toHaveBeenCalled();
   });
+});
+
+test("Google account hosts are named so the import can say their sign-ins stay behind", () => {
+  for (const host of [
+    ".google.com",
+    "accounts.google.com",
+    "mail.google.com",
+    "www.google.de",
+    "google.co.uk",
+    ".youtube.com",
+  ])
+    expect(isGoogleAccountHost(host)).toBe(true);
+  for (const host of ["notgoogle.com", "google.example.test", "github.com"])
+    expect(isGoogleAccountHost(host)).toBe(false);
 });

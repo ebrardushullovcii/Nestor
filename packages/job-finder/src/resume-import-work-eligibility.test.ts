@@ -284,7 +284,7 @@ describe("confirming eligibility review items", () => {
 });
 
 describe("where guided setup opens after an import", () => {
-  test("opens Job targets when that is the first step with something to do", async () => {
+  test("opens Basics, the first step the import filled, before Job targets", async () => {
     const seed = createSeed();
     seed.profileSetupState = {
       status: "in_progress",
@@ -306,12 +306,12 @@ describe("where guided setup opens after an import", () => {
       aiClient: createAiClient(),
     });
 
-    const snapshot = await profileWork.runResumeImport(
-      importInput(seed, text),
-    );
+    const snapshot = await profileWork.runResumeImport(importInput(seed, text));
 
+    // R10 fresh install: landing on Job targets skipped Basics and Work
+    // history while the import was still being read.
     expect(snapshot.profileSetupState.status).toBe("in_progress");
-    expect(snapshot.profileSetupState.currentStep).toBe("targeting");
+    expect(snapshot.profileSetupState.currentStep).toBe("essentials");
   });
 
   test("does not open on a step whose only item is an optional suggestion", async () => {
@@ -355,7 +355,7 @@ describe("where guided setup opens after an import", () => {
       ),
     );
 
-    expect(snapshot.profileSetupState.currentStep).toBe("targeting");
+    expect(snapshot.profileSetupState.currentStep).toBe("essentials");
   });
 
   test("leaves a finished setup alone", async () => {
@@ -460,9 +460,7 @@ describe("education and certificates the model names in its own words", () => {
       },
     });
 
-    const snapshot = await profileWork.runResumeImport(
-      importInput(seed, text),
-    );
+    const snapshot = await profileWork.runResumeImport(importInput(seed, text));
 
     expect(
       snapshot.profile.education.map((entry) => [

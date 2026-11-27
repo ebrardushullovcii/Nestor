@@ -56,6 +56,8 @@ import { JobDetailPane } from "./job-detail-pane";
 import { SearchPanel, SearchStatus } from "./search-panel";
 import { TRIAGE_ACTIONS, type TriageAction } from "./triage-actions";
 import { useSearchStatus } from "./use-search-status";
+import { pausedSearch } from "./paused-search";
+import { useKeepReading } from "./site-results";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
 import { useAssistantContextSource } from "../job-finder/assistant/assistant-provider";
 
@@ -141,6 +143,7 @@ export function FindJobsScreen() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const status = useSearchStatus();
+  const resume = useKeepReading();
   const [stage, setStage] = useState<TriageStage>(remembered.stage);
   const [sortByStage, setSortByStage] = useState(remembered.sortByStage);
   const [text, setText] = useState(remembered.text);
@@ -517,9 +520,13 @@ export function FindJobsScreen() {
 
   const counts = list.counts;
   const running = status.search?.state === "running";
+  // A search paused on an AI refusal brings no rows until it carries on:
+  // the list says why and what happens next instead of skeleton rows.
+  const paused = pausedSearch(status);
   // A first search with nothing found yet: rows are on their way, so the
   // list shows skeleton rows rather than an empty message.
-  const firstRowsComing = stage === "found" && running && counts.found === 0;
+  const firstRowsComing =
+    stage === "found" && running && !paused && counts.found === 0;
   const tabOptions: SegmentedControlOption<TriageStage>[] = TABS.map((tab) => {
     // "Found 0" is not true while a first search brings rows in: the count
     // is not known yet, and says so with the same "–" as an unread count.
@@ -563,29 +570,31 @@ export function FindJobsScreen() {
     !list.loading &&
     counts.found === 0 &&
     sortedJobs === 0 &&
-    !running &&
+    (!running || paused !== null) &&
     !text.trim();
   const emptyMessage =
     stage === "found" && counts.found === 0
-      ? (status.progress?.failed ?? 0) > 0 ||
-        (status.search?.state === "failed" && !status.progress?.needsYou)
-        ? [
-            "Some sites could not be read",
-            "Open What each site found above to see why, fix their URLs or search again.",
-          ]
-        : (status.progress?.needsYou ?? 0) > 0
+      ? paused
+        ? [`Search paused: ${paused.reason}`, paused.next]
+        : (status.progress?.failed ?? 0) > 0 ||
+            (status.search?.state === "failed" && !status.progress?.needsYou)
           ? [
-              "Some sites need you",
-              "Open Needs you to sign in, then retry those sites.",
+              "Some sites could not be read",
+              "Open What each site found above to see why, fix their URLs or search again.",
             ]
-          : sortedJobs > 0
-            ? ["All caught up", "Every found job is shortlisted or hidden."]
-            : siteTotal === 0
-              ? [
-                  "Add a job site first",
-                  "Searches read the job sites you add in Profile. Press Add a job site above, then search it here.",
-                ]
-              : ["No jobs yet", "Pick how to search above and press Search."]
+          : (status.progress?.needsYou ?? 0) > 0
+            ? [
+                "Some sites need you",
+                "Open Needs you to sign in, then retry those sites.",
+              ]
+            : sortedJobs > 0
+              ? ["All caught up", "Every found job is shortlisted or hidden."]
+              : siteTotal === 0
+                ? [
+                    "Add a job site first",
+                    "Searches read the job sites you add in Profile. Press Add a job site above, then search it here.",
+                  ]
+                : ["No jobs yet", "Pick how to search above and press Search."]
       : filtered && list.total === 0
         ? [
             text.trim() === "" && stage === "found" && floor !== null
@@ -604,6 +613,25 @@ export function FindJobsScreen() {
       <p className="font-medium text-foreground">{emptyMessage[0]}</p>
       {emptyMessage[1] ? <p>{emptyMessage[1]}</p> : null}
       <div className="flex flex-wrap justify-center gap-2">
+        {stage === "found" && counts.found === 0 && paused?.retry ? (
+          <Button
+            onClick={() => resume.keepReading()}
+            pending={resume.pending}
+            size="sm"
+            type="button"
+          >
+            Try again
+          </Button>
+        ) : null}
+        {stage === "found" && counts.found === 0 && paused?.accountStep ? (
+          <Button
+            onClick={() => void navigate("/job-finder/actions")}
+            size="sm"
+            type="button"
+          >
+            Open Needs you
+          </Button>
+        ) : null}
         {emptyFit && fitReason.eligibility ? (
           <Button
             onClick={() => {

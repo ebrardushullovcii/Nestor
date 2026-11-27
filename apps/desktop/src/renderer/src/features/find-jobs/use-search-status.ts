@@ -19,15 +19,20 @@ export function useSearchStatus(): JobSearchStatus & { loaded: boolean } {
   });
   useEffect(() => {
     let live = true;
-    const unsubscribe = window.nestor.jobs.onSearchStatus((next) => {
-      if (live) setStatus({ ...next, loaded: true });
-    });
-    void window.nestor.jobs
-      .run("search_status", {})
-      .then((next) => {
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = window.nestor.jobs.onSearchStatus((next) => {
         if (live) setStatus({ ...next, loaded: true });
-      })
-      .catch(() => undefined);
+      });
+      void window.nestor.jobs
+        .run("search_status", {})
+        .then((next) => {
+          if (live) setStatus({ ...next, loaded: true });
+        })
+        .catch(() => undefined);
+    } catch {
+      /* No search feed here (a screen shown on its own): nothing to show. */
+    }
     return () => {
       live = false;
       unsubscribe();

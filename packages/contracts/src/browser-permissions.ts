@@ -2,9 +2,11 @@ import { z } from "zod";
 
 /**
  * What the agent may do on its own in the in-app browser, during a search,
- * an application or any other browser work. Each is a separate opt-in and
- * every one is off until the person turns it on in Settings › AI behavior.
- * Off means the agent stops and hands the page to the person, as before.
+ * an application or any other browser work. A new profile starts with every
+ * one on (`NEW_PROFILE_BROWSER_PERMISSIONS`), shown with a switch each in
+ * Guided setup and Settings › AI behavior. Off means the agent stops and
+ * hands the page to the person. A workspace saved before these existed has
+ * no value and reads as off.
  *
  * None of these is the send choice: whether an application is sent stays
  * `applicationAutomationMode`.
@@ -28,6 +30,14 @@ export const BrowserAgentPermissionsSchema = z
 export type BrowserAgentPermissions = z.infer<
   typeof BrowserAgentPermissionsSchema
 >;
+
+/** What a profile created from now on starts with: full access. */
+export const NEW_PROFILE_BROWSER_PERMISSIONS: BrowserAgentPermissions = {
+  solveCaptchas: true,
+  signIn: true,
+  googleSignIn: true,
+  createAccounts: true,
+};
 
 /**
  * The saved browser permissions, defaulted: a workspace saved before they

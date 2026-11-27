@@ -224,6 +224,46 @@ describe("resume import with a model (ADR 0041)", () => {
     expect(snapshot.searchPreferences.employmentTypes).toEqual(["Full-time"]);
   });
 
+  test("stated time zone and availability the model read fill empty answers", async () => {
+    const seed = freshSeed();
+    const text = `${TEXT}\nTime zone: CET (UTC+1)\nAvailability: Available now, no notice period.`;
+    const { profileWork } = createProfileServiceHarness({
+      seed,
+      aiClient: modelClient({
+        identity_summary: [
+          ...IDENTITY,
+          {
+            section: "location",
+            key: "timeZone",
+            value: "CET (UTC+1)",
+            line: "Time zone: CET (UTC+1)",
+          },
+          {
+            section: "work_eligibility",
+            key: "noticePeriodDays",
+            value: 0,
+            line: "Availability: Available now",
+          },
+          {
+            section: "work_eligibility",
+            key: "availableStartDate",
+            value: "Available now",
+            line: "Availability: Available now",
+          },
+        ],
+        experience: [ROLE],
+      }),
+    });
+
+    const snapshot = await profileWork.runResumeImport(importInput(seed, text));
+
+    expect(snapshot.profile.timeZone).toBe("CET (UTC+1)");
+    expect(snapshot.profile.workEligibility.noticePeriodDays).toBe(0);
+    expect(snapshot.profile.workEligibility.availableStartDate).toBe(
+      "Available now",
+    );
+  });
+
   test("a section the model could not read is named, and nothing is guessed for it", async () => {
     const seed = freshSeed();
     const unread = new ResumeImportStageUnreadError(

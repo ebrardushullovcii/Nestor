@@ -51,6 +51,7 @@ import {
 } from "../profile-list-editor";
 import { PROFILE_WORK_CONSTRAINT_COPY } from "../profile-work-constraints-copy";
 import { ResumeImportProgress } from "../resume-import-progress";
+import { SetupAgentPermissions } from "./setup-agent-permissions";
 
 const booleanSelectOptions = [
   { label: "Not set", value: "" },
@@ -586,7 +587,7 @@ export function SetupWorkEligibilityQuestions(props: {
               type="button"
               variant="outline"
             >
-              I can work in {suggestedCountry}
+              I&apos;m allowed to work in {suggestedCountry}
             </Button>
           </div>
         ) : null}
@@ -807,6 +808,8 @@ export function ProfileSetupTargetingStep(props: {
           profileForm={props.profileForm}
           suggestedCountry={props.suggestedWorkCountry ?? null}
         />
+
+        <SetupAgentPermissions />
 
         <Disclosure
           className={SETUP_BLOCK_CLASS}

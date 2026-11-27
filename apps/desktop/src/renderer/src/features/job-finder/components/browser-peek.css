@@ -765,6 +765,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  list-style: none;
   overflow-y: auto;
   max-height: 320px;
   margin: 0 -4px;
@@ -877,6 +878,24 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   color: var(--muted-foreground);
   font-size: var(--text-tiny);
   line-height: 1.45;
+}
+.browser-import-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.browser-import-google {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--control-border);
+  color: var(--foreground);
+  font-weight: 600;
+  font-size: var(--text-small);
+  transition: background-color var(--duration-fast) ease;
+}
+.browser-import-google:hover {
+  background: var(--secondary);
 }
 .browser-import-done {
   height: 32px;

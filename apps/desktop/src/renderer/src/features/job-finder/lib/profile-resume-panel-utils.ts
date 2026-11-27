@@ -18,12 +18,23 @@ export function getRunningResumeImportProgress(
       ))
   )
     return null;
+  // Applied with a deferred read still running (the layout read of a
+  // multi-page PDF): the profile is already filled in, and "Saving your
+  // review items" read as stuck for the half minute that read takes.
+  if (["applied", "review_ready"].includes(run.status))
+    return {
+      stage: "building_profile",
+      message:
+        "Your profile is filled in and ready to review. Nestor is still reading your resume's layout and may add a few suggestions.",
+      occurredAt: run.startedAt,
+    };
   return {
-    stage: ["reconciling", "applied", "review_ready"].includes(run.status)
-      ? "saving_results"
-      : run.status === "extracting"
-        ? "building_profile"
-        : "reading_document",
+    stage:
+      run.status === "reconciling"
+        ? "saving_results"
+        : run.status === "extracting"
+          ? "building_profile"
+          : "reading_document",
     message: "The latest resume import is still in progress.",
     occurredAt: run.startedAt,
   };

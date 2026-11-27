@@ -48,7 +48,7 @@ export async function setup(
   await ctx.fill("Preferred job locations", "Remote");
   await ctx.press("Enter");
   for (const country of ["European Union", "Germany"]) {
-    await ctx.fill("Countries where you can work", country);
+    await ctx.fill("Countries where you are legally allowed to work", country);
     await ctx.press("Enter");
   }
   await ctx.click("No", {
@@ -93,7 +93,7 @@ export async function setup(
   );
   await p.getByLabel("Notice period (days)", { exact: true }).fill("30");
   const remote = p.getByRole("combobox", {
-    name: "Can you legally work remotely?",
+    name: "Can you legally work remotely from where you live?",
     exact: true,
   });
   await remote.click();

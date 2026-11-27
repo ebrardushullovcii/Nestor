@@ -61,6 +61,8 @@ import {
   BrowserPasswordPanel,
 } from "./browser-passwords";
 
+const GOOGLE_SIGN_IN_URL = "https://accounts.google.com/";
+
 const initialState: DesktopBrowserState = {
   revision: 0,
   phase: "closed",
@@ -564,6 +566,13 @@ export function BrowserPeek(props: {
           "The import couldn’t finish. Your existing sign-ins are still available.",
       });
     }
+  }
+
+  /** Opens Google's sign-in in a tab of the person's own, here. */
+  async function signInToGoogleHere() {
+    setImportPanel(null);
+    if (!blank) await command({ type: "new_tab" });
+    await command({ type: "navigate", url: GOOGLE_SIGN_IN_URL });
   }
 
   const status =
@@ -1186,30 +1195,32 @@ export function BrowserPeek(props: {
                               "No other browsers with saved sign-ins were found on this device."}
                           </div>
                         ) : (
-                          <div className="browser-import-list" role="list">
+                          <ul className="browser-import-list">
                             {importPanel.sources.map((source) => (
-                              <button
-                                key={source.id}
-                                type="button"
-                                role="listitem"
-                                className="browser-import-source"
-                                disabled={!source.supported}
-                                title={source.note ?? undefined}
-                                onClick={() => void importFrom(source)}
-                              >
-                                <BrowserBrandMark browser={source.browser} />
-                                <span className="browser-import-source-text">
-                                  <span>{source.browserLabel}</span>
-                                  <small>
-                                    {source.profileLabel}
-                                    {!source.supported &&
-                                      " · can’t be read on this device"}
-                                  </small>
-                                </span>
-                                <ArrowUpRight size={15} />
-                              </button>
+                              // Each row is named by its browser and profile
+                              // ("Google Chrome Ebrar"); the Keychain note is
+                              // the footer's, not every row's name.
+                              <li key={source.id}>
+                                <button
+                                  type="button"
+                                  className="browser-import-source"
+                                  disabled={!source.supported}
+                                  onClick={() => void importFrom(source)}
+                                >
+                                  <BrowserBrandMark browser={source.browser} />
+                                  <span className="browser-import-source-text">
+                                    <span>{source.browserLabel}</span>
+                                    <small>
+                                      {source.profileLabel}
+                                      {!source.supported &&
+                                        " · can’t be read on this device"}
+                                    </small>
+                                  </span>
+                                  <ArrowUpRight size={15} />
+                                </button>
+                              </li>
                             ))}
-                          </div>
+                          </ul>
                         ))}
                       {importPanel.step === "importing" && (
                         <div className="browser-import-empty">
@@ -1243,13 +1254,25 @@ export function BrowserPeek(props: {
                           </span>
                         )}
                         {importPanel.step === "done" && (
-                          <button
-                            type="button"
-                            className="browser-import-done"
-                            onClick={() => setImportPanel(null)}
-                          >
-                            Done
-                          </button>
+                          <div className="browser-import-actions">
+                            {/* Google keeps its sign-ins in the browser they
+                                were made in; one sign-in here is the route,
+                                and Nestor keeps it across restarts. */}
+                            <button
+                              type="button"
+                              className="browser-import-google"
+                              onClick={() => void signInToGoogleHere()}
+                            >
+                              Sign in to Google here
+                            </button>
+                            <button
+                              type="button"
+                              className="browser-import-done"
+                              onClick={() => setImportPanel(null)}
+                            >
+                              Done
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>

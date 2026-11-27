@@ -911,7 +911,7 @@ export function extractLiteralCandidates(
         key: "authorizedWorkCountries",
         recordId: null,
       },
-      label: "Countries where you can work",
+      label: "Countries where you are legally allowed to work",
       value: eligibility.authorizedWorkCountries.values,
       normalizedValue: eligibility.authorizedWorkCountries.values,
       valuePreview: eligibility.authorizedWorkCountries.values.join(", "),

@@ -212,7 +212,11 @@ export async function landProfileSetupAfterImport(
   const landingStep =
     derived.status === "completed"
       ? derived.currentStep
-      : getProfileSetupLandingStep(readiness, derived.reviewItems);
+      : getProfileSetupLandingStep(
+          readiness,
+          derived.reviewItems,
+          derived.reviewedSteps ?? [],
+        );
   await deriveAndPersistProfileSetupState(ctx, {
     persistedState: ProfileSetupStateSchema.parse({
       ...derived,

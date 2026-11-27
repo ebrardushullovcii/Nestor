@@ -130,6 +130,7 @@ function existingScalarValueForCandidate(
     case "location.currentLocation":
       return profile.currentLocation;
     case "location.timeZone":
+    case "identity.timeZone":
       return profile.timeZone;
     case "contact.email":
       return profile.email;
@@ -174,6 +175,10 @@ function existingScalarValueForCandidate(
       return profile.workEligibility.requiresVisaSponsorship;
     case "work_eligibility.limitedWorkPermissions":
       return profile.workEligibility.limitedWorkPermissions;
+    case "work_eligibility.noticePeriodDays":
+      return profile.workEligibility.noticePeriodDays;
+    case "work_eligibility.availableStartDate":
+      return profile.workEligibility.availableStartDate;
     default:
       return undefined;
   }

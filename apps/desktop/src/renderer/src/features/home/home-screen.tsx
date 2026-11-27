@@ -1,6 +1,8 @@
 import type {
+  AiAccountNeed,
   HomeSummary,
   HomeUpcoming,
+  JobSearchStatus,
   ProfileSetupStatus,
 } from "@nestor/contracts";
 import {
@@ -29,6 +31,9 @@ import { markFirstScreenShown } from "@renderer/features/job-finder/lib/after-fi
 import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 
 import { useHomeSummary } from "./use-home-summary";
+import { pausedSearch } from "@renderer/features/find-jobs/paused-search";
+import { useSearchStatus } from "@renderer/features/find-jobs/use-search-status";
+import { useAiAccountNeeds } from "@renderer/features/needs-you/use-ai-account-needs";
 
 const HOME_SHOWN_MARK = "job-finder:home:numbers-shown";
 
@@ -46,17 +51,49 @@ interface NextStep {
 const NEEDS_YOU_PATH = "/job-finder/actions";
 const SETUP_PATH = "/job-finder/profile/setup";
 
+const AI_ACCOUNT_STEP: Record<AiAccountNeed["reason"], string> = {
+  funding: "Top up your AI account",
+  authentication: "Fix the API key for your AI account",
+  permission: "Give your API key access to the model",
+};
+
 /**
- * What is waiting on the person, most urgent first. Until guided setup is
- * finished, finishing it comes first: searching and applying both use the
- * profile it builds. An unknown setup state (the launch read failed) adds
- * nothing rather than nagging a set-up workspace.
+ * What is waiting on the person, most urgent first. The AI account Needs
+ * you holds comes first: every search, resume and application waits on it.
+ * Until guided setup is finished, finishing it comes next: searching and
+ * applying both use the profile it builds. An unknown setup state (the
+ * launch read failed) adds nothing rather than nagging a set-up workspace.
+ * A search paused on an AI refusal is said here with its reason, so Home
+ * never reads "Nothing is waiting on you" over a stopped search.
  */
 export function nextSteps(
   summary: HomeSummary,
   setupStatus: ProfileSetupStatus | null = null,
+  live: {
+    aiAccount?: readonly AiAccountNeed[];
+    search?: Pick<JobSearchStatus, "search" | "parked"> | null;
+  } = {},
 ): NextStep[] {
   const steps: NextStep[] = [];
+  const account = live.aiAccount?.[0];
+  if (account)
+    steps.push({
+      id: "ai-account",
+      text: AI_ACCOUNT_STEP[account.reason],
+      detail:
+        "The AI service is refusing Nestor's requests. Searches, resumes and applications wait, then carry on by themselves once it answers.",
+      action: "Open Needs you",
+      to: NEEDS_YOU_PATH,
+    });
+  const paused = pausedSearch(live.search);
+  if (paused && !(paused.accountStep && account))
+    steps.push({
+      id: "search-paused",
+      text: `Your search is paused: ${paused.reason}`,
+      detail: paused.next,
+      action: "Open Find jobs",
+      to: JOB_FINDER_ROUTE_PATHS.discovery,
+    });
   if (setupStatus === "not_started")
     steps.push({
       id: "setup",
@@ -172,6 +209,8 @@ export function HomeScreen() {
   const { summary, error, retry } = useHomeSummary();
   const setupStatus =
     useLaunchReads().context?.profileSetupState?.status ?? null;
+  const searchStatus = useSearchStatus();
+  const aiAccount = useAiAccountNeeds();
   const navigate = useNavigate();
   const shown = summary !== null;
   // Launch is measured to this mark: the first frame with Home's numbers.
@@ -209,7 +248,10 @@ export function HomeScreen() {
       <HomeSkeleton />
     );
 
-  const steps = nextSteps(summary, setupStatus);
+  const steps = nextSteps(summary, setupStatus, {
+    aiAccount,
+    search: searchStatus,
+  });
   const setupDone = setupStatus === null || setupStatus === "completed";
   const week = summary.days.slice(-7).reduce((sum, day) => sum + day.sent, 0);
   const lastWeek = summary.days
@@ -265,6 +307,7 @@ export function HomeScreen() {
       ) : (
         <FirstRunHome
           navigate={(to) => void navigate(to)}
+          searchStatus={searchStatus}
           setupStatus={setupStatus}
           steps={steps}
           summary={summary}
@@ -479,7 +522,16 @@ function HomeDashboard(props: {
 function firstRunPath(
   summary: HomeSummary,
   setupStatus: ProfileSetupStatus | null,
-): { id: string; text: string; detail: string; done: boolean }[] {
+  searchStatus: Pick<JobSearchStatus, "search" | "parked"> | null = null,
+): {
+  id: string;
+  text: string;
+  detail: string;
+  done: boolean;
+  warning?: boolean;
+}[] {
+  const paused = pausedSearch(searchStatus);
+  const searching = searchStatus?.search?.state === "running";
   const searched =
     summary.jobs.found +
       summary.jobs.hidden +
@@ -499,8 +551,14 @@ function firstRunPath(
     {
       id: "search",
       text: "Search your job sites",
-      detail: "Every job found is checked for fit.",
-      done: searched,
+      // The search line says a running or paused search, with the reason.
+      detail: paused
+        ? `Paused: ${paused.reason}.`
+        : searching
+          ? "Searching now. Every job found is checked for fit."
+          : "Every job found is checked for fit.",
+      done: searched && !paused,
+      ...(paused ? { warning: true } : {}),
     },
     {
       id: "shortlist",
@@ -526,12 +584,17 @@ function firstRunPath(
 function FirstRunHome(props: {
   steps: NextStep[];
   summary: HomeSummary;
+  searchStatus: Pick<JobSearchStatus, "search" | "parked"> | null;
   setupStatus: ProfileSetupStatus | null;
   navigate: (to: string) => void;
 }) {
   const next = props.steps[0] ?? null;
   const later = props.steps.slice(1);
-  const path = firstRunPath(props.summary, props.setupStatus);
+  const path = firstRunPath(
+    props.summary,
+    props.setupStatus,
+    props.searchStatus,
+  );
   const current = path.findIndex((step) => !step.done);
   // The next step is the path's current one ("Set up your profile" in Next
   // up and again as step 1): say it once, in the path, with its action.
@@ -646,7 +709,14 @@ function FirstRunHome(props: {
                             : ""}
                       </span>
                     </span>
-                    <span className="text-xs text-foreground-soft">
+                    <span
+                      className={cn(
+                        "text-xs",
+                        step.warning
+                          ? "text-(--warning-text)"
+                          : "text-foreground-soft",
+                      )}
+                    >
                       {step.detail}
                     </span>
                   </span>

@@ -362,6 +362,31 @@ describe("embedded browser tab state", () => {
     }
   });
 
+  test("closing the last tab hides the browser although Electron removes the page later", async () => {
+    const { browser, state, pages } = makeBrowser();
+    for (const id of [...state.pageMap.keys()])
+      if (id !== "person") state.pageMap.delete(id);
+    state.activeTabId = "person";
+    state.personTabs.add("person");
+    const close = vi
+      .spyOn(browser, "close")
+      .mockImplementation(() => Promise.resolve());
+    await browser.command({ type: "close_tab", tabId: "person" });
+    expect(pages.get("person")!.close).toHaveBeenCalled();
+    // The destroyed event has not run: the page is still in the map.
+    expect(state.pageMap.has("person")).toBe(true);
+    expect(close).toHaveBeenCalledWith(false);
+  });
+
+  test("closing one of several tabs keeps the browser open", async () => {
+    const { browser } = makeBrowser();
+    const close = vi
+      .spyOn(browser, "close")
+      .mockImplementation(() => Promise.resolve());
+    await browser.command({ type: "close_tab", tabId: "person" });
+    expect(close).not.toHaveBeenCalled();
+  });
+
   test.each(["about:blank", "file:///private", "javascript:alert(1)"])(
     "opening outside ignores a non-web address (%s)",
     async (url) => {

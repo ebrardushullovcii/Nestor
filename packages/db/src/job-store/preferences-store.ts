@@ -21,6 +21,7 @@ import {
   type GoalValues,
   type SettingsValues,
   type ApplicationCrmStageDefinition,
+  NEW_PROFILE_BROWSER_PERMISSIONS,
 } from "@nestor/contracts";
 import type { JobStore } from "./job-store";
 import {
@@ -114,6 +115,21 @@ const defaultSettings = () =>
     coverLetter: CoverLetterPreferenceSchema.parse({}),
     applicationCrm: ApplicationCrmSettingsSchema.parse({}),
   });
+/**
+ * What a new profile stores: full access, the owner's default. Pay
+ * questions are answered from the person's saved facts and every browser
+ * permission is on; Guided setup and Settings show each with a switch. A
+ * file from before a setting existed keeps reading its empty column through
+ * `defaultSettings` (off), so an upgrade never switches anything on.
+ */
+const newProfileSettings = () =>
+  JobFinderSettingsSchema.parse({
+    ...defaultSettings(),
+    salaryDisclosure: "answer_from_profile",
+    aiBehavior: AiBehaviorPreferenceSchema.parse({
+      browserPermissions: NEW_PROFILE_BROWSER_PERMISSIONS,
+    }),
+  });
 export function createPreferencesStore(store: JobStore) {
   const items = createProfileItems(store),
     goals = createScalarValues(
@@ -125,6 +141,7 @@ export function createPreferencesStore(store: JobStore) {
       store,
       SETTINGS_TABLE,
       flatten(defaultSettings(), settingFields),
+      flatten(newProfileSettings(), settingFields),
     );
   if (settings.created)
     store.transaction(() => {
