@@ -134,6 +134,95 @@ describe("agent task runtime", () => {
     expect(seen[1]).toContain("applied to the task draft");
   });
 
+  test("each turn's request extends the previous one, with the changed task state on the newest message", async () => {
+    const requests: string[][] = [];
+    let turns = 0;
+    await runAgentTask({
+      taskId: "cached_prefix",
+      capability: "resume_generation",
+      systemPrompt: "Use the tools.",
+      state: { evidence: "SYNTHETIC_EVIDENCE" },
+      initialDraft: { text: "" },
+      model: {
+        chat(input) {
+          requests.push(
+            input.messages.map((message) => JSON.stringify(message)),
+          );
+          turns += 1;
+          return Promise.resolve({
+            toolCalls: [
+              turns < 3
+                ? {
+                    id: `write_${turns}`,
+                    type: "function" as const,
+                    function: {
+                      name: "write",
+                      arguments: JSON.stringify({ text: `DRAFT_${turns}` }),
+                    },
+                  }
+                : {
+                    id: "finish",
+                    type: "function" as const,
+                    function: { name: "finish_task", arguments: "{}" },
+                  },
+            ],
+          });
+        },
+      },
+      tools: [
+        {
+          name: "write",
+          description: "Write the draft",
+          inputSchema: z.object({ text: z.string() }),
+          parameters: { type: "object", properties: {} },
+          permission: "draft_write",
+          execute: (input) => ({
+            summary: "Written",
+            draft: { text: (input as { text: string }).text },
+            progressMade: true,
+          }),
+        },
+        {
+          name: "finish_task",
+          description: "Finish",
+          inputSchema: z.object({}),
+          parameters: { type: "object", properties: {} },
+          permission: "read",
+          execute: () => ({ summary: "Finished", finish: true }),
+        },
+      ],
+      validate: () => [],
+      buildContext: ({ state, draft }) => ({ ...state, draft }),
+      draftShownInContext: true,
+    });
+    expect(requests).toHaveLength(3);
+    // The opening task message never changes.
+    expect(new Set(requests.map((request) => request[1]))).toHaveProperty(
+      "size",
+      1,
+    );
+    // Every message before the newest of the previous request is repeated
+    // byte for byte, so the provider can serve it from its cache.
+    for (const [index, request] of requests.entries()) {
+      const previous = requests[index - 1];
+      if (!previous) continue;
+      expect(request.slice(0, previous.length - 1)).toEqual(
+        previous.slice(0, -1),
+      );
+    }
+    const last = requests[2]!.at(-1)!;
+    expect(last).toContain("taskStateUpdate");
+    expect(last).toContain("DRAFT_2");
+    expect(
+      requests[2]!.filter((message) =>
+        message.includes("Current task state, replacing"),
+      ),
+    ).toHaveLength(1);
+    expect(requests[1]).toEqual(
+      expect.arrayContaining([expect.stringContaining("SYNTHETIC_EVIDENCE")]),
+    );
+  });
+
   test("repairs a rejected tool call and finishes a valid draft", async () => {
     let call = 0;
     const result = await runAgentTask({

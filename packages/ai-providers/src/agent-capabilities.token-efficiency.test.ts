@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { agentToolResultText, readAgentTaskState } from "@nestor/agent-runtime";
 
 import {
   buildWriterProfileOutline,
@@ -42,13 +43,9 @@ async function captureGeneration(request: CreateResumeDraftInput) {
   const client: AgentCapableJobFinderAiClient = {
     ...createDeterministicJobFinderAiClient(),
     chatWithTools(messages) {
-      payloads.push(
-        JSON.parse(
-          messages.find((message) => message.role === "user")!.content,
-        ) as VisibleContext,
-      );
+      payloads.push(readAgentTaskState(messages) as VisibleContext);
       for (const message of messages.filter((entry) => entry.role === "tool")) {
-        const result = JSON.parse(message.content) as {
+        const result = JSON.parse(agentToolResultText(message.content)) as {
           inlineItems?: Array<Record<string, unknown>>;
         };
         if (result.inlineItems?.[0])
