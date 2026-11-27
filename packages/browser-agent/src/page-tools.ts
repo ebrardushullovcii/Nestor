@@ -113,7 +113,7 @@ export function createPageTools(
   };
 
   const tools: AgentLoopTool[] = [
-    ...createVisualPageTools(hands, observe),
+    ...createVisualPageTools(hands, observe, describe),
     ...createKeyboardTools(hands, observe, describe).map((tool) =>
       tool.definition.function.name === "press_key"
         ? {

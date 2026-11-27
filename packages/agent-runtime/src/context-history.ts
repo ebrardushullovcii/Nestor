@@ -71,13 +71,25 @@ export function createContextHistory(maxChars: number) {
         kind: "ok",
         content: `No archive ${String(args.archive)}. Available archives: ${archives.length}.`,
       };
-    // Private provider continuation is not public transcript data.
+    // Private provider continuation is not public transcript data. Images
+    // come back as images, named in the message they belonged to.
+    const images: NonNullable<
+      Extract<AgentLoopMessage, { role: "tool" }>["images"]
+    > = [];
     const messages = archive
       .slice(
         Number(args.start ?? 0),
         args.end === undefined ? undefined : Number(args.end),
       )
       .map((message) => {
+        if (message.role === "tool" && message.images?.length) {
+          images.push(...message.images);
+          const { images: attached, ...rest } = message;
+          return {
+            ...rest,
+            images: attached.map((image) => image.label),
+          };
+        }
         if (message.role !== "assistant") return message;
         return {
           role: message.role,
@@ -92,11 +104,17 @@ export function createContextHistory(maxChars: number) {
         totalMessages: archive.length,
         messages,
       }),
+      ...(images.length ? { images } : {}),
     };
   }
 
   return {
     tool,
+    /** Keeps exact messages readable; returns their archive id. */
+    archive(messages: AgentLoopMessage[]): number {
+      archives.push(messages);
+      return archives.length;
+    },
     compact(
       messages: AgentLoopMessage[],
       openingCount: number,

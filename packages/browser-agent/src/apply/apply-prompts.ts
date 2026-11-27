@@ -253,6 +253,17 @@ function placesOfRepeatedLabels<
 }
 
 /** The page, written out for the model. Nothing here is a DOM handle. */
+/**
+ * Page text keeps every word; runs of blank space between them (often most
+ * of a rendered form's text) become one space or one line break.
+ */
+export function collapseBlankRuns(text: string): string {
+  return text
+    .replace(/[^\S\n]+/gu, " ")
+    .replace(/ ?\n\s*/gu, "\n")
+    .trim();
+}
+
 export function describeObservation(observation: ApplyFormObservation): string {
   const step =
     observation.step.index !== null && observation.step.total !== null
@@ -325,7 +336,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
           .join("\n")}`
       : null,
     observation.bodyTextExcerpt.trim()
-      ? `Page text:\n${observation.bodyTextExcerpt}`
+      ? `Page text:\n${collapseBlankRuns(observation.bodyTextExcerpt)}`
       : null,
   ]
     .filter((line): line is string => line !== null)

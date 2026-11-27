@@ -897,3 +897,69 @@ test.each(["browser", undefined] as const)(
     ).toBe(true);
   },
 );
+
+describe("superseded page views", () => {
+  test("fold before the next request, and the model can read them back word for word", async () => {
+    const seen: AgentLoopMessage[][] = [];
+    let page = 0;
+    const view = (n: number) => `VIEW ${n} ${"listing ".repeat(3_000)}`;
+    const model: AgentLoopModel = {
+      chatWithTools: (messages) => {
+        seen.push(messages.map((message) => ({ ...message })));
+        const turn = seen.length;
+        return Promise.resolve({
+          content: "",
+          toolCalls: [
+            turn <= 2
+              ? call("look", {}, `look_${turn}`)
+              : turn === 3
+                ? call("read_context_history", { archive: 1 }, "read")
+                : call("finish", {}, "done"),
+          ],
+        });
+      },
+    };
+    let readBack = "";
+    const result = await runAgentLoop({
+      messages: [
+        { role: "system", content: "rules" },
+        { role: "user", content: view(0) },
+      ],
+      model,
+      tools: [
+        tool("look", () =>
+          Promise.resolve({ kind: "ok", content: view(++page) }),
+        ),
+        finishTool,
+      ],
+      subjectLabel: "the site",
+      supersededContent: (messages) => {
+        // Every view but the newest is superseded.
+        const newest = `VIEW ${page} `;
+        return messages.flatMap((message, index) =>
+          message.role !== "system" &&
+          message.content.startsWith("VIEW ") &&
+          !message.content.startsWith(newest)
+            ? [{ index, content: `[${message.content.slice(0, 6)} folded]` }]
+            : [],
+        );
+      },
+      onToolTiming: () => undefined,
+    });
+    expect(result.ending).toBe("finished");
+    // Request 2: the opening view is folded, the first look whole.
+    expect(seen[1]![1]!.content).toBe(
+      "[VIEW 0 folded] [Exact earlier message: read_context_history archive 1.]",
+    );
+    expect(seen[1]![3]!.content).toBe(view(1));
+    // Request 3: views 0 and 1 are folded; only view 2 is whole.
+    expect(seen[2]!.filter((m) => m.content.startsWith("VIEW "))).toEqual([
+      expect.objectContaining({ content: view(2) }),
+    ]);
+    readBack = seen[3]!.at(-1)!.content;
+    expect(JSON.parse(readBack)).toMatchObject({
+      archive: 1,
+      messages: [{ role: "user", content: view(0) }],
+    });
+  });
+});

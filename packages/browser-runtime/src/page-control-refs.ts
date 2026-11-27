@@ -13,6 +13,25 @@ interface Binding {
 interface RefState {
   refs: Map<string, Binding>;
   identities: Map<string, string>;
+  /** Highest handle number given out per kind. */
+  next?: Map<Kind, number>;
+}
+
+/**
+ * A handle for an element seen for the first time: its position (`l3`) when
+ * no other element holds that, or else the next unused number of its kind
+ * (`l138`). Short handles keep every page view, and each change to one,
+ * small; a handle is never reused for another element on this page.
+ */
+function freshHandle(state: RefState, kind: Kind, ordinal: string): string {
+  if (!state.refs.has(ordinal)) return ordinal;
+  const next = (state.next ??= new Map());
+  let number = next.get(kind) ?? 0;
+  let handle: string;
+  do handle = `${kind}${++number}`;
+  while (state.refs.has(handle));
+  next.set(kind, number);
+  return handle;
 }
 const bindings = new WeakMap<Page, RefState>();
 const groups = {
@@ -134,8 +153,7 @@ export function controlSnapshot(
           if (!ordinal || !nodeRef) continue;
           const identity = `${nodeRef}:${kind}`;
           const handle =
-            state.identities.get(identity) ??
-            (state.refs.has(ordinal) ? `${nodeRef}${kind}` : ordinal);
+            state.identities.get(identity) ?? freshHandle(state, kind, ordinal);
           entry.ref = handle;
           state.refs.set(handle, { frame, nodeRef, kind });
           state.identities.set(identity, handle);
