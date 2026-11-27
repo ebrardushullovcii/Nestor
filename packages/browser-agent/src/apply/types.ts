@@ -126,6 +126,11 @@ export interface ApplyFormControl {
   checked: boolean;
   options: string[];
   selectedOptionLabel: string;
+  /**
+   * What a search box holds as items in its own field (a Workday prompt's
+   * chosen pills), when it has such a list; `value` is then search text.
+   */
+  selectedItems?: string[];
   invalid: boolean;
   validationMessage: string;
   /** What a file input's own field shows about its upload, when the page said. */
@@ -154,6 +159,8 @@ export interface ApplyPlacement {
   frame?: ApplyFrameOwner;
   /** The part of the page holding it: legend, dialog or section name, or nearby words. */
   section?: string;
+  /** The short words nearest it, when they differ from its section. */
+  nearby?: string;
   /** Inside a form, a fieldset or a group of fields. */
   inForm?: boolean;
 }

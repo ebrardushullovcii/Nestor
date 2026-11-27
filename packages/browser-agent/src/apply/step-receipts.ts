@@ -30,7 +30,9 @@ export function observedControlValue(
       : "Yes"
     : control.kind === "radio"
       ? control.label || control.value
-      : control.selectedOptionLabel || control.value;
+      : control.selectedItems
+        ? JSON.stringify(control.selectedItems)
+        : control.selectedOptionLabel || control.value;
 }
 
 /** Fields a receipt may hold: visible, enabled, answered, never a secret or a file. */

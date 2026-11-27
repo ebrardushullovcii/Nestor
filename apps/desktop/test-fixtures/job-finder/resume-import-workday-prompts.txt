@@ -1,0 +1,29 @@
+Jamie Rivers
+Senior Full-Stack Engineer
+Berlin, Germany
+jamie@example.com
++49 555 0000000
+https://jamie.example.test
+https://www.linkedin.com/in/jamie-rivers-test
+
+Summary
+Full-stack engineer with 12 years of experience building React and TypeScript product interfaces on Node.js and PostgreSQL services.
+
+Experience
+Signal Systems
+Senior Full-Stack Engineer
+2018 - Present
+Built React and TypeScript product UI, Node.js GraphQL APIs on PostgreSQL, and Docker-based deployments on AWS.
+
+Education
+Example Technical University
+BSc Computer Science
+
+Skills
+React
+TypeScript
+Node.js
+PostgreSQL
+Docker
+GraphQL
+AWS

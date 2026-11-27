@@ -3,7 +3,7 @@ import path from "node:path";
 import { App } from "./app.ts";
 import { google, savedSignIn, browserImport } from "./sign-in.ts";
 import * as applications from "./applications.ts";
-import { setup } from "./profile.ts";
+import { setup, WORKDAY_PROMPTS_RESUME } from "./profile.ts";
 import { search } from "./search.ts";
 import { auditQuestions, PERSONA, save, SCENARIOS } from "./report.ts";
 import type { Context, Result, Run } from "./types.ts";
@@ -15,6 +15,7 @@ const handlers: Record<string, (app: App, result: Result) => Promise<void>> = {
   "saved-sign-in": savedSignIn,
   "browser-import": browserImport,
   ...applications,
+  "workday-prompts": applications.workdayPrompts,
 };
 const likely: Record<string, string> = {
   google:
@@ -25,6 +26,8 @@ const likely: Record<string, string> = {
     "apps/desktop/src/main/services/browser/browser-profile-import.ts or browser-passwords routes",
   standard:
     "packages/browser-agent/src/apply (profile answer selection/checking)",
+  "workday-prompts":
+    "packages/browser-runtime/src/choose-page-option.ts and listbox-relation.ts (prompt lookups and pills)",
   multistep:
     "packages/browser-agent/src/apply (sign-in or ordinary step handling)",
   captcha:
@@ -56,7 +59,12 @@ export default async function journey(ctx: Context) {
   if (ctx.ai !== "live") throw Error("Scoreboard requires --ai live");
   try {
     await startReplicaAliases(ctx.sites.url);
-    await setup(app);
+    await setup(
+      app,
+      config.scenario === "workday-prompts"
+        ? WORKDAY_PROMPTS_RESUME
+        : undefined,
+    );
     run.setupSeconds =
       (run.setupSeconds ?? 0) + (Date.now() - setupStarted) / 1000;
     run.persona = PERSONA;
@@ -95,6 +103,7 @@ export default async function journey(ctx: Context) {
     "search",
     "standard",
     "multistep",
+    "workday-prompts",
     "captcha",
     "security",
     "restart",

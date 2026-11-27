@@ -84,10 +84,20 @@ export function readStepPosition(
 ): ApplyStepPosition {
   const label = stepLabel?.trim() || null;
   const haystack = label ?? bodyText.slice(0, 4_000);
+  // A progress bar that lists every step says which one is current
+  // ("completed step 1 of 5 … current step 2 of 5 … step 3 of 5", as
+  // Workday's does); the first step it lists is not where the form is.
+  const steps = [
+    ...haystack.matchAll(
+      /\b(?:step|page|section)\s+(\d{1,2})\s*(?:of|\/|from)\s*(\d{1,2})\b/giu,
+    ),
+  ];
+  const before = (match: RegExpMatchArray) =>
+    haystack.slice(Math.max(0, (match.index ?? 0) - 24), match.index ?? 0);
   const numbered =
-    /\b(?:step|page|section)\s+(\d{1,2})\s*(?:of|\/|from)\s*(\d{1,2})\b/iu.exec(
-      haystack,
-    );
+    steps.find((match) => /\bcurrent\W*$/iu.test(before(match))) ??
+    steps.find((match) => !/\bcomplete(?:d)?\W*$/iu.test(before(match))) ??
+    steps[0];
   if (numbered?.[1] && numbered[2]) {
     return {
       label,
@@ -137,6 +147,7 @@ function placementOf(raw: RawApplyPlacement): ApplyPlacement {
     ...(raw.scopeKey ? { scopeKey: raw.scopeKey } : {}),
     ...(raw.formIndex !== undefined ? { formIndex: raw.formIndex } : {}),
     ...(raw.section?.trim() ? { section: raw.section.trim() } : {}),
+    ...(raw.nearby?.trim() ? { nearby: raw.nearby.trim() } : {}),
     ...(raw.inForm ? { inForm: true } : {}),
   };
 }
@@ -376,6 +387,9 @@ export function buildApplyFormObservation(
       checked: rawControl.checked,
       options: rawControl.options,
       selectedOptionLabel: rawControl.selectedOptionLabel,
+      ...(rawControl.selectedItems
+        ? { selectedItems: [...rawControl.selectedItems] }
+        : {}),
       invalid: rawControl.invalid,
       validationMessage: rawControl.validationMessage,
       ...(rawControl.upload ? { upload: rawControl.upload } : {}),

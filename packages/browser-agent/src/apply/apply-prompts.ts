@@ -146,6 +146,17 @@ function describeAnswered(
 ): string {
   // A widget that emptied its input once the upload landed still holds the
   // file; shown as empty, the model attaches it again.
+  // A search box beside the items it holds: what it holds, and apart from
+  // that whatever search text is in the box.
+  if (control.selectedItems) {
+    const held = control.selectedItems.length
+      ? `${control.selectedItems.length} selected: ${control.selectedItems.map((item) => JSON.stringify(item)).join(", ")}`
+      : "nothing selected";
+    const typed = control.value.trim();
+    return typed
+      ? `${held} · search text in the box: ${JSON.stringify(typed)}`
+      : held;
+  }
   if (!holdsAnswer(control)) return "empty";
   if (
     control.credentialRole === "password" ||
@@ -214,6 +225,32 @@ function describeControl(
   return `- ${parts.join(" · ")}`;
 }
 
+/**
+ * Where each of several entries with one label sits, so five "Add" buttons
+ * say which block each adds to. The section names it when the sections
+ * differ, else the words nearest each.
+ */
+function placesOfRepeatedLabels<
+  T extends { label: string; section?: string; nearby?: string },
+>(entries: readonly T[]): Map<T, string> {
+  const byLabel = new Map<string, T[]>();
+  for (const entry of entries) {
+    const key = entry.label.trim().toLowerCase();
+    byLabel.set(key, [...(byLabel.get(key) ?? []), entry]);
+  }
+  const places = new Map<T, string>();
+  for (const group of byLabel.values()) {
+    if (group.length < 2) continue;
+    const sections = new Set(group.map((entry) => entry.section ?? ""));
+    for (const entry of group) {
+      const place =
+        sections.size > 1 ? entry.section : (entry.nearby ?? entry.section);
+      if (place) places.set(entry, ` (in: ${place})`);
+    }
+  }
+  return places;
+}
+
 /** The page, written out for the model. Nothing here is a DOM handle. */
 export function describeObservation(observation: ApplyFormObservation): string {
   const step =
@@ -227,6 +264,8 @@ export function describeObservation(observation: ApplyFormObservation): string {
   const actions = observation.actions.filter((action) => action.visible);
   const links = observation.links.filter((link) => link.visible);
   const clickables = observation.clickables.filter((entry) => entry.visible);
+  const actionPlaces = placesOfRepeatedLabels(actions);
+  const clickablePlaces = placesOfRepeatedLabels(clickables);
 
   if (observation.navigationNote)
     observation = {
@@ -253,7 +292,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
           .join("\n")}`
       : null,
     observation.validationErrors.length > 0
-      ? `The page is showing problems:\n${observation.validationErrors
+      ? `The page announces (its alert regions, word for word):\n${observation.validationErrors
           .map((error) => `- ${error}`)
           .join("\n")}`
       : null,
@@ -264,7 +303,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
       ? `Buttons:\n${actions
           .map(
             (action) =>
-              `- ${action.ref}: ${action.label}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
+              `- ${action.ref}: ${action.label}${actionPlaces.get(action) ?? ""}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,
@@ -280,7 +319,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
       ? `Other clickable things:\n${clickables
           .map(
             (entry) =>
-              `- ${entry.ref}: ${entry.label}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
+              `- ${entry.ref}: ${entry.label}${clickablePlaces.get(entry) ?? ""}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,

@@ -14,6 +14,7 @@ import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
 import { handleRemoteSearch } from "./remote-search.mjs";
 import { handleCityLookup } from "./city-lookup.mjs";
+import { handleWorkdayPrompts } from "./workday-prompts.mjs";
 import { handleRichText } from "./rich-text.mjs";
 import { handleEmailApply } from "./email-apply.mjs";
 import { handleSelfId } from "./self-id.mjs";
@@ -467,6 +468,8 @@ const server = http.createServer(async (req, res) => {
     if (await handleRemoteSearch(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleCityLookup(req, res, url, { send, readPost, logPost }))
+      return;
+    if (await handleWorkdayPrompts(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleRichText(req, res, url, { send, readPost, logPost }))
       return;

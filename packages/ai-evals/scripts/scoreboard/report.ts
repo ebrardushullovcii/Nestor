@@ -5,6 +5,7 @@ import type { Question, Run } from "./types.ts";
 export const SCENARIOS = [
   ["standard", "Standard application"],
   ["multistep", "Workday four steps"],
+  ["workday-prompts", "Workday prompts, pills and skills (Send)"],
   ["captcha", "CAPTCHA and auto-resume"],
   ["security", "Eight-second security check"],
   ["restart", "Restart filled application"],

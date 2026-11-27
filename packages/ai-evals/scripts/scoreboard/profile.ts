@@ -12,19 +12,24 @@ export const SOURCES = [
   "ripple/",
 ];
 
-export async function setup(app: App) {
+/**
+ * Jamie with a full-stack record listing seven skills, for a Skills field
+ * that asks for five to ten. The same contact, place and settings as Jamie.
+ */
+export const WORKDAY_PROMPTS_RESUME =
+  "test-fixtures/job-finder/resume-import-workday-prompts.txt";
+
+export async function setup(
+  app: App,
+  resume = "test-fixtures/job-finder/resume-import-sample.txt",
+) {
   const { ctx } = app;
   const p = await ctx.page;
   await ctx.waitFor("Guided setup", 30, { role: "heading" });
   const chooser = p.getByRole("button", { name: /Choose my resume file/ });
   if (await chooser.count()) {
-    app.log("import synthetic Jamie resume");
-    ctx.pick(
-      path.join(
-        ctx.desktopDir,
-        "test-fixtures/job-finder/resume-import-sample.txt",
-      ),
-    );
+    app.log("import synthetic Jamie resume", { resume });
+    ctx.pick(path.join(ctx.desktopDir, resume));
     await chooser.click();
   }
   await ctx.waitFor("/Basics.*Ready to review/", 360, { role: "button" });

@@ -92,7 +92,9 @@ export function pageAnswerSuggestion(
         ? control.checked
           ? "Yes"
           : "No"
-        : control.selectedOptionLabel || control.value;
+        : control.selectedItems
+          ? control.selectedItems.join(", ")
+          : control.selectedOptionLabel || control.value;
   return answer.trim() && answer.length <= 20000 ? { answer, control } : null;
 }
 
