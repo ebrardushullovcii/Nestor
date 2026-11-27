@@ -183,6 +183,7 @@ export type ResumeCommandInput<K extends ResumeCommandName> = z.input<
 
 export interface ShortlistedPage {
   rows: ShortlistedRow[];
+  readyResumeCount: number;
   nextCursor: string | null;
   total: number;
   totalCapped: boolean;

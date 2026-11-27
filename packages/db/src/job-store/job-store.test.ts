@@ -422,7 +422,7 @@ describe("job store", () => {
     expect(store.getJob(id)?.stage).toBe("found");
     expect(
       createApplicationStore(store).applyJobs({ selection: { ids: [id] } }),
-    ).toEqual({ queued: 0, unchanged: 0, notReady: 1 });
+    ).toMatchObject({ queued: 0, unchanged: 0, notReady: 1 });
   });
 
   it("undoes a move again once a later move of its jobs is undone", () => {

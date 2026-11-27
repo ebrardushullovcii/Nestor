@@ -18,7 +18,7 @@ import type {
   AnswerNeedsYouInput,
   AnswerNeedsYouResult,
   ApplyJobsInput,
-  ApplyJobsResult,
+  ApplyJobsQueueResult,
   JobChange,
   ApplicationStoreDemoResult,
 } from "@nestor/contracts";
@@ -31,7 +31,6 @@ import type {
   ApplicationListQuery,
   ApplicationStoreDemoResult,
   ApplyJobsInput,
-  ApplyJobsResult,
   CandidateAssetDeleteInput,
   CandidateAssetDeleteResult,
   CandidateAssetImportInput,
@@ -178,7 +177,7 @@ declare global {
         ) => Promise<unknown>;
       };
       jobFinder: {
-        applyJobs: (input: ApplyJobsInput) => Promise<ApplyJobsResult>;
+        applyJobs: (input: ApplyJobsInput) => Promise<ApplyJobsQueueResult>;
         listApplications: (
           input?: ApplicationListQuery,
         ) => Promise<ApplicationListPage>;

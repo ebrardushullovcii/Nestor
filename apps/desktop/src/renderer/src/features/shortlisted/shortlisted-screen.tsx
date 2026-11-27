@@ -1,5 +1,7 @@
 import { cn } from "@renderer/lib/cn";
 import type {
+  ApplyJobSkip,
+  ApplicationWorkState,
   JobSelectionInput,
   ShortlistedPage,
   ShortlistedRow,
@@ -60,15 +62,48 @@ type Tab = "shortlisted" | "resume";
 
 const FILTER_ID = "shortlisted-filter";
 
+const existingApplication: Record<ApplicationWorkState, string> = {
+  queued: "This application is already queued.",
+  running: "Apply is already working on this job.",
+  needs_you: "This application is waiting for you.",
+  ready: "This application is ready to send.",
+  submitting: "This application is being sent.",
+  submitted: "This application was already sent.",
+  stopped: "This application was stopped.",
+  skipped: "Apply already skipped this posting.",
+  blocked: "This application is blocked.",
+  failed: "An earlier application failed.",
+  uncertain: "An earlier send has an uncertain outcome.",
+  closed: "The posting is closed.",
+};
+
+function skippedApplyReason(job: ApplyJobSkip): string {
+  switch (job.reason) {
+    case "job_missing":
+      return "This job no longer exists.";
+    case "job_moved":
+      return "This job has left Shortlisted.";
+    case "resume_waiting":
+      return job.detail || "Its resume is still being written.";
+    case "resume_failed":
+      return ["Resume writing failed.", job.detail].filter(Boolean).join(" ");
+    case "application_exists":
+      return [
+        job.applicationState
+          ? existingApplication[job.applicationState]
+          : "An application already exists for this job.",
+        job.detail,
+      ]
+        .filter(Boolean)
+        .join(" ");
+  }
+}
+
 /**
  * Shortlisted: every shortlisted job's resume is written as soon as it lands
  * here. Read each one, edit it if you like, approve it if you like; Apply
  * takes any written resume, approved or not, from either tab.
  */
-function notReady(count: number): string {
-  return `${plural(count, "resume")} still being written`;
-}
-
 export function ShortlistedScreen() {
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
@@ -99,6 +134,7 @@ export function ShortlistedScreen() {
   }, [reading.measured, reading.sheet, setSheetOpen]);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [busy, setBusy] = useState<"approve" | "apply" | "move" | null>(null);
+  const [applySkips, setApplySkips] = useState<ApplyJobSkip[]>([]);
   const approvalPending = useRef(false);
   const requestedApproved = searchParams.get("tab") === "approved";
   useEffectWhileKeptRouteShown(() => {
@@ -108,7 +144,11 @@ export function ShortlistedScreen() {
     setSelection(NO_SELECTION);
   }, [requestedApproved, navigationKey]);
   const view = useResume(activeId);
-  const list = useStoreList<ShortlistedRow>({
+  const list = useStoreList<
+    ShortlistedRow,
+    ShortlistedPage["counts"],
+    Pick<ShortlistedPage, "readyResumeCount">
+  >({
     key: JSON.stringify([tab, text]),
     load: ({ cursor, limit }) =>
       window.nestor.resumes.run("list_shortlisted", {
@@ -139,18 +179,18 @@ export function ShortlistedScreen() {
   const selectedText = `${selectedCount.toLocaleString()}${
     totalCapped && selection.all ? "+" : ""
   }`;
-  // Ticked resumes still being written cannot be approved yet. Counted over
-  // explicit ticks (every ticked row is loaded); "all matching" is checked
-  // when it runs, and those still writing stay in To review.
-  const stillWriting =
-    tab === "shortlisted" && !selection.all
-      ? list.rows.filter(
-          (row) => selection.ids.has(row.id) && row.resume?.state !== "ready",
-        ).length
-      : 0;
-  const approvable = selection.all
-    ? selectedCount
-    : Math.max(0, selectedCount - stillWriting);
+  const readyRows = list.rows.filter((row) => row.resume?.state === "ready");
+  const readyTotal = list.readyResumeCount ?? 0;
+  // Explicit selections and exclusions only come from loaded rows.
+  const readySelected = selection.all
+    ? Math.max(
+        0,
+        readyTotal -
+          readyRows.filter((row) => selection.ids.has(row.id)).length,
+      )
+    : readyRows.filter((row) => selection.ids.has(row.id)).length;
+  const readyToApply = selectedCount > 0 ? readySelected : readyTotal;
+  const notReadyToApprove = selectedCount - readySelected;
 
   // Arriving with nothing to review while approved jobs wait opens Approved,
   // where the jobs are. A link, a tab or an Assistant view chooses for itself.
@@ -410,8 +450,16 @@ export function ShortlistedScreen() {
         (id) => change.ids === null || change.ids.includes(id),
       );
       if (watched.length === 0) return;
-      void jobFinder
-        .applicationsForJobs({ jobIds: watched })
+      const requests = [];
+      // The read bridge takes at most 200 ids. A filtered Apply spans pages.
+      for (let start = 0; start < watched.length; start += 200)
+        requests.push(
+          jobFinder.applicationsForJobs({
+            jobIds: watched.slice(start, start + 200),
+          }),
+        );
+      void Promise.all(requests)
+        .then((pages) => pages.flat())
         .then((rows) => {
           const failed = rows.filter((row) => row.state === "failed");
           for (const row of rows)
@@ -454,6 +502,7 @@ export function ShortlistedScreen() {
             ? { ids: latest.current.list.rows.map((row) => row.id) }
             : target();
       if (!input || ("ids" in input && input.ids.length === 0)) return;
+      setApplySkips([]);
       setBusy("apply");
       try {
         const result = await window.nestor.jobFinder.applyJobs({
@@ -463,33 +512,21 @@ export function ShortlistedScreen() {
           ...(scope === "page" ? { bulk: true } : {}),
         });
         setSelection(NO_SELECTION);
-        if (result.queued > 0) {
-          const ids =
-            "ids" in input
-              ? input.ids
-              : latest.current.list.rows
-                  .filter(
-                    (row) =>
-                      !("except" in input) ||
-                      !(input.except ?? []).includes(row.id),
-                  )
-                  .map((row) => row.id);
-          for (const id of ids) applyWatch.current.add(id);
-        }
+        setApplySkips(result.skipped);
+        for (const id of result.queuedJobIds) applyWatch.current.add(id);
         showToast({
           id: "shortlisted-apply",
           title:
             result.queued > 0
               ? `Applying to ${plural(result.queued, "job")}`
-              : result.unchanged > 0
-                ? "Those jobs are already being applied to"
-                : notReady(result.notReady),
+              : "No applications queued",
           description:
-            result.queued === 0 && result.unchanged === 0
-              ? "Apply once a resume is written."
-              : result.notReady > 0
-                ? `${notReady(result.notReady)} stayed here.`
-                : "Each one moves to Applications once it is sent.",
+            result.skipped.length > 0
+              ? "See the jobs that weren’t queued in Shortlisted."
+              : result.queued > 0
+                ? "Each one moves to Applications once it is sent."
+                : "No jobs match this selection now.",
+          tone: result.queued === 0 ? "warning" : "neutral",
         });
       } catch (error) {
         showToast({ title: describeError(error), tone: "warning" });
@@ -623,18 +660,21 @@ export function ShortlistedScreen() {
 
   const jobsText = (count: number, capped = false) =>
     `${count.toLocaleString()}${capped ? "+" : ""} ${count === 1 ? "job" : "jobs"}`;
-  // Every job here already has Apply at work: nothing to press.
+  // The ready resumes here already have active applications.
   const allApplying =
     selectedCount === 0 &&
-    list.rows.length > 0 &&
-    list.nextCursor === null &&
-    list.rows.every(
-      (row) => row.application !== null && row.application.status !== "failed",
+    readyTotal > 0 &&
+    readyRows.length === readyTotal &&
+    readyRows.every(
+      ({ application }) =>
+        application?.status === "applying" ||
+        application?.status === "ready" ||
+        application?.status === "needs_you",
     );
   // The pending label follows where each one really is: an application
   // waiting on an answer or a Send is no longer "applying".
   const appliesBy = (status: "applying" | "ready" | "needs_you") =>
-    list.rows.filter((row) => row.application?.status === status).length;
+    readyRows.filter((row) => row.application?.status === status).length;
   const applyingLabel = (() => {
     const parts = [
       appliesBy("applying") > 0
@@ -649,19 +689,19 @@ export function ShortlistedScreen() {
     ].filter(Boolean);
     return parts.length > 0
       ? parts.join(" · ")
-      : `Applying to ${jobsText(list.rows.length)}`;
+      : `Applying to ${jobsText(readyRows.length)}`;
   })();
   const applyLabel = allApplying
     ? applyingLabel
     : counting
       ? "Apply"
-      : selectedCount > 0
-        ? `Apply to ${jobsText(selectedCount, totalCapped && selection.all)}`
-        : list.totalCapped
-          ? "Apply to all matching jobs"
-          : list.total === 1
+      : readyToApply === 0
+        ? "No resumes ready to apply"
+        : selectedCount > 0
+          ? `Apply to ${jobsText(readySelected)}`
+          : readyToApply === 1
             ? "Apply to 1 job"
-            : `Apply to all ${jobsText(list.total)}`;
+            : `Apply to all ${jobsText(readyToApply)}`;
 
   return (
     <LockedScreenLayout
@@ -685,7 +725,9 @@ export function ShortlistedScreen() {
             actions={
               list.total > 0 ? (
                 <>
-                  {selectedCount === 0 && list.total > list.rows.length ? (
+                  {selectedCount === 0 &&
+                  readyTotal > readyRows.length &&
+                  readyRows.length > 0 ? (
                     // More jobs match than this page shows.
                     <Button
                       disabled={busy !== null || list.loading}
@@ -693,12 +735,16 @@ export function ShortlistedScreen() {
                       size="toolbar"
                       variant="outline"
                     >
-                      {`Apply to the ${jobsText(list.rows.length)} on this page`}
+                      {`Apply to the ${jobsText(readyRows.length)} on this page`}
                     </Button>
                   ) : null}
                   <Button
                     disabled={
-                      busy !== null || list.loading || counting || allApplying
+                      busy !== null ||
+                      list.loading ||
+                      counting ||
+                      allApplying ||
+                      readyToApply === 0
                     }
                     onClick={() =>
                       void apply(selectedCount === 0 ? "all" : "target")
@@ -760,6 +806,26 @@ export function ShortlistedScreen() {
             ]}
             value={tab}
           />
+          {applySkips.length > 0 ? (
+            <details className="min-w-0 text-sm">
+              <summary className="w-fit cursor-pointer text-foreground">
+                {`${jobsText(applySkips.length)} ${applySkips.length === 1 ? "wasn’t" : "weren’t"} queued`}
+              </summary>
+              <ul className="mt-1 grid max-h-36 gap-2 overflow-auto pl-4">
+                {applySkips.map((job) => (
+                  <li key={job.jobId}>
+                    <strong>
+                      {job.title ?? `Job #${job.jobId}`}
+                      {job.company ? ` at ${job.company}` : ""}
+                    </strong>
+                    <p className="text-foreground-muted">
+                      {skippedApplyReason(job)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </div>
       }
     >
@@ -802,30 +868,21 @@ export function ShortlistedScreen() {
             activeId={activeId}
             bulkActions={
               <>
-                {stillWriting > 0 ? (
+                {tab === "shortlisted" && notReadyToApprove > 0 ? (
                   // Why Approve counts fewer than are ticked, or is off.
                   <span className="hidden truncate text-(length:--text-small) text-foreground-soft @2xl/listbar:inline">
-                    {`${stillWriting.toLocaleString()} still writing`}
+                    {`${notReadyToApprove.toLocaleString()} resumes not ready`}
                   </span>
                 ) : null}
                 <Button
                   aria-label={
                     tab !== "shortlisted"
-                      ? `Apply to ${selectedText} selected`
-                      : stillWriting > 0
-                        ? `Approve ${approvable.toLocaleString()} of ${selectedText} selected`
+                      ? `Apply to ${readySelected.toLocaleString()} selected`
+                      : notReadyToApprove > 0
+                        ? `Approve ${readySelected.toLocaleString()} of ${selectedText} selected`
                         : `Approve ${selectedText} selected`
                   }
-                  disabled={
-                    busy !== null ||
-                    counting ||
-                    (tab === "shortlisted" && approvable === 0)
-                  }
-                  title={
-                    stillWriting > 0
-                      ? `${plural(stillWriting, "resume")} still writing ${stillWriting === 1 ? "stays" : "stay"} in To review`
-                      : undefined
-                  }
+                  disabled={busy !== null || counting || readySelected === 0}
                   onClick={() =>
                     void (tab === "shortlisted" ? approve() : apply())
                   }
@@ -837,25 +894,21 @@ export function ShortlistedScreen() {
                   size="toolbar"
                 >
                   {`${tab === "shortlisted" ? "Approve" : "Apply"} ${
-                    counting
-                      ? ""
-                      : tab === "shortlisted" && !selection.all
-                        ? approvable.toLocaleString()
-                        : selectedText
+                    counting ? "" : readySelected.toLocaleString()
                   }`.trim()}
                 </Button>
                 {tab === "shortlisted" ? (
                   // A written resume can be applied with as it is: approval
                   // is the person's marker, never a step before Apply.
                   <Button
-                    aria-label={`Apply to ${selectedText} selected`}
-                    disabled={busy !== null || counting}
+                    aria-label={`Apply to ${readySelected.toLocaleString()} selected`}
+                    disabled={busy !== null || counting || readySelected === 0}
                     onClick={() => void apply()}
                     pending={busy === "apply"}
                     size="toolbar"
                     variant="outline"
                   >
-                    {`Apply ${counting ? "" : selectedText}`.trim()}
+                    {`Apply ${counting ? "" : readySelected.toLocaleString()}`.trim()}
                   </Button>
                 ) : null}
                 <Button

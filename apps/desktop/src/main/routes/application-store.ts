@@ -3,7 +3,7 @@ import {
   ApplicationListPageSchema,
   ApplicationListQuerySchema,
   ApplyJobsInputSchema,
-  ApplyJobsResultSchema,
+  ApplyJobsQueueResultSchema,
   ApplicationStoreDemoInputSchema,
   ApplicationStoreDemoResultSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
@@ -65,7 +65,7 @@ export async function executeApplicationStoreCommand(
           "The person paused background work. Resume it before applying.",
         );
       noteExplicitUserStart();
-      return ApplyJobsResultSchema.parse(
+      return ApplyJobsQueueResultSchema.parse(
         store.applyJobs(
           value,
           instruction
