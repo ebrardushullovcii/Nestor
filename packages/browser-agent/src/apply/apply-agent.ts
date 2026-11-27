@@ -325,7 +325,8 @@ async function runApplyAgentPrivate(
       const control = handedControl(item);
       if (
         !control ||
-        (control.kind !== "select" && control.kind !== "combobox")
+        (control.kind !== "select" && control.kind !== "combobox") ||
+        control.options.some((option) => option.trim())
       )
         continue;
       const options = await config.hands
