@@ -3,7 +3,7 @@ import { z } from "zod";
 import { WorkModeSchema, type WorkMode } from "./base";
 import { JOB_FIT_BANDS } from "./plain-values";
 
-/** The longest short fit reason, in characters: a narrow row's room. */
+/** The short fit reason's length the fit model aims for, in characters: a narrow row's room. Longer ones are kept; the row fits them. */
 export const FIT_SHORT_MAX = 32;
 
 /**
@@ -105,7 +105,7 @@ export const JobRowSchema = z.object({
    * you want"), for a row with no room for the line; null where the fit
    * step wrote none (older rows), which then cut the line with "…".
    */
-  fitShort: z.string().max(FIT_SHORT_MAX).nullable().optional(),
+  fitShort: z.string().nullable().optional(),
   postedAt: z.string().nullable(),
   foundAt: z.string(),
   /** The search that found it first. */
@@ -138,7 +138,7 @@ export const JOB_TOTAL_CAP = 1000;
 
 export const JobFitSchema = z.object({
   /** {@link JobRow.fitShort}: the summary in a few words. */
-  short: z.string().max(FIT_SHORT_MAX).optional(),
+  short: z.string().optional(),
   inputFingerprint: z.string().optional(),
   limit: z
     .object({
