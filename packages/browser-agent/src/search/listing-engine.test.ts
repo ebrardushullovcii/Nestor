@@ -1906,7 +1906,11 @@ test("a page the reader calls an index of vacancies is returned for collection, 
         html: "<main><h1>DevOps and Sysadmin Jobs</h1><p>Latest remote DevOps postings from many employers, each with its own page.</p></main>",
       }),
   });
-  expect(result).toEqual({ jobs: [], failures: [], indexes: [index.url] });
+  expect(result).toEqual({
+    jobs: [],
+    failures: [],
+    indexes: [{ requestedUrl: index.url, indexUrl: index.url }],
+  });
   expect(chatWithTools.mock.calls[0]?.[0][0]?.content).toContain(
     "When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true",
   );

@@ -343,11 +343,12 @@ export function writeFoundJobs(
       const found = findKey.get(key) as
         | (KeyMatch & { company: string })
         | undefined;
-      // A board's job number can repeat across its employers (arbeitnow ends
-      // every listing URL in one): it names a posting only within one employer.
+      // An external apply destination or a board's repeated number can
+      // represent multiple employers, for example a shared application portal.
       if (
         found &&
-        key.startsWith("id:") &&
+        (key.startsWith("id:") ||
+          (keys.target && key === `url:${keys.target}`)) &&
         !sameEmployer(found.company, job.company)
       )
         continue;

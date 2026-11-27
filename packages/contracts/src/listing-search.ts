@@ -105,6 +105,8 @@ export interface SourceNavigationProgress {
   collected: number;
   stepCount: number;
   savedAt: string;
+  /** The model's instructions for pages, cards or cursors still to read. */
+  remainingWork?: string[];
   /** Set when the collection ended: how it ended, for a restart to reuse. */
   outcome?: {
     complete: boolean;
@@ -132,7 +134,7 @@ export interface ReadListingResult {
    * (a category, directory or results list). Their postings are collected
    * from the index; the index itself is neither a vacancy nor a failed read.
    */
-  indexes?: string[];
+  indexes?: Array<{ requestedUrl: string; indexUrl: string }>;
   /**
    * Supplied addresses the site answered as removed (HTTP 404 or 410). They
    * are recorded closed without a model read; they are not failed reads.

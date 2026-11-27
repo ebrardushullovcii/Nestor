@@ -8,7 +8,10 @@ import { screenshotPage, pointerPage } from "./page-image-input";
 import { readPressability } from "./element-state";
 import { watchPagePress } from "./page-press-facts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
-import { withNavigationLiveness } from "./browser-navigation";
+import {
+  withNavigationLiveness,
+  withPageConnectionLiveness,
+} from "./browser-navigation";
 import { tracePageHands, tracePage, markPrivateTracePage } from "./trace-page";
 import { withTaskPageTabs, configureTaskPageOwner } from "./task-page-tabs";
 
@@ -2426,17 +2429,17 @@ function describeWriteFailure(error: unknown, fallback: string): string {
  * than the document it destroyed on the way.
  */
 async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
-  if ((await locator.count()) === 0)
-    throw new Error("Stale control; observe again.");
-  const interaction = await locator.evaluate(readPressability);
-  if (interaction.disabled) throw new Error("The control is disabled.");
-  if (interaction.inert) throw new Error("The control is inert.");
-  // Something drawn over it, or a sticky header: a person would still get
-  // the click in; so does a click aimed straight at it.
-  await clickPresent(locator);
-  await page
-    .waitForLoadState("domcontentloaded", { timeout: 0 })
-    .catch(() => undefined);
+  await withPageConnectionLiveness(page, async () => {
+    const interaction = await evaluatePresent(
+      locator,
+      readPressability,
+      undefined,
+    );
+    if (interaction.disabled) throw new Error("The control is disabled.");
+    if (interaction.inert) throw new Error("The control is inert.");
+    await clickPresent(locator);
+    await page.waitForLoadState("domcontentloaded", { timeout: 0 });
+  });
 }
 
 /**
@@ -2608,7 +2611,9 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             locator,
             requests,
             before,
-            await typeFieldKeys(locator, text),
+            await withPageConnectionLiveness(page, () =>
+              typeFieldKeys(locator, text),
+            ),
           );
         } finally {
           requests.stop();
@@ -2840,19 +2845,19 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         // search on Enter): report the list it then shows, as typing does.
         const before = field ? await openListsBefore(field) : null;
         requests = field ? watchControlRequests(page, field) : null;
-        if (locator) {
-          const element = await presentControl(locator);
-          try {
-            await element.press(key, { timeout: 0 });
-          } finally {
-            await element.dispose();
+        await withPageConnectionLiveness(page, async () => {
+          if (locator) {
+            const element = await presentControl(locator);
+            try {
+              await element.press(key, { timeout: 0 });
+            } finally {
+              await element.dispose();
+            }
+          } else {
+            await page.keyboard.press(key);
           }
-        } else {
-          await page.keyboard.press(key);
-        }
-        await page
-          .waitForLoadState("domcontentloaded", { timeout: 0 })
-          .catch(() => undefined);
+          await page.waitForLoadState("domcontentloaded", { timeout: 0 });
+        });
         const pressed: ApplyWriteResult = { ok: true, observedValue: key };
         return field && requests && before
           ? await withFieldLookup(page, field, requests, before, pressed)

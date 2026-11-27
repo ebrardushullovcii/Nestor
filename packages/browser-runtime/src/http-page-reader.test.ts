@@ -247,7 +247,8 @@ test("a landing read returns where a link's redirects end without reading the pa
     .fn<typeof fetch>()
     .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
     .mockResolvedValueOnce(landed(200))
-    .mockResolvedValueOnce(landed(403));
+    .mockResolvedValueOnce(landed(403))
+    .mockResolvedValueOnce(landed(404));
   const reader = createHttpPageReader({ fetch: request });
   expect(
     await reader("https://board.test/job/go/123/", { landingOnly: true }),
@@ -258,4 +259,8 @@ test("a landing read returns where a link's redirects end without reading the pa
   expect(
     await reader("https://board.test/job/go/124/", { landingOnly: true }),
   ).toEqual({ html: "", finalUrl: "https://jobs.employer.test/acme/123" });
+  // An error page shared by removed postings cannot establish their identity.
+  await expect(
+    reader("https://board.test/job/go/125/", { landingOnly: true }),
+  ).rejects.toMatchObject({ status: 404 });
 });

@@ -291,6 +291,52 @@ it("keeps listings apart that share a board's own page as their apply link", () 
   );
 });
 
+it("joins same-board copies with one employer form and keeps distinct requisitions", () => {
+  const store = open();
+  const form = "https://employer.example/engineering/jobs/105";
+  const original = posting({
+    company: "Replica Employer",
+    title: "Platform Engineer",
+    location: "Spain",
+    sourceId: "board",
+    sourceJobId: "spain",
+    url: "https://board.example/jobs/spain",
+    applyUrl: form,
+  });
+  const result = store.saveFoundJobs({
+    searchId: null,
+    jobs: [
+      original,
+      {
+        ...original,
+        location: "Portugal",
+        url: "https://board.example/jobs/portugal",
+        sourceJobId: "portugal",
+        applyUrl: `${form}?utm_source=board`,
+      },
+      {
+        ...original,
+        location: "France",
+        url: "https://board.example/jobs/france",
+        sourceJobId: "france",
+        applyUrl: "https://employer.example/engineering/jobs/106",
+      },
+      {
+        ...original,
+        company: "Other Employer",
+        location: "France",
+        url: "https://board.example/jobs/partner",
+        sourceJobId: "partner",
+      },
+    ],
+  });
+  expect(result.added).toHaveLength(3);
+  expect(store.getJob(result.ids[0]!)?.sightings).toHaveLength(2);
+  expect(result.ids[0]).toBe(result.ids[1]);
+  expect(result.ids[2]).not.toBe(result.ids[0]);
+  expect(result.ids[3]).not.toBe(result.ids[0]);
+});
+
 it("keeps different employers apart when a board repeats its job number, and joins one employer's", () => {
   const store = open();
   const numbered = (company: string, path: string) =>

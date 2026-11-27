@@ -538,6 +538,47 @@ test("lists links after the view's limit and advances via the selected page cont
   expect(result.incomplete).toBe(false);
 });
 
+test("a replaced Next control gives the model a fresh full page and waits for its new decision", async () => {
+  const pages = { current: rawPage() };
+  const liveHands = hands(pages);
+  const click = vi
+    .spyOn(liveHands, "clickElement")
+    .mockImplementationOnce(async () => {
+      pages.current = rawPage({
+        bodyText: "The pager drew a replacement control",
+        actions: [
+          {
+            index: 0,
+            ref: "a-new",
+            label: "Next",
+            visible: true,
+            disabled: false,
+          },
+        ],
+      });
+      return { ok: false, error: "Stale control; observe again." };
+    });
+  const model = scripted([
+    { name: "next_page", args: { ref: "a-old" } },
+    { name: "next_page", args: { ref: "a-new" } },
+    { name: "finish", args: { reason: "Last page." } },
+  ]);
+  const chatWithTools = vi.fn(model.chatWithTools);
+  await runJobSearchAgent({
+    hands: liveHands,
+    config: config(),
+    jobExtractor: extractor,
+    llmClient: { chatWithTools },
+  });
+  const stale = chatWithTools.mock.calls[1]?.[0]
+    .filter((message) => message.role === "tool")
+    .at(-1)?.content;
+  expect(stale).toContain("Stale control; observe again.");
+  expect(stale).toContain("a-new");
+  expect(stale).not.toContain("Page delta");
+  expect(click.mock.calls).toEqual([["a-old"], ["a-new"]]);
+});
+
 test.each(["job_detail", "explicit"])(
   "a later model decision can correct a duplicate's earlier rejection (%s)",
   async (kind) => {
@@ -653,7 +694,7 @@ test("the browser inventory is told the search depth, and Thorough means the who
   expect(thorough).toContain("When signing in shows more listings");
   expect(thorough).not.toContain("rather than walking every location portal");
   for (const system of [thorough, prompt("quick"), prompt()]) {
-    expect(system).toContain("Nothing reads remainingWork later");
+    expect(system).toContain("so a resumed search can continue");
     expect(system).not.toContain("does not mean the source was exhausted");
   }
   expect(prompt("quick")).toContain("Search depth: Quick.");
@@ -2949,7 +2990,7 @@ test("a listing read receives its exact identity without the general source-sear
   const run = config({ requestedListing, retainAllFound: true });
   const prompt = createJobSearchPrompts(run);
   expect(prompt.system).toContain(JSON.stringify(requestedListing));
-  expect(prompt.system).toContain("Do not save the index as a vacancy");
+  expect(prompt.system).toContain("listingIndexUrl");
   expect(prompt.system).not.toContain("find a broad pool");
   expect(
     (
@@ -3309,6 +3350,7 @@ test("a restarted browser collection is told where the interrupted one had got t
         stepCount: 9,
         collectedJobs: [],
         collectedEarlier: 57,
+        remainingWork: ["Continue at the observed next URL ?page=4"],
         visitedUrls: [
           "https://jobs.example.test/jobs",
           "https://jobs.example.test/jobs?page=2",
@@ -3322,11 +3364,12 @@ test("a restarted browser collection is told where the interrupted one had got t
     "Start at these observed source URLs:\nhttps://jobs.example.test/jobs?page=3\nhttps://jobs.example.test/jobs",
   );
   expect(resumed.user).toContain("had collected 57 listing cards");
+  expect(resumed.user).toContain("Continue at the observed next URL ?page=4");
   expect(resumed.user).toContain(
     "It had reached https://jobs.example.test/jobs?page=3, where this run starts.",
   );
   expect(resumed.user).toContain(
-    "Pages it had loaded, in order:\nhttps://jobs.example.test/jobs\nhttps://jobs.example.test/jobs?page=2",
+    "Pages it had opened, in order (opening a page does not mean its cards were collected):\nhttps://jobs.example.test/jobs\nhttps://jobs.example.test/jobs?page=2",
   );
   // The resume facts follow the stable system prompt, which stays cacheable.
   expect(resumed.system).toBe(fresh.system);

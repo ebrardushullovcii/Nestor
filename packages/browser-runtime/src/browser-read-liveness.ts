@@ -1,5 +1,5 @@
 import type { Page, Frame } from "playwright";
-import { withNavigationLiveness } from "./browser-navigation";
+import { withPageConnectionLiveness } from "./browser-navigation";
 
 /** A navigating page is responding. Read its new document without replaying the action. */
 export async function withBrowserReadLiveness<T>(
@@ -7,12 +7,12 @@ export async function withBrowserReadLiveness<T>(
   read: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  return withNavigationLiveness(
+  return withPageConnectionLiveness(
     page,
-    async () => {
+    async (connection) => {
       let navigated = false;
       for (;;) {
-        signal?.throwIfAborted();
+        connection.throwIfAborted();
         if (page.isClosed?.())
           throw new Error("The browser page closed during the read.");
         let changed = false;

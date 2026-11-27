@@ -4,6 +4,7 @@ import {
   verificationIsPrivate,
   redactVerificationText,
   redactVerificationData,
+  traceSafe,
 } from "@nestor/core/run-trace";
 import { mailboxAccountFacts } from "../tab-tools";
 import { intendedAccountEmail } from "@nestor/contracts";
@@ -57,6 +58,7 @@ import type { AgentConfig, AgentProgress, AgentResult } from "../types";
 import type { SearchResultCache } from "./search-result-cache";
 import { readCachedSearchResult } from "./search-result-cache";
 import { collectRenderedInventory } from "./rendered-inventory";
+import { fingerprint } from "./listing-html";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
 import { normalizeExtractedJobSourceId, sanitizeUrl } from "./job-identity";
 import {
@@ -116,7 +118,7 @@ export function buildExtractionSelectionContext(
   if (config.requestedListing)
     return JSON.stringify({
       purpose:
-        "Read the requested vacancy. Keep its identity through redirects; report a closed vacancy as closed. If the supplied address is actually an index, collect its genuine vacancy cards under their own URLs instead; do not save the index as a vacancy. Do not assess fit.",
+        "Read the requested vacancy. Keep its identity through redirects; report a closed vacancy as closed. If the supplied address leads to an index in place of the vacancy, return its address in finish.listingIndexUrl so inventory collection can handle it once. Do not assess fit.",
       requestedListing: config.requestedListing,
       sourceInstructions: config.promptContext.siteInstructions ?? [],
     });
@@ -393,7 +395,12 @@ async function runJobSearchAgentPrivate(
   }
   const mechanicallyCollected: JobPosting[] = [];
   const collectionNotes: string[] = [];
-  if (config.inventoryOnly && input.page && !isSourceCheck) {
+  if (
+    config.inventoryOnly &&
+    input.page &&
+    !isSourceCheck &&
+    !config.resumeCheckpoint?.remainingWork?.length
+  ) {
     const postings = new Map<string, JobPosting>();
     // A mechanical read that fails (an ad frame detaching mid-read, a page
     // changing under the reader) is our failure, not the source's end: the
@@ -404,7 +411,7 @@ async function runJobSearchAgentPrivate(
       source: { id: config.source, label: siteLabel },
       ...(input.signal ? { signal: input.signal } : {}),
       allowUrl: (url) => isAllowedUrl(url, config.navigationPolicy).valid,
-      onPage: async (cards) => {
+      onPage: async (cards, { visitedUrls, pendingUrls }) => {
         for (const card of cards)
           postings.set(
             card.url,
@@ -439,7 +446,8 @@ async function runJobSearchAgentPrivate(
           lastStableUrl: input.page!.url(),
           stepCount: 0,
           collectedJobs: [...postings.values()],
-          visitedUrls: [],
+          visitedUrls,
+          remainingWork: pendingUrls,
           phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
         });
       },
@@ -483,7 +491,7 @@ async function runJobSearchAgentPrivate(
   const nonListingUrls = new Set<string>();
   let pageMovementRevision = 0;
   const recordListingRead = (url: string, text: string) => {
-    const pageKey = `${url}\n${text}`;
+    const pageKey = fingerprint([url, text]);
     const lastMovement = lastReadMovementByUrl.get(url);
     if (
       !coveredPageKeys.has(pageKey) &&
@@ -541,6 +549,11 @@ async function runJobSearchAgentPrivate(
   let checkpointRevision = config.resumeCheckpoint?.revision ?? 0;
 
   const notes: string[] = [...collectionNotes];
+  let remainingWork = config.resumeCheckpoint?.remainingWork ?? [];
+  const safeVisitedUrls = new Set<string>();
+  let visitedChecked = 0;
+  const resumeUrl = config.resumeCheckpoint?.lastStableUrl ?? "";
+  let lastCheckpointUrl = traceSafe(resumeUrl) === resumeUrl ? resumeUrl : "";
   let observationRevision = 0;
   const views = createSearchViewDescriber();
   const pageTools = createPageTools(
@@ -552,12 +565,6 @@ async function runJobSearchAgentPrivate(
           : hands.readText(ref),
       observe: async () => {
         let observation = await hands.observe();
-        observation = {
-          ...observation,
-          bodyTextExcerpt: hands.readLinkedText
-            ? await hands.readLinkedText()
-            : await hands.readText(),
-        };
         // A page that has not drawn yet (an app shell still fetching its
         // list) is looked at again after a moment, rather than spending a
         // model turn on "wait".
@@ -568,18 +575,17 @@ async function runJobSearchAgentPrivate(
         ) {
           await hands.wait(BLANK_PAGE_SETTLE_MS);
           observation = await hands.observe();
+        }
+        if (hands.readLinkedText)
           observation = {
             ...observation,
-            bodyTextExcerpt: hands.readLinkedText
-              ? await hands.readLinkedText()
-              : await hands.readText(),
+            bodyTextExcerpt: await hands.readLinkedText(),
           };
-        }
         observationRevision += 1;
         const view = compactSearchObservation(observation);
         // A new URL alone is not progress. New cards, controls, or filter
         // values are evidence even when no listing has been kept yet.
-        const content = JSON.stringify({
+        const content = fingerprint({
           text: view.bodyTextExcerpt,
           links: view.links.map(({ label, href }) => ({ label, href })),
           controls: view.controls,
@@ -666,16 +672,24 @@ async function runJobSearchAgentPrivate(
   };
 
   const checkpoint = async (): Promise<void> => {
-    if (!config.onCheckpoint) return;
+    if (!config.onCheckpoint || verificationIsPrivate()) return;
     checkpointRevision += 1;
+    for (const url of pageTools.state.visitedUrls.slice(visitedChecked))
+      if (/^https?:/iu.test(url) && traceSafe(url) === url)
+        safeVisitedUrls.add(url);
+    visitedChecked = pageTools.state.visitedUrls.length;
+    const currentUrl = pageTools.state.observation?.url;
+    if (currentUrl && safeVisitedUrls.has(currentUrl))
+      lastCheckpointUrl = currentUrl;
     const snapshot: BrowserAgentRunCheckpoint = {
       revision: checkpointRevision,
       savedAt: now().toISOString(),
-      currentUrl: pageTools.state.observation?.url ?? "",
-      lastStableUrl: pageTools.state.observation?.url ?? "",
+      currentUrl: lastCheckpointUrl,
+      lastStableUrl: lastCheckpointUrl,
       stepCount: steps,
       collectedJobs: [...collected],
-      visitedUrls: [...pageTools.state.visitedUrls],
+      visitedUrls: [...safeVisitedUrls],
+      remainingWork: remainingWork.map((work) => String(traceSafe(work))),
       phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
     };
     await config.onCheckpoint(snapshot);
@@ -832,7 +846,7 @@ async function runJobSearchAgentPrivate(
       const observation = await pageTools.observe();
       let pageText =
         pageType === "search_results" && hands.readLinkedText
-          ? await hands.readLinkedText()
+          ? observation.bodyTextExcerpt
           : await hands.readText();
       if (!observation.url) {
         return { kind: "ok", content: "There is no page to read yet." };
@@ -903,11 +917,10 @@ async function runJobSearchAgentPrivate(
               found: await read(detailReadText(observation, pageText), maxJobs),
               unreadParts: 0,
               readFailures: [],
-              remainingParts: 0,
               rereadOnly: false,
             }
           : await readResultsPage(observation, pageText, read))();
-      const unread = pageRead.unreadParts + pageRead.remainingParts;
+      const unread = pageRead.unreadParts;
       if (unread > 0) pendingPageReads.set(observation.url, unread);
       else pendingPageReads.delete(observation.url);
       const found = pageRead.found;
@@ -1000,9 +1013,6 @@ async function runJobSearchAgentPrivate(
           : null,
         pageRead.unreadParts > 0
           ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read: ${pageRead.readFailures.join("; ")}. Reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
-          : null,
-        pageRead.remainingParts > 0
-          ? `This page is long: ${pageRead.remainingParts} more part${pageRead.remainingParts === 1 ? " is" : "s are"} still unread. Call extract_jobs again on this page to read ${pageRead.remainingParts === 1 ? "it" : "them"} before moving on.`
           : null,
         pageRead.rereadOnly
           ? "This page's listings were all read before in this search and have not changed; reading it again finds nothing new. Scrolling only helps if more listings load."
@@ -1303,7 +1313,17 @@ async function runJobSearchAgentPrivate(
               "The model supplied this listing's complete text from read data.",
           };
         else posting.detailQuality = "card_only";
-        if (keep(posting)) added.push(posting);
+        const existing = known.has(jobKey(posting))
+          ? collected.findIndex((job) => jobKey(job) === jobKey(posting))
+          : -1;
+        if (
+          existing >= 0 &&
+          fullPostingText &&
+          collected[existing]?.listingDetailFetch?.outcome !== "enriched"
+        ) {
+          collected[existing] = posting;
+          added.push(posting);
+        } else if (keep(posting)) added.push(posting);
       }
       if (added.length) await checkpoint();
       return {
@@ -1361,6 +1381,15 @@ async function runJobSearchAgentPrivate(
               description:
                 "Your coverage judgment: false when relevant result pages, cards or API pages remain unread.",
             },
+            ...(config.requestedListing
+              ? {
+                  listingIndexUrl: {
+                    type: "string",
+                    description:
+                      "The observed URL when this address lands on a category or results list instead of the requested vacancy. Return the index to search for collection and leave its other vacancies out of this listing read.",
+                  },
+                }
+              : {}),
             remainingWork: {
               type: "array",
               items: { type: "string" },
@@ -1467,13 +1496,7 @@ async function runJobSearchAgentPrivate(
     const fingerprint = indexFingerprint(landed);
     // Item boundaries can change which card a badge belongs to without
     // changing plain innerText. Reuse requires the linked read to match too.
-    initialIndexFingerprint =
-      fingerprint && hands.readLinkedText
-        ? JSON.stringify({
-            view: fingerprint,
-            linkedText: await hands.readLinkedText(),
-          })
-        : fingerprint;
+    initialIndexFingerprint = fingerprint;
     const reusedIndex = initialIndexFingerprint
       ? await readCachedSearchResult(
           input.resultCache,
@@ -1642,10 +1665,22 @@ async function runJobSearchAgentPrivate(
             ...tool,
             execute: async (raw, context) => {
               const savedBefore = collected.length;
+              const revisionBefore = checkpointRevision;
+              const urlBefore = pageTools.state.observation?.url;
               const contentBefore = pageContentRevision;
               const readsBefore = readContentRevision;
               const decisionsBefore = decisionRevision;
               const outcome = await tool.execute(raw, context);
+              const urlAfter = pageTools.state.observation?.url;
+              if (
+                config.inventoryOnly &&
+                urlAfter &&
+                urlAfter !== urlBefore &&
+                /^https?:/iu.test(urlAfter) &&
+                !verificationIsPrivate() &&
+                checkpointRevision === revisionBefore
+              )
+                await checkpoint();
               if (outcome.kind !== "ok") return outcome;
               const savedNewJobs = collected.length > savedBefore;
               const readUnreadContent =
@@ -1667,6 +1702,9 @@ async function runJobSearchAgentPrivate(
     // Keep action history intact; recover context at the provider boundary
     // if the selected model reaches its context limit.
     staleToolResultChars: null,
+    // Browser operations and nested model requests know when their actual
+    // connections go idle. Stop still aborts tools through the run signal.
+    ceilings: { toolIdleTimeoutMs: Infinity },
     compactionMaxChars: Math.floor(
       (input.modelContextWindowTokens ?? 64_000) * 3.6 * 0.8,
     ),
@@ -1690,6 +1728,10 @@ async function runJobSearchAgentPrivate(
   });
 
   emit("finish", redactVerificationText(loop.reason));
+  if (config.inventoryOnly && loop.finish) {
+    remainingWork = asStringList(loop.finish.data.remainingWork);
+    await checkpoint();
+  }
   const result = buildResult(loop);
   const completeIndex =
     initialIndex &&
@@ -1722,7 +1764,6 @@ async function runJobSearchAgentPrivate(
     found: ExtractedJobs;
     unreadParts: number;
     readFailures: string[];
-    remainingParts: number;
     rereadOnly: boolean;
   }> {
     const links = observation.links.filter((link) => link.visible);
@@ -1732,13 +1773,13 @@ async function runJobSearchAgentPrivate(
       text: string;
       window: string;
     }): Promise<ExtractedJobs> => {
-      const key = `${pageUrl}\n${part.text}`;
+      const key = fingerprint([pageUrl, part.text]);
       const cached = pageReadCache.get(key);
       if (cached) return cached;
       const partLinks = linksInText(part.window, links, pageUrl);
       const linkedKey =
         partLinks.length > 0
-          ? JSON.stringify({
+          ? fingerprint({
               origin: new URL(pageUrl).origin,
               text: part.window,
               links: partLinks,
@@ -1785,7 +1826,7 @@ async function runJobSearchAgentPrivate(
         jobs = [];
         for (const half of halves) jobs.push(...(await readPart(half)));
       }
-      const contentKey = `${new URL(pageUrl).origin}\n${part.text}`;
+      const contentKey = fingerprint([new URL(pageUrl).origin, part.text]);
       if (!seenPartContent.has(contentKey)) {
         seenPartContent.add(contentKey);
         readContentRevision += 1;
@@ -1806,35 +1847,12 @@ async function runJobSearchAgentPrivate(
       pageUrl,
       inlineLinks: Boolean(hands.readLinkedText),
     });
-    // One call reads a bounded number of new parts, so it ends well inside
-    // the tool deadline; the rest wait for the next call on this page, which
-    // starts where this one stopped (parts already read come from the cache).
-    const unread = parts.filter(
-      (part) =>
-        !pageReadCache.has(`${pageUrl}
-${part.text}`),
-    );
-    pendingPageReads.set(pageUrl, unread.length);
-    const now = new Set(unread);
-    const settled = await mapWithLimit(
-      parts.filter(
-        (part) =>
-          now.has(part) ||
-          pageReadCache.has(`${pageUrl}
-${part.text}`),
-      ),
-      PAGE_READ_CONCURRENCY,
-      (part) => readPart(part),
+    const settled = await mapWithLimit(parts, PAGE_READ_CONCURRENCY, (part) =>
+      readPart(part),
     );
     const failures = settled.flatMap((entry) =>
       entry.status === "rejected" ? [entry.reason as unknown] : [],
     );
-    const remainingParts =
-      parts.filter(
-        (part) =>
-          !pageReadCache.has(`${pageUrl}
-${part.text}`),
-      ).length - failures.length;
     const aborted = failures.find(
       (reason) =>
         (reason instanceof DOMException && reason.name === "AbortError") ||
@@ -1863,9 +1881,7 @@ ${part.text}`),
       readFailures: failures.map((error) =>
         error instanceof Error ? error.message : String(error),
       ),
-      remainingParts,
-      rereadOnly:
-        freshReads === 0 && failures.length === 0 && remainingParts === 0,
+      rereadOnly: freshReads === 0 && failures.length === 0,
     };
   }
 
@@ -1910,9 +1926,10 @@ ${part.text}`),
       !finish.stuck &&
       !finish.needsPerson &&
       finish.data.coverageComplete !== false;
-    const remainingWork = asStringList(finish?.data.remainingWork);
-    if (remainingWork.length)
-      notes.push(`Work left by the model: ${remainingWork.join("; ")}`);
+    const workLeft = asStringList(finish?.data.remainingWork);
+    if (workLeft.length)
+      notes.push(`Work left by the model: ${workLeft.join("; ")}`);
+    const listingIndexUrl = finish?.data.listingIndexUrl;
     const unfinishedReads =
       pendingPageReads.size > 0 &&
       (isSourceCheck ||
@@ -2027,6 +2044,11 @@ ${part.text}`),
       unreadableListings,
       pagesCovered: coveredPageUrls.length,
       jobs: [...collected],
+      ...(config.requestedListing &&
+      typeof listingIndexUrl === "string" &&
+      /^https?:\/\//iu.test(listingIndexUrl)
+        ? { listingIndexUrl }
+        : {}),
       steps,
       incomplete: !finishedCleanly || unfinishedReads,
       ...(error ? { error } : {}),

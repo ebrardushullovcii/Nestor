@@ -154,6 +154,8 @@ export function createHttpPageReader(
           answered(address.hostname);
           if (readOptions.landingOnly) {
             await response.body?.cancel();
+            if (response.status === 404 || response.status === 410)
+              throw new DiscoveryPageReadError(response.status);
             return { html: "", finalUrl: response.url || url };
           }
           if (!response.ok) {

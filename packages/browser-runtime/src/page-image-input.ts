@@ -8,6 +8,8 @@ import { captureModelPageImage } from "./trace-page";
 import { isDetachedFrameError } from "./visible-page-text";
 import { controlRefFrame } from "./page-control-refs";
 import { watchPagePress } from "./page-press-facts";
+import { withPageConnectionLiveness } from "./browser-navigation";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 
 const frameIds = new WeakMap<Page, Map<Frame, string>>();
 function idsFor(page: Page): Map<Frame, string> {
@@ -20,6 +22,13 @@ function idsFor(page: Page): Map<Frame, string> {
 }
 
 export async function screenshotPage(
+  page: Page,
+  name?: string,
+): Promise<BrowserPageImage> {
+  return withBrowserReadLiveness(page, () => capturePageImage(page, name));
+}
+
+async function capturePageImage(
   page: Page,
   name?: string,
 ): Promise<BrowserPageImage> {
@@ -100,16 +109,23 @@ export async function pointerPage(
 ): Promise<ApplyWriteResult> {
   const press = watchPagePress(page);
   try {
-    await page.mouse.move(input.x, input.y);
-    if (input.action === "click") await page.mouse.click(input.x, input.y);
+    await withPageConnectionLiveness(page, () =>
+      page.mouse.move(input.x, input.y),
+    );
+    if (input.action === "click")
+      await withPageConnectionLiveness(page, () =>
+        page.mouse.click(input.x, input.y),
+      );
     else {
-      await page.mouse.down();
+      await withPageConnectionLiveness(page, () => page.mouse.down());
       try {
         if (input.action === "drag")
-          await page.mouse.move(input.endX!, input.endY!, { steps: 20 });
+          await withPageConnectionLiveness(page, () =>
+            page.mouse.move(input.endX!, input.endY!, { steps: 20 }),
+          );
         if (input.durationMs) await page.waitForTimeout(input.durationMs);
       } finally {
-        await page.mouse.up();
+        await withPageConnectionLiveness(page, () => page.mouse.up());
       }
     }
     return {

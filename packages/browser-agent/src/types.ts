@@ -84,6 +84,7 @@ export interface AgentConfig extends BrowserPermissionPolicy {
 }
 
 export interface AgentResult {
+  listingIndexUrl?: string;
   pagesCovered?: number;
   coveredPageUrls?: string[];
   deferredListingPageUrls?: string[];

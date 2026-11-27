@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS search_listing_queue (
   url TEXT NOT NULL,
   card_json TEXT NOT NULL,
   leased INTEGER NOT NULL DEFAULT 0,
+  completed_as TEXT,
   UNIQUE(search_id, source_id, url)
 );
 CREATE INDEX IF NOT EXISTS search_listing_queue_source ON search_listing_queue(search_id, source_id, id);
@@ -76,6 +77,12 @@ END;
 `;
 const COLUMNS = `source_id AS sourceId, label, url, state, lane, phase, cards, related, unrelated, seen,
  failed_reads AS failedReads, found, added, hidden, message`;
+type CardOutcome =
+  | "related"
+  | "unrelated"
+  | "seen"
+  | "removed"
+  | "related_removed";
 export function createSearchSourcesStore(store: JobStore) {
   const { sql } = store;
   /** Drops a source's queued cards and where its collection had got to. */
@@ -131,6 +138,33 @@ export function createSearchSourcesStore(store: JobStore) {
       );
     },
     clearProgress,
+    copyProgress(from: string, to: string, sourceId: string): void {
+      sql(
+        `INSERT INTO search_listing_queue (search_id, source_id, url, card_json, completed_as)
+         SELECT ?, source_id, url, card_json, completed_as FROM search_listing_queue
+         WHERE search_id=? AND source_id=?`,
+      ).run(to, from, sourceId);
+      sql(
+        `INSERT INTO search_source_pages (search_id, source_id, url, links_json)
+         SELECT ?, source_id, url, links_json FROM search_source_pages WHERE search_id=? AND source_id=?`,
+      ).run(to, from, sourceId);
+      sql(
+        `INSERT INTO search_source_navigation (search_id, source_id, start_url, progress_json)
+         SELECT ?, source_id, start_url, progress_json FROM search_source_navigation WHERE search_id=? AND source_id=?`,
+      ).run(to, from, sourceId);
+    },
+    pruneRetiredProgress(latestSearchId: string): void {
+      for (const table of [
+        "search_listing_queue",
+        "search_source_pages",
+        "search_source_navigation",
+      ])
+        sql(
+          `DELETE FROM ${table} WHERE search_id IN (
+            SELECT id FROM searches WHERE id<>? AND state<>'running'
+          )`,
+        ).run(latestSearchId);
+    },
     /** Why the source's last attempt in this search failed, if it did. */
     failure(searchId: string, sourceId: string): string | null {
       return (
@@ -175,6 +209,23 @@ export function createSearchSourcesStore(store: JobStore) {
           "SELECT url FROM search_listing_queue WHERE search_id=? AND source_id=? ORDER BY id",
         ).all(searchId, sourceId) as { url: string }[]
       ).map((row) => row.url);
+    },
+    cardOutcomes(searchId: string, sourceId: string) {
+      return sql(
+        `SELECT completed_as AS outcome, count(*) AS total FROM search_listing_queue
+         WHERE search_id=? AND source_id=? AND completed_as IS NOT NULL GROUP BY completed_as`,
+      ).all(searchId, sourceId) as { outcome: CardOutcome; total: number }[];
+    },
+    acknowledgeCards(
+      searchId: string,
+      cards: readonly { card: ListingCard; outcome: CardOutcome }[],
+    ): void {
+      const acknowledge = sql(
+        `UPDATE search_listing_queue SET leased=0, completed_as=?, card_json='{}'
+         WHERE search_id=? AND source_id=? AND url=? AND completed_as IS NULL`,
+      );
+      for (const { card, outcome } of cards)
+        acknowledge.run(outcome, searchId, card.sourceId, card.url);
     },
     /**
      * The index pages this search has finished on one source. A restarted
@@ -239,15 +290,15 @@ export function createSearchSourcesStore(store: JobStore) {
       );
     },
     cardQueue(searchId: string) {
-      // A new process owns no old in-flight wave. Its exact cards remain on
-      // disk until the whole source result is acknowledged atomically.
-      sql("UPDATE search_listing_queue SET leased=0 WHERE search_id=?").run(
-        searchId,
-      );
+      // A new process owns no old in-flight wave. Completed addresses stay
+      // until source settlement so re-collection cannot enqueue them again.
+      sql(
+        "UPDATE search_listing_queue SET leased=0 WHERE search_id=? AND leased<>0",
+      ).run(searchId);
       const pending = new Map(
         (
           sql(
-            "SELECT source_id, count(*) AS n FROM search_listing_queue WHERE search_id=? GROUP BY source_id ORDER BY min(id)",
+            "SELECT source_id, count(*) AS n FROM search_listing_queue WHERE search_id=? AND completed_as IS NULL GROUP BY source_id ORDER BY min(id)",
           ).all(searchId) as { source_id: string; n: number }[]
         ).map((row) => [row.source_id, row.n]),
       );
@@ -277,7 +328,7 @@ export function createSearchSourcesStore(store: JobStore) {
         take(sourceId: string, size: number): ListingCard[] {
           return store.transaction(() => {
             const rows = sql(
-              "SELECT id, card_json FROM search_listing_queue WHERE search_id=? AND source_id=? AND leased=0 ORDER BY id LIMIT ?",
+              "SELECT id, card_json FROM search_listing_queue WHERE search_id=? AND source_id=? AND leased=0 AND completed_as IS NULL ORDER BY id LIMIT ?",
             ).all(searchId, sourceId, size) as {
               id: number;
               card_json: string;
@@ -293,7 +344,8 @@ export function createSearchSourcesStore(store: JobStore) {
           });
         },
         complete(): void {
-          /* settle() acknowledges the complete source, including deferred browser reads. */
+          // Screening and deferred detail reads acknowledge each card, as
+          // finishing a screening wave alone does not complete its reads.
         },
         drop(sourceId: string, urls: readonly string[]): string[] {
           return store.transaction(() => {
@@ -301,7 +353,7 @@ export function createSearchSourcesStore(store: JobStore) {
               (url) =>
                 Number(
                   sql(
-                    "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=? AND url=? AND leased=0",
+                    "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=? AND url=? AND leased=0 AND completed_as IS NULL",
                   ).run(searchId, sourceId, url).changes,
                 ) > 0,
             );

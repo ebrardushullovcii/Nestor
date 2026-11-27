@@ -53,6 +53,7 @@ export interface JobSearchEngine {
       onCards?: (cards: ListingCard[]) => Promise<void>;
       message(text: string): void;
       knownUrls(urls: readonly string[]): readonly string[];
+      collectedUrls?(urls: readonly string[]): readonly string[];
       /** Index page addresses this search has read on the site; pages read here are added. */
       indexPages?: Set<string>;
       /** Pages in indexPages are not read again: their cards are already collected. */
@@ -284,6 +285,200 @@ export function createListingSearchEngine(deps: {
               }
             : {}),
         }));
+      const navigateFallback = async (
+        portalUrl?: string,
+      ): Promise<SourceInventory> => {
+        if (!deps.browserRuntime.runAgentDiscovery)
+          return {
+            cards: [],
+            pagesRead: 0,
+            complete: false,
+            notes: [
+              "This site needs browser navigation, which is unavailable.",
+            ],
+          };
+        // A restart continues this collection where it had got to;
+        // its cards were accepted as they were collected.
+        const earlier = input.navigation?.read(target.startingUrl) ?? null;
+        if (earlier?.outcome?.complete)
+          return {
+            cards: [],
+            pagesRead: earlier.outcome.pagesRead,
+            complete: earlier.outcome.complete,
+            notes: earlier.outcome.notes,
+            resumed: true,
+          };
+        const startUrl = portalUrl ?? target.startingUrl;
+        const resumeUrl =
+          earlier && /^https?:/iu.test(earlier.currentUrl)
+            ? earlier.currentUrl
+            : null;
+        const progress = (update: Omit<SourceNavigationProgress, "savedAt">) =>
+          input.navigation?.save(target.startingUrl, {
+            ...update,
+            savedAt: new Date().toISOString(),
+          });
+        const remainingWork = earlier?.remainingWork ?? earlier?.outcome?.notes;
+        let latest: Omit<SourceNavigationProgress, "savedAt"> = {
+          currentUrl: resumeUrl ?? startUrl,
+          visitedUrls: earlier?.visitedUrls ?? [],
+          collected: earlier?.collected ?? 0,
+          stepCount: earlier?.stepCount ?? 0,
+          ...(remainingWork ? { remainingWork } : {}),
+        };
+        const accepted = new Map<string, JobPosting>();
+        // The runner bounds source navigation in its browser queue.
+        // Do not also hold the detail-reader queue: a checkpoint can
+        // wait for screening that needs a rendered detail of its own.
+        const result = await deps.browserRuntime.runAgentDiscovery(
+          "target_site",
+          {
+            ...(context.browserPermissions
+              ? { browserPermissions: context.browserPermissions }
+              : {}),
+            ...(context.readIntendedAccountEmail
+              ? {
+                  readIntendedAccountEmail: context.readIntendedAccountEmail,
+                }
+              : {}),
+            ...(context.readBrowserPermissions
+              ? {
+                  readBrowserPermissions: context.readBrowserPermissions,
+                }
+              : {}),
+            inventoryOnly: true,
+            ...(earlier && input.collectedUrls
+              ? {
+                  lookupKnownUrls: async (urls: readonly string[]) =>
+                    input.collectedUrls!(urls),
+                }
+              : {}),
+            ...(earlier
+              ? {
+                  resumeCheckpoint: {
+                    revision: 0,
+                    savedAt: earlier.savedAt,
+                    currentUrl: earlier.currentUrl,
+                    lastStableUrl: earlier.currentUrl,
+                    stepCount: earlier.stepCount,
+                    collectedJobs: [],
+                    collectedEarlier: earlier.collected,
+                    visitedUrls: earlier.visitedUrls,
+                    remainingWork,
+                    phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
+                  },
+                }
+              : {}),
+            onCheckpoint: async (checkpoint) => {
+              const changed = checkpoint.collectedJobs.filter(
+                (job) => accepted.get(job.canonicalUrl) !== job,
+              );
+              if (changed.length) {
+                input.message(
+                  `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
+                );
+                await input.onCards?.(toCards(changed));
+                for (const job of changed) accepted.set(job.canonicalUrl, job);
+              }
+              // Its cards are accepted: a restart continues from here.
+              const at = /^https?:/iu.test(checkpoint.currentUrl)
+                ? checkpoint.currentUrl
+                : checkpoint.lastStableUrl;
+              latest = {
+                currentUrl: /^https?:/iu.test(at) ? at : latest.currentUrl,
+                visitedUrls: checkpoint.visitedUrls.length
+                  ? checkpoint.visitedUrls
+                  : latest.visitedUrls,
+                collected:
+                  (earlier?.collected ?? 0) + checkpoint.collectedJobs.length,
+                stepCount: checkpoint.stepCount,
+                ...(checkpoint.remainingWork
+                  ? { remainingWork: checkpoint.remainingWork }
+                  : {}),
+              };
+              progress(latest);
+            },
+            dedicatedPage: true,
+            retainAllFound: true,
+            userProfile: context.profile,
+            searchPreferences: toJobSearchGoals(context.searchPreferences),
+            startingUrls: [
+              ...new Set([...(resumeUrl ? [resumeUrl] : []), startUrl]),
+            ],
+            navigationHostnames: [
+              ...new Set([
+                new URL(target.startingUrl).hostname,
+                ...(portalUrl ? [new URL(portalUrl).hostname] : []),
+                ...(resumeUrl ? [new URL(resumeUrl).hostname] : []),
+              ]),
+            ],
+            siteLabel: target.label,
+            siteInstructions: guidance,
+            searchRequest: {
+              intent: settings.note,
+              breadth: "wide",
+              depth: settings.depth,
+              freshness: "any",
+              sourceIds: [target.id],
+            },
+            targetJobCount: Number.MAX_SAFE_INTEGER,
+            maxSteps: Number.MAX_SAFE_INTEGER,
+            signal,
+            onProgress: (progress) => {
+              if (progress.message) input.message(progress.message);
+            },
+            aiClient: deps.aiClient,
+          },
+        );
+        const cards = toCards(result.jobs);
+        const complete = result.agentMetadata
+          ? result.agentMetadata.phaseCompletionMode === "structured_finish" &&
+            result.agentMetadata.incomplete === false
+          : result.inventoryCompleteness === "complete";
+        const needsYou =
+          result.agentMetadata?.accessBlockerReason === "auth_required" ||
+          result.agentMetadata?.accessBlockerReason === "site_protection";
+        // A collection the model finished, without leaving the
+        // person a step, is not repeated after a restart. One an
+        // outage or error cut short continues from where it was,
+        // and is ours to try again.
+        const inventory = {
+          cards,
+          pagesRead: result.agentMetadata?.pagesCovered ?? 0,
+          complete,
+          needsYou,
+          notes: [
+            ...(result.agentMetadata?.phaseCompletionReason
+              ? [result.agentMetadata.phaseCompletionReason]
+              : []),
+            result.warning ??
+              `${cards.length} listings collected with browser navigation.`,
+          ],
+          ...(earlier ? { resumed: true } : {}),
+          ...(!complete && !needsYou ? { cutShort: true } : {}),
+        };
+        if (complete && !inventory.needsYou && input.navigation) {
+          await input.onCards?.(cards);
+          progress({
+            ...latest,
+            collected: Math.max(
+              latest.collected,
+              (earlier?.collected ?? 0) + cards.length,
+            ),
+            outcome: {
+              complete: inventory.complete,
+              pagesRead: inventory.pagesRead,
+              notes: inventory.notes,
+            },
+          });
+        }
+        return inventory;
+      };
+      if (
+        input.lane === "browser" &&
+        input.navigation?.read(target.startingUrl)
+      )
+        return navigateFallback();
       return collectSource({
         browserAccessAuthorized,
         source: { id: target.id, label: target.label, url: target.startingUrl },
@@ -304,197 +499,7 @@ export function createListingSearchEngine(deps: {
           input.message(`Read ${cards.length} listing cards from this page.`);
           await input.onCards?.(cards);
         },
-        ...(input.lane === "browser"
-          ? {
-              navigateFallback: async (portalUrl) => {
-                if (!deps.browserRuntime.runAgentDiscovery)
-                  return {
-                    cards: [],
-                    pagesRead: 0,
-                    complete: false,
-                    notes: [
-                      "This site needs browser navigation, which is unavailable.",
-                    ],
-                  };
-                // A restart continues this collection where it had got to;
-                // its cards were accepted as they were collected.
-                const earlier =
-                  input.navigation?.read(target.startingUrl) ?? null;
-                if (earlier?.outcome)
-                  return {
-                    cards: [],
-                    pagesRead: earlier.outcome.pagesRead,
-                    complete: earlier.outcome.complete,
-                    notes: earlier.outcome.notes,
-                    resumed: true,
-                  };
-                const startUrl = portalUrl ?? target.startingUrl;
-                const resumeUrl =
-                  earlier && /^https?:/iu.test(earlier.currentUrl)
-                    ? earlier.currentUrl
-                    : null;
-                const progress = (
-                  update: Omit<SourceNavigationProgress, "savedAt">,
-                ) =>
-                  input.navigation?.save(target.startingUrl, {
-                    ...update,
-                    savedAt: new Date().toISOString(),
-                  });
-                let latest: Omit<SourceNavigationProgress, "savedAt"> = {
-                  currentUrl: resumeUrl ?? startUrl,
-                  visitedUrls: earlier?.visitedUrls ?? [],
-                  collected: earlier?.collected ?? 0,
-                  stepCount: earlier?.stepCount ?? 0,
-                };
-                // The runner bounds source navigation in its browser queue.
-                // Do not also hold the detail-reader queue: a checkpoint can
-                // wait for screening that needs a rendered detail of its own.
-                const result = await deps.browserRuntime.runAgentDiscovery(
-                  "target_site",
-                  {
-                    ...(context.browserPermissions
-                      ? { browserPermissions: context.browserPermissions }
-                      : {}),
-                    ...(context.readIntendedAccountEmail
-                      ? {
-                          readIntendedAccountEmail:
-                            context.readIntendedAccountEmail,
-                        }
-                      : {}),
-                    ...(context.readBrowserPermissions
-                      ? {
-                          readBrowserPermissions:
-                            context.readBrowserPermissions,
-                        }
-                      : {}),
-                    inventoryOnly: true,
-                    ...(earlier
-                      ? {
-                          resumeCheckpoint: {
-                            revision: 0,
-                            savedAt: earlier.savedAt,
-                            currentUrl: earlier.currentUrl,
-                            lastStableUrl: earlier.currentUrl,
-                            stepCount: earlier.stepCount,
-                            collectedJobs: [],
-                            collectedEarlier: earlier.collected,
-                            visitedUrls: earlier.visitedUrls,
-                            phaseEvidence: SourceDebugPhaseEvidenceSchema.parse(
-                              {},
-                            ),
-                          },
-                        }
-                      : {}),
-                    onCheckpoint: async (checkpoint) => {
-                      input.message(
-                        `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
-                      );
-                      await input.onCards?.(toCards(checkpoint.collectedJobs));
-                      // Its cards are accepted: a restart continues from here.
-                      const at = /^https?:/iu.test(checkpoint.currentUrl)
-                        ? checkpoint.currentUrl
-                        : checkpoint.lastStableUrl;
-                      latest = {
-                        currentUrl: /^https?:/iu.test(at)
-                          ? at
-                          : latest.currentUrl,
-                        visitedUrls: checkpoint.visitedUrls.length
-                          ? checkpoint.visitedUrls
-                          : latest.visitedUrls,
-                        collected:
-                          (earlier?.collected ?? 0) +
-                          checkpoint.collectedJobs.length,
-                        stepCount: checkpoint.stepCount,
-                      };
-                      progress(latest);
-                    },
-                    dedicatedPage: true,
-                    retainAllFound: true,
-                    userProfile: context.profile,
-                    searchPreferences: toJobSearchGoals(
-                      context.searchPreferences,
-                    ),
-                    startingUrls: [
-                      ...new Set([...(resumeUrl ? [resumeUrl] : []), startUrl]),
-                    ],
-                    navigationHostnames: [
-                      ...new Set([
-                        new URL(target.startingUrl).hostname,
-                        ...(portalUrl ? [new URL(portalUrl).hostname] : []),
-                        ...(resumeUrl ? [new URL(resumeUrl).hostname] : []),
-                      ]),
-                    ],
-                    siteLabel: target.label,
-                    siteInstructions: guidance,
-                    searchRequest: {
-                      intent: settings.note,
-                      breadth: "wide",
-                      depth: settings.depth,
-                      freshness: "any",
-                      sourceIds: [target.id],
-                    },
-                    targetJobCount: Number.MAX_SAFE_INTEGER,
-                    maxSteps: Number.MAX_SAFE_INTEGER,
-                    signal,
-                    onProgress: (progress) => {
-                      if (progress.message) input.message(progress.message);
-                    },
-                    aiClient: deps.aiClient,
-                  },
-                );
-                const cards = toCards(result.jobs);
-                const complete = result.agentMetadata
-                  ? result.agentMetadata.phaseCompletionMode ===
-                      "structured_finish" &&
-                    result.agentMetadata.incomplete === false
-                  : result.inventoryCompleteness === "complete";
-                const needsYou =
-                  result.agentMetadata?.accessBlockerReason ===
-                    "auth_required" ||
-                  result.agentMetadata?.accessBlockerReason ===
-                    "site_protection";
-                // A collection the model finished, without leaving the
-                // person a step, is not repeated after a restart. One an
-                // outage or error cut short continues from where it was,
-                // and is ours to try again.
-                const finished = result.agentMetadata
-                  ? result.agentMetadata.phaseCompletionMode ===
-                    "structured_finish"
-                  : complete;
-                const inventory = {
-                  cards,
-                  pagesRead: result.agentMetadata?.pagesCovered ?? 0,
-                  complete,
-                  needsYou,
-                  notes: [
-                    ...(result.agentMetadata?.phaseCompletionReason
-                      ? [result.agentMetadata.phaseCompletionReason]
-                      : []),
-                    result.warning ??
-                      `${cards.length} listings collected with browser navigation.`,
-                  ],
-                  ...(earlier ? { resumed: true } : {}),
-                  ...(!finished && !needsYou ? { cutShort: true } : {}),
-                };
-                if (finished && !inventory.needsYou && input.navigation) {
-                  await input.onCards?.(cards);
-                  progress({
-                    ...latest,
-                    collected: Math.max(
-                      latest.collected,
-                      (earlier?.collected ?? 0) + cards.length,
-                    ),
-                    outcome: {
-                      complete: inventory.complete,
-                      pagesRead: inventory.pagesRead,
-                      notes: inventory.notes,
-                    },
-                  });
-                }
-                return inventory;
-              },
-            }
-          : {}),
+        ...(input.lane === "browser" ? { navigateFallback } : {}),
       });
     },
     screenCards: (input) => {
@@ -639,7 +644,10 @@ export function createListingSearchEngine(deps: {
                 },
               ),
           );
-          for (const job of discovery.jobs)
+          const indexUrl = discovery.agentMetadata?.listingIndexUrl;
+          if (indexUrl)
+            (own.indexes ??= []).push({ requestedUrl: card.url, indexUrl });
+          for (const job of indexUrl ? [] : discovery.jobs)
             own.jobs.push({
               ...(card.evidenceFingerprint
                 ? {
@@ -678,7 +686,7 @@ export function createListingSearchEngine(deps: {
                 ? { hiddenReason: `Closed: ${job.searchRejection.reason}` }
                 : {}),
             });
-          if (!discovery.jobs.length)
+          if (!indexUrl && !discovery.jobs.length)
             own.failures.push({
               url: card.url,
               reason:
@@ -708,6 +716,8 @@ export function createListingSearchEngine(deps: {
           );
           result.jobs.push(...followed.jobs);
           result.failures.push(...followed.failures);
+          if (followed.indexes?.length)
+            (result.indexes ??= []).push(...followed.indexes);
           await onRead([card], followed);
         }
       }

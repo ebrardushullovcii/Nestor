@@ -61,6 +61,7 @@ function textOf(node: Node): string {
   if (
     element(node) &&
     (ignored.has(node.tagName) ||
+      ["navigation", "banner", "contentinfo"].includes(attr(node, "role")) ||
       node.attrs.some((a) => a.name === "hidden") ||
       attr(node, "aria-hidden") === "true")
   )
@@ -698,6 +699,7 @@ export function readListingHtml(
     nodes.find(
       (node) => node.tagName === "main" || attr(node, "role") === "main",
     ) ??
+    (articles.length === 1 ? articles[0] : undefined) ??
     nodes.find((node) => node.tagName === "body") ??
     doc;
   const rootNodes = descendants(root);

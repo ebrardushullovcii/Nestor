@@ -18,7 +18,10 @@ export async function collectRenderedInventory(input: {
   source: { id: string; label: string };
   signal?: AbortSignal;
   allowUrl(url: string): boolean;
-  onPage(cards: ListingCard[]): Promise<void>;
+  onPage(
+    cards: ListingCard[],
+    progress: { visitedUrls: string[]; pendingUrls: string[] },
+  ): Promise<void>;
 }): Promise<SourceInventory | null> {
   const cards = new Map<string, ListingCard>();
   const visited = new Set<string>();
@@ -55,8 +58,11 @@ export async function collectRenderedInventory(input: {
     const fresh = inventory.cards.filter((card) => !cards.has(card.url));
     for (const card of inventory.cards) cards.set(card.url, card);
     // The callback persists through the ordinary screen/read pipeline on its
-    // own search signal. A later browser deadline cannot erase this batch.
-    if (fresh.length) await input.onPage(fresh);
+    // own search signal. The observed branch addresses travel with it.
+    await input.onPage(fresh, {
+      visitedUrls: [...visited],
+      pendingUrls: [...pending],
+    });
     if (inventory.unlinked)
       return partial(
         `${inventory.unlinked} published vacancies on ${url} have no address of their own; read them from the page.`,

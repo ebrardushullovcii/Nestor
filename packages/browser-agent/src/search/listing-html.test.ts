@@ -1,10 +1,20 @@
 import { expect, test } from "vitest";
 
 import { blockedByCheck } from "./bot-check";
-import { readInventoryHtml } from "./listing-html";
+import { readInventoryHtml, readListingHtml } from "./listing-html";
 
 const source = { id: "board", label: "Board" };
 const url = "https://board.example.test/jobs";
+
+test("listing text skips site navigation landmarks and keeps the job's requirements", () => {
+  const html = `<body><main><article><div role="navigation">Welcome to the board</div>
+    <h1>Backend Engineer</h1><p>Remote in Europe</p>
+    <h2>Requirements</h2><p>Maintain our Go services</p>
+    <div role="contentinfo">Browse more employers</div></article></main></body>`;
+  expect(readListingHtml(html, "Backend Engineer").text).toBe(
+    "Backend Engineer\n\nRemote in Europe\n\nRequirements\n\nMaintain our Go services",
+  );
+});
 
 test.each(["Show more vacancies", "Load 10 more positions", "Next results →"])(
   "B2 recognizes observed pagination wording: %s",

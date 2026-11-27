@@ -96,7 +96,8 @@ const RELEASED_COLUMNS: Record<string, string> = {
   search_sources:
     "id search_id source_id label url state lane phase cards related unrelated seen failed_reads found added hidden message",
   search_source_queue: "search_id source_id target_json full completed",
-  search_listing_queue: "id search_id source_id url card_json leased",
+  search_listing_queue:
+    "id search_id source_id url card_json leased completed_as",
   search_source_navigation: "search_id source_id start_url progress_json",
   search_source_pages: "search_id source_id url links_json",
   searches:

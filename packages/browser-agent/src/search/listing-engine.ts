@@ -348,8 +348,14 @@ async function collectSourceObserved(
 ): Promise<SourceInventory> {
   try {
     const feed =
-      input.lane === "browser" ? null : await collectPublicFeed(input);
-    if (feed) return feed;
+      input.lane === "browser" || input.pageLog?.links(input.source.url)
+        ? null
+        : await collectPublicFeed(input);
+    if (feed) {
+      if (feed.complete)
+        input.pageLog?.record(input.source.url, input.source.url, []);
+      return feed;
+    }
   } catch {
     input.signal?.throwIfAborted(); /* The public board page is the fallback when its feed is unavailable. */
   }
@@ -427,8 +433,6 @@ async function collectSourceObserved(
           return;
         }
         if (logged(page.finalUrl)) return;
-        input.indexPages?.add(url);
-        input.indexPages?.add(page.finalUrl);
         const parsed = readInventoryHtml(
           page.html,
           page.finalUrl,
@@ -436,11 +440,14 @@ async function collectSourceObserved(
         );
         const done = (links: readonly string[]) => {
           follow(links);
-          if (finished)
+          if (finished) {
+            input.indexPages?.add(url);
+            input.indexPages?.add(page.finalUrl);
             input.pageLog?.record(url, page.finalUrl, [
               ...parsed.directories,
               ...links,
             ]);
+          }
         };
         if (parsed.unlinked) {
           unfinished();
@@ -1056,7 +1063,7 @@ export async function readListings(
     },
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
-  const indexes: string[] = [];
+  const indexes: NonNullable<ReadListingResult["indexes"]> = [];
   const closed: string[] = [];
   // Every URL owns its read, even when another source printed the same card.
   const reads = await mapConcurrent(input.cards, 6, (original) =>
@@ -1270,7 +1277,9 @@ export async function readListings(
   );
   const readMetadata = async (
     batch: Read[],
-    part: ReadListingResult & { indexes: string[] },
+    part: ReadListingResult & {
+      indexes: NonNullable<ReadListingResult["indexes"]>;
+    },
   ): Promise<void> => {
     const { failures, indexes } = part;
     const answer = await ask(
@@ -1296,7 +1305,10 @@ export async function readListings(
         continue;
       }
       if (fields.index === true) {
-        indexes.push(read.card.url);
+        indexes.push({
+          requestedUrl: read.card.url,
+          indexUrl: read.page.finalUrl,
+        });
         continue;
       }
       if (fields.isListing === false) {
@@ -1336,7 +1348,7 @@ export async function readListings(
       const part = {
         jobs: [] as FoundJob[],
         failures: [] as ReadListingResult["failures"],
-        indexes: [] as string[],
+        indexes: [] as NonNullable<ReadListingResult["indexes"]>,
       };
       try {
         await readMetadata(batch, part);
@@ -1472,11 +1484,13 @@ export async function fitJobs(
           employmentType: job.employmentType,
           salaryText: job.salaryText,
           seniority: job.seniority,
+          postedAt: job.postedAt,
+          fullListingRead: job.facts.fullListingRead ?? null,
           description: withoutRepeatedBlocks(job.description),
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing's description is its complete unabridged text; a block the page repeated verbatim appears once. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : " The person counts remote jobs as any location: a remote role they can work from where they live matches their preferred places. This setting is about their preferences only; it never removes a listing's residency or hiring-region rule."} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
+          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing carries the description we have and, when known, whether the full posting was read. A card, title-only result or stub with no concrete duties cannot establish a strong or worth-applying match, even if an older record labels its read complete. Where the evidence is thin, state exactly what is unverified. A block the page repeated verbatim appears once. Use the assessment date and postedAt to weigh unusually old openings. Weigh the posting's actual working language when the listing names it, and distinguish that from the language the page happens to be written in. Weigh a concrete caveat such as salary below the saved floor, a mandatory language, incompatible hours, or a required move in the score itself. For otherwise comparable roles, prefer one the person can start from their current location and in their preferred work mode over one that requires relocation or regular office attendance. Apply the same reasoning to the same location facts across listings, including region restrictions in the heading and exceptions or contradictions in the body. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : " The person counts remote jobs as any location: a remote role they can work from where they live matches their preferred places. This setting is about their preferences only; it never removes a listing's residency or hiring-region rule."} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
           {
             ...context,
             listings,

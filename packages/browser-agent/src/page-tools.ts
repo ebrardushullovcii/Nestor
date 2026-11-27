@@ -313,7 +313,7 @@ export function createPageTools(
         const pressed = await hands.clickElement(ref);
         if (!pressed.ok) {
           return ok(
-            `"${label}" would not press: ${pressed.error}\n\nThe page now:\n\n${describe(await observe())}`,
+            `"${label}" would not press: ${pressed.error}\n\nThe page now:\n\n${(policy.describeFull ?? describe)(await observe())}`,
           );
         }
         const before = seen?.signature ?? "";
