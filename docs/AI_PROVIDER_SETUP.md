@@ -51,8 +51,12 @@ Fit batches and title screens have role-specific effort so structured judgments
 can finish within the answer budget. A provider's HTTP 200 with incomplete
 output is unfinished technical work, not a score or evidence of exhaustion.
 Valid fit rows are retained; incomplete rows stay unscored. **Retry fit** in Find
-jobs scores saved full listings without rereading sites; **Stop fit** cancels it.
-A later Search also picks up unfinished fits while reusing unchanged listings.
+jobs scores saved full listings without rereading sites; **Stop fit** sends no
+more. A fit request already sent is paid for, so after Stop, or when a new
+search takes over, it finishes and keeps its answers; only quitting the app
+cancels it. A later Search also picks up unfinished fits while reusing unchanged
+listings, and never asks again about a listing whose request is still out or
+whose stored answer is for the same inputs.
 
 The gateway accepted simple synthetic image input on this DeepSeek route. The
 assistant capability declares that transport support; it does not establish

@@ -20,6 +20,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import { createFitQueue } from "./fit-queue";
+import { fitInputFingerprint } from "./fit-input";
 import { screenCards as screenListingCards } from "@nestor/browser-agent";
 import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import { setImmediate as yieldTurn } from "node:timers/promises";
@@ -1969,6 +1970,175 @@ test("complete fit batches persist before later work is cancelled", async () => 
   gate.resolve([]);
   expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77);
   expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 0 });
+});
+
+/**
+ * A scripted model that holds every fit request until the test answers it,
+ * and records each listing it is asked about under its input fingerprint.
+ */
+function scriptedFit(engine: ReturnType<typeof setup>["engine"]) {
+  const asked: string[] = [];
+  const open: { ids: number[]; answer: () => void; signal?: AbortSignal }[] =
+    [];
+  engine.fitJobs.mockImplementation(
+    ({ jobs, signal }) =>
+      new Promise((resolve, reject) => {
+        for (const job of jobs)
+          asked.push(`${job.id}:${fitInputFingerprint("facts", job)}`);
+        const request = {
+          ids: jobs.map((job) => job.id),
+          ...(signal ? { signal } : {}),
+          answer: () =>
+            resolve(
+              jobs.map((job) => ({
+                id: job.id,
+                score: 70,
+                summary: "Scripted judgment",
+                reasons: [],
+                gaps: [],
+              })),
+            ),
+        };
+        open.push(request);
+        signal?.addEventListener(
+          "abort",
+          () => reject(new Error("The fit request was cancelled.")),
+          { once: true },
+        );
+      }),
+  );
+  return {
+    asked,
+    open,
+    /** Answers every request sent so far. */
+    answerAll() {
+      for (const request of open.splice(0)) request.answer();
+    },
+    /** Keeps answering what is asked until `work` settles. */
+    async settle<T>(work: Promise<T>): Promise<T> {
+      let done = false;
+      void work.then(
+        () => (done = true),
+        () => (done = true),
+      );
+      while (!done) {
+        for (const request of open.splice(0)) request.answer();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return work;
+    },
+    /** Each listing asked about more than once for the same inputs. */
+    repeats() {
+      const counts = new Map<string, number>();
+      for (const key of asked) counts.set(key, (counts.get(key) ?? 0) + 1);
+      return [...counts].filter(([, n]) => n > 1).map(([key]) => key);
+    },
+  };
+}
+
+test("Stop keeps fit requests already sent; a new search mid-batch and new cards never ask about the same inputs twice", async () => {
+  const { runner, engine, store } = setup();
+  const backlog = seedBacklog(store, 60, LONG_LISTING);
+  const model = scriptedFit(engine);
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() => expect(model.open.length).toBe(6));
+  const sentBeforeStop = model.open.flatMap((request) => request.ids);
+  runner.stop();
+  expect(runner.status().search?.state).toBe("stopped");
+  // The person searches again at once, while the first requests are unanswered.
+  await runner.start({ postedWithin: "any" });
+  // New cards arrive mid-batch: one repeats a listing in flight unchanged, one
+  // brings a longer description for another listing in flight.
+  const unchanged = store.getJob(sentBeforeStop[0]!)!;
+  const changed = store.getJob(sentBeforeStop[1]!)!;
+  const listing = (job: typeof unchanged, description: string) => ({
+    ...found(card("seed")),
+    title: job.title,
+    sourceJobId: job.title.split(" ").at(-1)!,
+    url: job.url,
+    description,
+  });
+  store.saveFoundJobs({
+    searchId: "cards",
+    jobs: [
+      listing(unchanged, unchanged.description),
+      listing(changed, `${changed.description} Also: Kubernetes.`),
+    ],
+  });
+  expect(store.getJob(changed.id)?.description).toContain("Kubernetes");
+  // Requests the stopped search sent still count toward the person's limit.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(model.open).toHaveLength(6);
+  await model.settle(finished(runner));
+  await model.settle(runner.scoreUnscored());
+  expect(store.unscoredJobIds(200)).toEqual([]);
+  expect(model.repeats()).toEqual([]);
+  // Every answer the model gave before and after Stop was stored.
+  for (const id of [...backlog, ...sentBeforeStop])
+    expect(store.getJob(id)?.fitScore).toBe(70);
+  const askedAbout = (id: number) =>
+    model.asked.filter((key) => key.startsWith(`${id}:`)).length;
+  expect(askedAbout(unchanged.id)).toBe(1);
+  // Its facts changed while it was in flight: one request per version.
+  expect(askedAbout(changed.id)).toBe(2);
+  expect(askedAbout(backlog.at(-1)!)).toBe(1);
+});
+
+test("background fit sent at startup keeps its answers when a search starts, and the search waits for them", async () => {
+  const { runner, engine, store } = setup();
+  const backlog = seedBacklog(store, 60, LONG_LISTING);
+  const model = scriptedFit(engine);
+  const background = runner.scoreUnscored();
+  await vi.waitFor(() => expect(model.open.length).toBe(6));
+  const sentAtStartup = model.open.flatMap((request) => request.ids);
+  await runner.start({ postedWithin: "any" });
+  expect(await background).toBe(0);
+  expect(model.open.every((request) => !request.signal?.aborted)).toBe(true);
+  await model.settle(finished(runner));
+  for (const id of sentAtStartup) expect(store.getJob(id)?.fitScore).toBe(70);
+  expect(store.unscoredJobIds(200)).toEqual([]);
+  expect(model.repeats()).toEqual([]);
+  // Each saved listing, from the backlog and the search, was asked about once.
+  expect(model.asked).toHaveLength(store.stageCounts().found);
+  expect(store.stageCounts().found).toBeGreaterThan(backlog.length);
+});
+
+test("quitting cancels a fit request already sent", async () => {
+  const { runner, engine, store } = setup();
+  seedBacklog(store, 3, LONG_LISTING);
+  const model = scriptedFit(engine);
+  void runner.scoreUnscored();
+  await vi.waitFor(() => expect(model.open.length).toBe(1));
+  runner.suspend();
+  expect(model.open[0]!.signal?.aborted).toBe(true);
+});
+
+test("a stale flag on unchanged inputs keeps the stored answer without asking again", async () => {
+  const { runner, engine, store, context } = setup();
+  context.sources = [];
+  const [id] = seedBacklog(store, 1, LONG_LISTING);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  const job = store.getJob(id!)!;
+  // A pay figure the listing's text already carried: the fit inputs are the same.
+  store.saveFoundJobs({
+    searchId: "again",
+    jobs: [
+      {
+        ...found(card("seed")),
+        title: job.title,
+        sourceJobId: "0",
+        url: job.url,
+        description: job.description,
+        salaryMin: 150_000,
+        facts: { fullListingRead: true },
+      },
+    ],
+  });
+  expect(store.getJob(id!)?.fitStale).toBe(true);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  expect(store.getJob(id!)).toMatchObject({ fitScore: 82, fitStale: false });
 });
 
 test("healthy-source jobs persist and score while another source detail is held", async () => {

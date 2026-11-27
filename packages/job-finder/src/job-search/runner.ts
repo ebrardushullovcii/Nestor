@@ -19,7 +19,7 @@ import {
   type JobSearchProgress,
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
-import { createFitQueue } from "./fit-queue";
+import { createFitQueue, createFitRequests } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
 import {
@@ -74,6 +74,11 @@ export function createJobSearchRunner(
   let recoveryError: string | null = null;
   const providerWaits = new Set<object>();
   let visibleIds: readonly number[] = [];
+  // Only quitting cancels a fit request already sent; Stop and a new search
+  // end what each queue takes next.
+  const fitLifetime = new AbortController();
+  setMaxListeners(0, fitLifetime.signal);
+  const sentFits = createFitRequests(fitLifetime.signal);
   const scheduleFit = (delay = 300) => {
     if (continuation) clearTimeout(continuation);
     continuation = setTimeout(() => {
@@ -229,6 +234,7 @@ export function createJobSearchRunner(
       },
       settings,
       () => notify(),
+      sentFits,
     );
     run.fits = fits;
     run.queueProgress = () => ({
@@ -883,6 +889,7 @@ export function createJobSearchRunner(
       if (continuation) clearTimeout(continuation);
       continuation = null;
       recovery?.controller.abort();
+      fitLifetime.abort();
       const run = active;
       if (!run) return;
       run.flush?.();
@@ -960,6 +967,7 @@ export function createJobSearchRunner(
               // The last search's note was for that search only.
               search ? { ...search.settings, note: "" } : undefined,
               () => notify(),
+              sentFits,
             );
             recoveryQueue = fits;
             fits.enqueue([
