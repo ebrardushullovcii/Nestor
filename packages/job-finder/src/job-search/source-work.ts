@@ -29,7 +29,13 @@ export interface SourceWork {
   accessBlocked: boolean;
   counted: boolean;
   notes: string[];
+  /** The notes come from an attempt that read listings or finished. */
+  notesRead: boolean;
   readFailures: string[];
+  /** Why this run's last attempt on the site failed; a resume tries it again. */
+  failure: string | null;
+  /** Why the attempt before this run failed, kept for the site's message. */
+  earlierFailure: string | null;
   completeAccess?: () => void;
 }
 /** Keep reading reads the whole site, as a Thorough search does. */
@@ -66,7 +72,10 @@ export function sourceWork(
     accessBlocked: false,
     counted: false,
     notes: [],
+    notesRead: false,
     readFailures: [],
+    failure: null,
+    earlierFailure: null,
     row: {
       sourceId: target.id,
       label: target.label,

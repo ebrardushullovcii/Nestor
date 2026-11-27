@@ -4,6 +4,7 @@ import {
   DiscoveryPageReadError,
   JobDetailSchema,
   type ListingCard,
+  type SeenListingCard,
 } from "@nestor/contracts";
 import {
   collectSource,
@@ -2170,7 +2171,7 @@ test("listing reads hand each finished group over before the other groups end", 
   expect(result.jobs).toHaveLength(2);
 });
 
-test("screening hands each batch's unrelated verdicts over as they are decided", async () => {
+test("screening hands each batch's verdicts, related and unrelated, over as they are decided", async () => {
   const cards = [card("Data Analyst"), card("Nurse"), card("Chef")];
   const client = {
     chatWithTools: vi.fn(() =>
@@ -2189,11 +2190,69 @@ test("screening hands each batch's unrelated verdicts over as they are decided",
     onSeen: (seen) => {
       // Handed over before screening returns.
       expect(client.chatWithTools).toHaveBeenCalledOnce();
-      kept.push(seen.map((card) => card.url));
+      kept.push(seen.map((card) => `${card.verdict} ${card.url}`));
     },
   });
   expect(kept).toEqual([
-    ["https://board.example/Nurse", "https://board.example/Chef"],
+    [
+      "unrelated https://board.example/Nurse",
+      "unrelated https://board.example/Chef",
+    ],
+    ["related https://board.example/Data Analyst"],
   ]);
-  expect(result.seen.map((card) => card.url)).toEqual(kept[0]);
+  expect(result.seen.map((card) => card.url)).toEqual([
+    "https://board.example/Nurse",
+    "https://board.example/Chef",
+  ]);
+});
+
+test("a card judged related before a restart is read again without another screening call", async () => {
+  const cards = [card("Data Analyst"), card("Nurse"), card("Saved")];
+  const goals = {
+    targetRoles: ["Data Analyst"],
+    relatedRoles: [],
+    strategy: "related_roles" as const,
+  };
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"keep":{"0":1,"1":0}}' }),
+    ),
+  };
+  const verdicts: SeenListingCard[] = [];
+  const first = await screenCards({
+    client,
+    cards: cards.slice(0, 2),
+    goals,
+    onSeen: (seen) => {
+      verdicts.push(...seen);
+    },
+  });
+  expect(first.related.map((card) => card.title)).toEqual(["Data Analyst"]);
+  // The next process: the related card's read had not finished.
+  const published: string[] = [];
+  const again = await screenCards({
+    client,
+    cards,
+    goals,
+    lookupSeenCards: (asked) =>
+      Promise.resolve(
+        verdicts.filter((verdict) =>
+          asked.some(
+            (card) =>
+              card.url === verdict.url &&
+              card.cardFingerprint === verdict.cardFingerprint,
+          ),
+        ),
+      ),
+    // A saved posting is not read again, whatever its verdict.
+    lookupKnownUrls: () => Promise.resolve([cards[2].url]),
+    onRelated: (related) => {
+      published.push(...related.map((card) => card.title));
+      return Promise.resolve();
+    },
+  });
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+  expect(again.related.map((card) => card.title)).toEqual(["Data Analyst"]);
+  expect(published).toEqual(["Data Analyst"]);
+  expect(again.seen).toEqual([]);
 });

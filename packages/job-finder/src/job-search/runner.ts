@@ -298,12 +298,17 @@ export function createJobSearchRunner(
           ? ` ${source.row.failedReads} listing reads need attention.`
           : "") +
         (source.notes.length ? ` ${source.notes.join(" ")}` : "") +
-        (source.readFailures.length ? ` ${source.readFailures.join(" ")}` : "");
+        (source.readFailures.length
+          ? ` ${source.readFailures.join(" ")}`
+          : "") +
+        (source.earlierFailure && source.earlierFailure !== source.failure
+          ? ` An earlier attempt failed: ${source.earlierFailure}`
+          : "");
       // The settled row, queue acknowledgement and count commit together.
       // A crash cannot acknowledge work whose result was not saved.
       deps.store.transaction(() => {
         resultRows.put(run.record!.id, source.row);
-        if (resultRows.settle(run.record!.id, source.target.id))
+        if (resultRows.settle(run.record!.id, source.target.id, source.failure))
           update(run, { sourcesDone: 1 });
       });
       dirty.delete(source);
@@ -349,6 +354,21 @@ export function createJobSearchRunner(
       siteDirty = true;
       write(source);
     };
+    /**
+     * An attempt on the site ended on an error. A resume tries it again; what
+     * earlier attempts found stays, with this failure added.
+     */
+    const attemptFailed = (source: SourceWork, error: unknown) => {
+      if (!current(source)) return;
+      source.failure = errorMessage(error);
+      if (source.row.cards) {
+        source.row.state = "partial";
+        const failed = `The last attempt to read this site failed: ${source.failure}`;
+        source.notes = source.notesRead ? [...source.notes, failed] : [failed];
+        write(source);
+      } else
+        failedSource(source, `This site could not be read: ${source.failure}`);
+    };
     const browserTask = (
       source: SourceWork,
       work: (signal: AbortSignal) => Promise<void>,
@@ -372,10 +392,7 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
-          failedSource(
-            source,
-            `This site could not be read: ${errorMessage(error)}`,
-          );
+          attemptFailed(source, error);
           source.collected = true;
           markDone(source);
         });
@@ -471,8 +488,23 @@ export function createJobSearchRunner(
         ? false
         : source.accessBlocked || Boolean(inventory.accessBlocked);
       // This is the current collection outcome, replacing the earlier HTTP
-      // attempt when browser navigation recovered the source.
-      source.notes = inventory.notes;
+      // attempt when browser navigation recovered the source. An attempt
+      // that read nothing does not erase what an earlier one found and said.
+      const readNothing = !inventory.complete && !inventory.cards.length;
+      const later = `${inventory.cutShort && source.row.cards ? "The last attempt to read this site failed" : "A later attempt did not finish"}: ${inventory.notes.join(" ")}`;
+      if (readNothing && source.notesRead)
+        source.notes = [...source.notes, later];
+      else if (readNothing && inventory.cutShort && source.row.cards)
+        source.notes = [later];
+      else {
+        source.notes = inventory.notes;
+        source.notesRead = !readNothing;
+      }
+      // Cut short by an error or outage, the source is tried again on resume.
+      source.failure = inventory.cutShort
+        ? inventory.notes.join(" ") ||
+          "The collection stopped before it finished."
+        : null;
       source.row.lane = inventory.lane ?? lane;
       if (lane === "http" && inventory.requiresBrowser) {
         browserTask(source, async (browserSignal) => {
@@ -487,7 +519,9 @@ export function createJobSearchRunner(
           `${source.target.label}: ${inventory.notes.join(" ") || "The site's sign-in or verification attempt still needs you on the open page."}`,
         );
       else if (!inventory.complete) {
-        if (inventory.cards.length) source.row.state = "partial";
+        // Cards collected before a restart or by an earlier attempt count:
+        // the site was read, not completely.
+        if (source.row.cards) source.row.state = "partial";
         else
           failedSource(
             source,
@@ -531,6 +565,10 @@ export function createJobSearchRunner(
       if (before?.counted) update(run, { sourcesDone: -1 });
       else if (run.enqueue) update(run, { sourcesTotal: 1 });
       const source = sourceWork(target, full);
+      source.earlierFailure = resultRows.failure(run.record!.id, target.id);
+      // This run already screened what a failed attempt had queued; the new
+      // attempt starts afresh rather than waiting on cards it has handled.
+      if (before?.counted) resultRows.clearProgress(run.record!.id, target.id);
       // Keep saved-result counts when restarting an interrupted source; URL
       // identity in the job store keeps already saved postings out of reads.
       const previous = resultRows.get(run.record!.id, target.id);
@@ -566,8 +604,7 @@ export function createJobSearchRunner(
         .catch((error: unknown) => {
           if (current(source)) {
             source.collected = true;
-            source.row.state = "failed";
-            source.row.message = errorMessage(error);
+            attemptFailed(source, error);
             markDone(source);
           }
         });
@@ -763,6 +800,12 @@ export function createJobSearchRunner(
             });
           }
           if (resume) {
+            // A site whose last attempt failed gets another real attempt.
+            const retried = resultRows.retryFailed(resume.id);
+            if (retried)
+              run.record = deps.store.searches.count(resume.id, {
+                sourcesDone: -retried,
+              });
             const pending = resultRows.pending(resume.id);
             targets = pending.map((item) => item.target);
             fullIds = new Set(

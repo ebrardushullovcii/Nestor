@@ -90,6 +90,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   profile_tracker_stages: "id label base_stage color position is_terminal",
   profile_work_permissions:
     "country conditions requires_future_sponsorship position",
+  related_listing_cards: "url role_goals_key card_fingerprint",
   resumes:
     "job_id level state updated_at error draft_json previous_json approved_at pdf_path",
   search_sources:

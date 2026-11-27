@@ -76,7 +76,7 @@ export interface JobSearchEngine {
         roleGoalsKey: string,
       ): readonly SeenListingCard[];
       onRelated?: (cards: ListingCard[]) => Promise<void>;
-      /** Unrelated verdicts as each model batch decides them. */
+      /** Each verdict, related or unrelated, as the model decides it. */
       onSeen?: (cards: SeenListingCard[]) => Promise<void> | void;
     },
   ): Promise<{
@@ -443,19 +443,29 @@ export function createListingSearchEngine(deps: {
                   },
                 );
                 const cards = toCards(result.jobs);
+                const complete = result.agentMetadata
+                  ? result.agentMetadata.phaseCompletionMode ===
+                      "structured_finish" &&
+                    result.agentMetadata.incomplete === false
+                  : result.inventoryCompleteness === "complete";
+                const needsYou =
+                  result.agentMetadata?.accessBlockerReason ===
+                    "auth_required" ||
+                  result.agentMetadata?.accessBlockerReason ===
+                    "site_protection";
+                // A collection the model finished, without leaving the
+                // person a step, is not repeated after a restart. One an
+                // outage or error cut short continues from where it was,
+                // and is ours to try again.
+                const finished = result.agentMetadata
+                  ? result.agentMetadata.phaseCompletionMode ===
+                    "structured_finish"
+                  : complete;
                 const inventory = {
                   cards,
                   pagesRead: result.agentMetadata?.pagesCovered ?? 0,
-                  complete: result.agentMetadata
-                    ? result.agentMetadata.phaseCompletionMode ===
-                        "structured_finish" &&
-                      result.agentMetadata.incomplete === false
-                    : result.inventoryCompleteness === "complete",
-                  needsYou:
-                    result.agentMetadata?.accessBlockerReason ===
-                      "auth_required" ||
-                    result.agentMetadata?.accessBlockerReason ===
-                      "site_protection",
+                  complete,
+                  needsYou,
                   notes: [
                     ...(result.agentMetadata?.phaseCompletionReason
                       ? [result.agentMetadata.phaseCompletionReason]
@@ -464,14 +474,8 @@ export function createListingSearchEngine(deps: {
                       `${cards.length} listings collected with browser navigation.`,
                   ],
                   ...(earlier ? { resumed: true } : {}),
+                  ...(!finished && !needsYou ? { cutShort: true } : {}),
                 };
-                // A collection the model finished, without leaving the
-                // person a step, is not repeated after a restart. One an
-                // outage or error cut short continues from where it was.
-                const finished = result.agentMetadata
-                  ? result.agentMetadata.phaseCompletionMode ===
-                    "structured_finish"
-                  : inventory.complete;
                 if (finished && !inventory.needsYou && input.navigation) {
                   await input.onCards?.(cards);
                   progress({
