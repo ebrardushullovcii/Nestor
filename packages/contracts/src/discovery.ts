@@ -2612,6 +2612,11 @@ export interface BrowserAgentRunCheckpoint {
   lastStableUrl: string;
   stepCount: number;
   collectedJobs: JobPosting[];
+  /**
+   * Postings an earlier run of this collection had collected and kept, when
+   * a restarted run continues without them in collectedJobs.
+   */
+  collectedEarlier?: number | undefined;
   visitedUrls: string[];
   phaseEvidence: z.infer<typeof SourceDebugPhaseEvidenceSchema>;
 }
@@ -2627,6 +2632,7 @@ export const BrowserAgentRunCheckpointSchema: z.ZodType<
   lastStableUrl: z.string(),
   stepCount: z.number().int().nonnegative(),
   collectedJobs: z.array(JobPostingSchema).default([]),
+  collectedEarlier: z.number().int().nonnegative().optional(),
   visitedUrls: z.array(UrlStringSchema).default([]),
   phaseEvidence: SourceDebugPhaseEvidenceSchema,
 });

@@ -1,6 +1,7 @@
 import {
   CandidateProfileSchema,
   JobPostingSchema,
+  SourceDebugPhaseEvidenceSchema,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
@@ -3129,4 +3130,45 @@ test("an infinite-scroll page reads only the cards this run has not saved yet", 
   // The second read is the new card alone.
   expect(read.at(-1)).toContain("jobs/j2");
   expect(read.at(-1)).not.toContain("jobs/j1");
+});
+
+test("a restarted browser collection is told where the interrupted one had got to", () => {
+  const fresh = createJobSearchPrompts(config({ inventoryOnly: true }));
+  expect(fresh.user).not.toContain("interrupted");
+  const resumed = createJobSearchPrompts(
+    config({
+      inventoryOnly: true,
+      startingUrls: [
+        "https://jobs.example.test/jobs?page=3",
+        "https://jobs.example.test/jobs",
+      ],
+      resumeCheckpoint: {
+        revision: 0,
+        savedAt: "2026-11-27T03:11:00.000Z",
+        currentUrl: "https://jobs.example.test/jobs?page=3",
+        lastStableUrl: "https://jobs.example.test/jobs?page=3",
+        stepCount: 9,
+        collectedJobs: [],
+        collectedEarlier: 57,
+        visitedUrls: [
+          "https://jobs.example.test/jobs",
+          "https://jobs.example.test/jobs?page=2",
+          "https://jobs.example.test/jobs?page=3",
+        ],
+        phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
+      },
+    }),
+  );
+  expect(resumed.user).toContain(
+    "Start at these observed source URLs:\nhttps://jobs.example.test/jobs?page=3\nhttps://jobs.example.test/jobs",
+  );
+  expect(resumed.user).toContain("had collected 57 listing cards");
+  expect(resumed.user).toContain(
+    "It had reached https://jobs.example.test/jobs?page=3, where this run starts.",
+  );
+  expect(resumed.user).toContain(
+    "Pages it had loaded, in order:\nhttps://jobs.example.test/jobs\nhttps://jobs.example.test/jobs?page=2",
+  );
+  // The resume facts follow the stable system prompt, which stays cacheable.
+  expect(resumed.system).toBe(fresh.system);
 });

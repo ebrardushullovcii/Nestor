@@ -1,7 +1,9 @@
 import type {
+  IndexPageLog,
   JobDiscoveryTarget,
   JobSearchSettings,
   JobSearchSourceRow,
+  SourceNavigationProgress,
 } from "@nestor/contracts";
 
 export interface SourceWork {
@@ -12,6 +14,13 @@ export interface SourceWork {
   urls: Set<string>;
   /** Index page addresses this run has read on the site, requested and landed. */
   indexPages: Set<string>;
+  /** Index pages this search finished on the site, kept across restarts. */
+  pageLog?: IndexPageLog;
+  /** Where browser collections of the site had got to, kept across restarts. */
+  navigation?: {
+    read(startUrl: string): SourceNavigationProgress | null;
+    save(startUrl: string, progress: SourceNavigationProgress): void;
+  };
   processed: number;
   /** Listings the site answered as removed; recorded closed, never read. */
   removed: number;

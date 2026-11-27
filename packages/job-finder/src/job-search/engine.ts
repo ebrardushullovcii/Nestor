@@ -24,11 +24,14 @@ import {
   type JobDiscoveryTarget,
   type JobFitUpdate,
   type JobSearchSettings,
+  SourceDebugPhaseEvidenceSchema,
+  type IndexPageLog,
   type ListingCard,
   type ModelTokenUsage,
   type ReadListingResult,
   type SeenListingCard,
   type SourceInventory,
+  type SourceNavigationProgress,
   type JobPosting,
 } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
@@ -54,6 +57,13 @@ export interface JobSearchEngine {
       indexPages?: Set<string>;
       /** Pages in indexPages are not read again: their cards are already collected. */
       skipReadIndexPages?: boolean;
+      /** Index pages this search finished on the site, kept across restarts. */
+      pageLog?: IndexPageLog;
+      /** Where browser collections of this site had got to, by starting address. */
+      navigation?: {
+        read(startUrl: string): SourceNavigationProgress | null;
+        save(startUrl: string, progress: SourceNavigationProgress): void;
+      };
     },
   ): Promise<SourceInventory>;
   screenCards(
@@ -66,6 +76,8 @@ export interface JobSearchEngine {
         roleGoalsKey: string,
       ): readonly SeenListingCard[];
       onRelated?: (cards: ListingCard[]) => Promise<void>;
+      /** Unrelated verdicts as each model batch decides them. */
+      onSeen?: (cards: SeenListingCard[]) => Promise<void> | void;
     },
   ): Promise<{
     related: ListingCard[];
@@ -80,6 +92,14 @@ export interface JobSearchEngine {
     context?: JobSearchContext;
     cards: readonly ListingCard[];
     signal: AbortSignal;
+    /**
+     * Each finished group of cards with its complete result, as soon as it
+     * is read; the returned result is then every group's together.
+     */
+    onRead?: (
+      cards: readonly ListingCard[],
+      result: ReadListingResult,
+    ) => Promise<void>;
   }): Promise<ReadListingResult>;
   fitJobs(input: {
     /** Save complete judgments before another batch or repair can fail. */
@@ -270,6 +290,7 @@ export function createListingSearchEngine(deps: {
         lane: input.lane,
         ...(input.indexPages ? { indexPages: input.indexPages } : {}),
         ...(input.skipReadIndexPages ? { skipReadIndexPages: true } : {}),
+        ...(input.pageLog ? { pageLog: input.pageLog } : {}),
         readPage:
           input.lane === "http"
             ? readPage
@@ -295,6 +316,36 @@ export function createListingSearchEngine(deps: {
                       "This site needs browser navigation, which is unavailable.",
                     ],
                   };
+                // A restart continues this collection where it had got to;
+                // its cards were accepted as they were collected.
+                const earlier =
+                  input.navigation?.read(target.startingUrl) ?? null;
+                if (earlier?.outcome)
+                  return {
+                    cards: [],
+                    pagesRead: earlier.outcome.pagesRead,
+                    complete: earlier.outcome.complete,
+                    notes: earlier.outcome.notes,
+                    resumed: true,
+                  };
+                const startUrl = portalUrl ?? target.startingUrl;
+                const resumeUrl =
+                  earlier && /^https?:/iu.test(earlier.currentUrl)
+                    ? earlier.currentUrl
+                    : null;
+                const progress = (
+                  update: Omit<SourceNavigationProgress, "savedAt">,
+                ) =>
+                  input.navigation?.save(target.startingUrl, {
+                    ...update,
+                    savedAt: new Date().toISOString(),
+                  });
+                let latest: Omit<SourceNavigationProgress, "savedAt"> = {
+                  currentUrl: resumeUrl ?? startUrl,
+                  visitedUrls: earlier?.visitedUrls ?? [],
+                  collected: earlier?.collected ?? 0,
+                  stepCount: earlier?.stepCount ?? 0,
+                };
                 // The runner bounds source navigation in its browser queue.
                 // Do not also hold the detail-reader queue: a checkpoint can
                 // wait for screening that needs a rendered detail of its own.
@@ -317,11 +368,45 @@ export function createListingSearchEngine(deps: {
                         }
                       : {}),
                     inventoryOnly: true,
+                    ...(earlier
+                      ? {
+                          resumeCheckpoint: {
+                            revision: 0,
+                            savedAt: earlier.savedAt,
+                            currentUrl: earlier.currentUrl,
+                            lastStableUrl: earlier.currentUrl,
+                            stepCount: earlier.stepCount,
+                            collectedJobs: [],
+                            collectedEarlier: earlier.collected,
+                            visitedUrls: earlier.visitedUrls,
+                            phaseEvidence: SourceDebugPhaseEvidenceSchema.parse(
+                              {},
+                            ),
+                          },
+                        }
+                      : {}),
                     onCheckpoint: async (checkpoint) => {
                       input.message(
                         `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
                       );
                       await input.onCards?.(toCards(checkpoint.collectedJobs));
+                      // Its cards are accepted: a restart continues from here.
+                      const at = /^https?:/iu.test(checkpoint.currentUrl)
+                        ? checkpoint.currentUrl
+                        : checkpoint.lastStableUrl;
+                      latest = {
+                        currentUrl: /^https?:/iu.test(at)
+                          ? at
+                          : latest.currentUrl,
+                        visitedUrls: checkpoint.visitedUrls.length
+                          ? checkpoint.visitedUrls
+                          : latest.visitedUrls,
+                        collected:
+                          (earlier?.collected ?? 0) +
+                          checkpoint.collectedJobs.length,
+                        stepCount: checkpoint.stepCount,
+                      };
+                      progress(latest);
                     },
                     dedicatedPage: true,
                     retainAllFound: true,
@@ -329,10 +414,15 @@ export function createListingSearchEngine(deps: {
                     searchPreferences: toJobSearchGoals(
                       context.searchPreferences,
                     ),
-                    startingUrls: [portalUrl ?? target.startingUrl],
+                    startingUrls: [
+                      ...new Set([...(resumeUrl ? [resumeUrl] : []), startUrl]),
+                    ],
                     navigationHostnames: [
-                      new URL(target.startingUrl).hostname,
-                      ...(portalUrl ? [new URL(portalUrl).hostname] : []),
+                      ...new Set([
+                        new URL(target.startingUrl).hostname,
+                        ...(portalUrl ? [new URL(portalUrl).hostname] : []),
+                        ...(resumeUrl ? [new URL(resumeUrl).hostname] : []),
+                      ]),
                     ],
                     siteLabel: target.label,
                     siteInstructions: guidance,
@@ -353,7 +443,7 @@ export function createListingSearchEngine(deps: {
                   },
                 );
                 const cards = toCards(result.jobs);
-                return {
+                const inventory = {
                   cards,
                   pagesRead: result.agentMetadata?.pagesCovered ?? 0,
                   complete: result.agentMetadata
@@ -373,7 +463,31 @@ export function createListingSearchEngine(deps: {
                     result.warning ??
                       `${cards.length} listings collected with browser navigation.`,
                   ],
+                  ...(earlier ? { resumed: true } : {}),
                 };
+                // A collection the model finished, without leaving the
+                // person a step, is not repeated after a restart. One an
+                // outage or error cut short continues from where it was.
+                const finished = result.agentMetadata
+                  ? result.agentMetadata.phaseCompletionMode ===
+                    "structured_finish"
+                  : inventory.complete;
+                if (finished && !inventory.needsYou && input.navigation) {
+                  await input.onCards?.(cards);
+                  progress({
+                    ...latest,
+                    collected: Math.max(
+                      latest.collected,
+                      (earlier?.collected ?? 0) + cards.length,
+                    ),
+                    outcome: {
+                      complete: inventory.complete,
+                      pagesRead: inventory.pagesRead,
+                      notes: inventory.notes,
+                    },
+                  });
+                }
+                return inventory;
               },
             }
           : {}),
@@ -419,6 +533,7 @@ export function createListingSearchEngine(deps: {
               Promise.resolve(input.seenCards(cards, key)),
             readPage,
             ...(input.onRelated ? { onRelated: input.onRelated } : {}),
+            ...(input.onSeen ? { onSeen: input.onSeen } : {}),
           }),
       ).finally(() =>
         timing("screen", startedAt, {
@@ -428,30 +543,72 @@ export function createListingSearchEngine(deps: {
       );
     },
     async readListings(input) {
-      if (input.lane !== "browser" || !input.context)
-        return followBoardApplyLinks(
-          await withTraceScope(
-            {
-              sourceId: undefined,
-              sourceUrl: undefined,
-              sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
-            },
-            () =>
-              readListings({
-                client,
-                onUsage,
-                ...input,
-                readPage,
-                ...modelContext(),
-              }),
-          ),
-          readPage,
-          input.signal,
+      const { onRead, ...request } = input;
+      if (input.lane !== "browser" || !input.context) {
+        if (!onRead)
+          return followBoardApplyLinks(
+            await withTraceScope(
+              {
+                sourceId: undefined,
+                sourceUrl: undefined,
+                sourceIds: [
+                  ...new Set(input.cards.map((card) => card.sourceId)),
+                ],
+              },
+              () =>
+                readListings({
+                  client,
+                  onUsage,
+                  ...request,
+                  readPage,
+                  ...modelContext(),
+                }),
+            ),
+            readPage,
+            input.signal,
+          );
+        // Each finished group is handed over with its apply links followed,
+        // before the other groups end.
+        const all: ReadListingResult = { jobs: [], failures: [] };
+        await withTraceScope(
+          {
+            sourceId: undefined,
+            sourceUrl: undefined,
+            sourceIds: [...new Set(input.cards.map((card) => card.sourceId))],
+          },
+          () =>
+            readListings({
+              client,
+              onUsage,
+              ...request,
+              readPage,
+              ...modelContext(),
+              onRead: async (cards, part) => {
+                const followed = await followBoardApplyLinks(
+                  part,
+                  readPage,
+                  input.signal,
+                );
+                all.jobs.push(...followed.jobs);
+                all.failures.push(...followed.failures);
+                if (followed.indexes?.length)
+                  (all.indexes ??= []).push(...followed.indexes);
+                if (followed.closed?.length)
+                  (all.closed ??= []).push(...followed.closed);
+                await onRead(cards, followed);
+              },
+            }),
         );
+        return all;
+      }
       const context = input.context;
       const result: ReadListingResult = { jobs: [], failures: [] };
       for (const card of input.cards) {
         input.signal.throwIfAborted();
+        // One listing's complete result, handed over when onRead is given.
+        const own: ReadListingResult = onRead
+          ? { jobs: [], failures: [] }
+          : result;
         try {
           const discovery = await withTraceScope(
             {
@@ -479,7 +636,7 @@ export function createListingSearchEngine(deps: {
               ),
           );
           for (const job of discovery.jobs)
-            result.jobs.push({
+            own.jobs.push({
               ...(card.evidenceFingerprint
                 ? {
                     listingCardEvidence: {
@@ -518,7 +675,7 @@ export function createListingSearchEngine(deps: {
                 : {}),
             });
           if (!discovery.jobs.length)
-            result.failures.push({
+            own.failures.push({
               url: card.url,
               reason:
                 discovery.warning ??
@@ -533,13 +690,26 @@ export function createListingSearchEngine(deps: {
             });
         } catch (error) {
           input.signal.throwIfAborted();
-          result.failures.push({
+          own.failures.push({
             url: card.url,
             reason: error instanceof Error ? error.message : String(error),
           });
         }
+        if (onRead) {
+          // Kept as soon as it is read: a restart does not read it again.
+          const followed = await followBoardApplyLinks(
+            own,
+            readPage,
+            input.signal,
+          );
+          result.jobs.push(...followed.jobs);
+          result.failures.push(...followed.failures);
+          await onRead([card], followed);
+        }
       }
-      return followBoardApplyLinks(result, readPage, input.signal);
+      return onRead
+        ? result
+        : followBoardApplyLinks(result, readPage, input.signal);
     },
     fitJobs: (input) =>
       withTraceScope(

@@ -1,7 +1,9 @@
 import {
   JobDiscoveryTargetSchema,
+  type IndexPageLog,
   type JobDiscoveryTarget,
   type ListingCard,
+  type SourceNavigationProgress,
   JobSearchSourceQuerySchema,
   type JobSearchSourceQuery,
   type JobSearchSourcePage,
@@ -52,6 +54,20 @@ CREATE TABLE IF NOT EXISTS search_listing_queue (
   UNIQUE(search_id, source_id, url)
 );
 CREATE INDEX IF NOT EXISTS search_listing_queue_source ON search_listing_queue(search_id, source_id, id);
+CREATE TABLE IF NOT EXISTS search_source_pages (
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  links_json TEXT NOT NULL,
+  PRIMARY KEY(search_id, source_id, url)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS search_source_navigation (
+  search_id TEXT NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  start_url TEXT NOT NULL,
+  progress_json TEXT NOT NULL,
+  PRIMARY KEY(search_id, source_id, start_url)
+) WITHOUT ROWID;
 CREATE TRIGGER IF NOT EXISTS search_sources_finished AFTER UPDATE OF state ON searches
 WHEN NEW.state IN ('stopped', 'failed') BEGIN
   UPDATE search_sources SET state = 'stopped', phase = NULL WHERE search_id = NEW.id AND state IN ('waiting', 'searching');
@@ -80,9 +96,15 @@ export function createSearchSourcesStore(store: JobStore) {
       );
     },
     settle(searchId: string, sourceId: string): boolean {
-      sql(
-        "DELETE FROM search_listing_queue WHERE search_id=? AND source_id=?",
-      ).run(searchId, sourceId);
+      for (const table of [
+        "search_listing_queue",
+        "search_source_pages",
+        "search_source_navigation",
+      ])
+        sql(`DELETE FROM ${table} WHERE search_id=? AND source_id=?`).run(
+          searchId,
+          sourceId,
+        );
       return (
         Number(
           sql(`UPDATE search_source_queue SET completed=1
@@ -115,6 +137,68 @@ export function createSearchSourcesStore(store: JobStore) {
           "SELECT url FROM search_listing_queue WHERE search_id=? AND source_id=? ORDER BY id",
         ).all(searchId, sourceId) as { url: string }[]
       ).map((row) => row.url);
+    },
+    /**
+     * The index pages this search has finished on one source. A restarted
+     * process reads it back, so those pages are not fetched again.
+     */
+    pageLog(
+      searchId: string,
+      sourceId: string,
+    ): IndexPageLog & { readonly restored: number } {
+      const pages = new Map(
+        (
+          sql(
+            "SELECT url, links_json FROM search_source_pages WHERE search_id=? AND source_id=?",
+          ).all(searchId, sourceId) as { url: string; links_json: string }[]
+        ).map((row) => [row.url, JSON.parse(row.links_json) as string[]]),
+      );
+      const restored = pages.size;
+      const insert =
+        sql(`INSERT INTO search_source_pages(search_id, source_id, url, links_json)
+        VALUES (?, ?, ?, ?) ON CONFLICT(search_id, source_id, url) DO UPDATE SET links_json=excluded.links_json`);
+      return {
+        restored,
+        links: (url) => pages.get(url) ?? null,
+        record(url, finalUrl, links) {
+          const value = [...new Set(links)];
+          store.transaction(() => {
+            for (const address of new Set([url, finalUrl])) {
+              pages.set(address, value);
+              insert.run(searchId, sourceId, address, JSON.stringify(value));
+            }
+          });
+        },
+      };
+    },
+    /** Where a browser collection that started at startUrl had got to. */
+    navigation(
+      searchId: string,
+      sourceId: string,
+      startUrl: string,
+    ): SourceNavigationProgress | null {
+      const row = sql(
+        "SELECT progress_json FROM search_source_navigation WHERE search_id=? AND source_id=? AND start_url=?",
+      ).get(searchId, sourceId, startUrl) as
+        | { progress_json: string }
+        | undefined;
+      return row
+        ? (JSON.parse(row.progress_json) as SourceNavigationProgress)
+        : null;
+    },
+    saveNavigation(
+      searchId: string,
+      sourceId: string,
+      startUrl: string,
+      progress: SourceNavigationProgress,
+    ): void {
+      sql(`INSERT INTO search_source_navigation(search_id, source_id, start_url, progress_json)
+        VALUES (?, ?, ?, ?) ON CONFLICT(search_id, source_id, start_url) DO UPDATE SET progress_json=excluded.progress_json`).run(
+        searchId,
+        sourceId,
+        startUrl,
+        JSON.stringify(progress),
+      );
     },
     cardQueue(searchId: string) {
       // A new process owns no old in-flight wave. Its exact cards remain on

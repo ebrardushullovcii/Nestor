@@ -67,6 +67,44 @@ export interface SourceInventory {
   accessBlocked?: boolean;
   /** The HTTP lane defers interaction to the separate browser queue. */
   requiresBrowser?: boolean;
+  /**
+   * Part of this inventory was collected earlier in the search, before a
+   * restart; those cards were accepted then and are not repeated in cards.
+   */
+  resumed?: boolean;
+}
+
+/**
+ * Index pages a search has finished collecting on one source, kept across a
+ * restart. A page in the log is not read again: its cards were accepted, and
+ * the collection continues from the pages it led to.
+ */
+export interface IndexPageLog {
+  /** The pages this finished page led to, or null when it is not in the log. */
+  links(url: string): readonly string[] | null;
+  /** Records a page once its cards are accepted. */
+  record(url: string, finalUrl: string, links: readonly string[]): void;
+}
+
+/**
+ * Where a browser collection of one source had got to, kept across a
+ * restart so the next run continues from that page with these facts.
+ */
+export interface SourceNavigationProgress {
+  /** The page the collection had reached. */
+  currentUrl: string;
+  /** Pages it had loaded, in order. */
+  visitedUrls: string[];
+  /** Listing cards it had collected; they are kept. */
+  collected: number;
+  stepCount: number;
+  savedAt: string;
+  /** Set when the collection ended: how it ended, for a restart to reuse. */
+  outcome?: {
+    complete: boolean;
+    pagesRead: number;
+    notes: string[];
+  };
 }
 
 export interface ListingSearchReader {
