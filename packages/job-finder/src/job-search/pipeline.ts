@@ -8,7 +8,7 @@ import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
 import { settledState, sourceSettings, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
-import { concurrency } from "./async";
+import { abortable, concurrency } from "./async";
 import { createSearchSourcesStore } from "@nestor/db/job-store";
 import { traceEvent } from "@nestor/core/run-trace";
 
@@ -144,6 +144,47 @@ export function createSearchPipeline(input: {
       input.settled(source);
     }
   };
+  /**
+   * Related cards' detail reads, one ordered queue per source. Screening the
+   * next wave needs only its cards, so no wave or screening batch waits for
+   * these reads: they drain at the site's own pace while screening moves on.
+   * The cards stay in the durable listing queue until their source settles,
+   * which needs every read to finish, so a restart loses none of them.
+   */
+  const readQueues = new Map<string, Promise<void>>();
+  const readsInFlight = new Set<Promise<void>>();
+  let readError: Error | null = null;
+  const queueReads = (
+    cards: readonly ListingCard[],
+    read: (cards: readonly ListingCard[]) => Promise<void>,
+  ) => {
+    if (readError) throw readError;
+    const bySource = new Map<string, ListingCard[]>();
+    for (const card of cards) {
+      const group = bySource.get(card.sourceId) ?? [];
+      group.push(card);
+      bySource.set(card.sourceId, group);
+    }
+    for (const [id, group] of bySource) {
+      const queued = (readQueues.get(id) ?? Promise.resolve())
+        .then(() => {
+          signal.throwIfAborted();
+          if (readError) return;
+          return read(group);
+        })
+        .catch((reason: unknown) => {
+          if (signal.aborted) return;
+          readError ??=
+            reason instanceof Error ? reason : new Error(String(reason));
+        });
+      readQueues.set(id, queued);
+      readsInFlight.add(queued);
+      void queued.finally(() => {
+        readsInFlight.delete(queued);
+        if (readQueues.get(id) === queued) readQueues.delete(id);
+      });
+    }
+  };
   const waves = createCardWaves(
     signal,
     async (incomingCards) => {
@@ -159,7 +200,6 @@ export function createSearchPipeline(input: {
         input.write(source);
       }
       const emitted = new Set<string>();
-      let reading = Promise.resolve();
       const readRelated = async (relatedCards: readonly ListingCard[]) => {
         // Each finished group is kept as soon as it is read; a restart reads
         // only what had not finished.
@@ -300,12 +340,13 @@ export function createSearchPipeline(input: {
           });
         }
       };
-      // Keep each source's reads bounded and persist them before waiting for
-      // unrelated cards. The final result may repeat these streamed matches.
+      // Hand each proven match to its source's read queue as soon as it is
+      // decided; screening goes on without waiting for the read. The final
+      // result may repeat these streamed matches.
       const readNewRelated = (
         relatedCards: readonly ListingCard[],
         account = true,
-      ) => {
+      ): Promise<void> => {
         const fresh = relatedCards.filter(
           (card) => !emitted.has(`${card.sourceId}\n${card.url}`),
         );
@@ -318,8 +359,8 @@ export function createSearchPipeline(input: {
             input.write(source);
           }
         }
-        if (fresh.length) reading = reading.then(() => readRelated(fresh));
-        return reading;
+        if (fresh.length) queueReads(fresh, readRelated);
+        return Promise.resolve();
       };
       const screened = await deps.engine.screenCards({
         onRelated: readNewRelated,
@@ -374,7 +415,6 @@ export function createSearchPipeline(input: {
         input.settled(source);
       }
       await readNewRelated(screened.related, false);
-      for (const id of touched) input.settled(sources.get(id)!);
     },
     concurrency(deps.concurrency?.sources, 12),
     durable.cardQueue(input.searchId),
@@ -502,6 +542,14 @@ export function createSearchPipeline(input: {
       input.write(source);
     },
     accept,
-    drain: () => waves.drain(),
+    /** Screening and every queued read; a read may find an index and add cards. */
+    async drain() {
+      for (;;) {
+        await waves.drain();
+        if (!readsInFlight.size) break;
+        await abortable(Promise.all([...readsInFlight]), signal);
+      }
+      if (readError) throw readError;
+    },
   };
 }

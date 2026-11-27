@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import { reportSelfLimitHit } from "@nestor/core";
 
 /**
@@ -123,7 +124,10 @@ export function createHostQueue(options: {
           signal,
           reject,
           detach: () => signal.removeEventListener("abort", cancel),
-          start() {
+          // Queued work runs as the caller that queued it, not as whichever
+          // run released the slot: its trace scope (which listing a fetch
+          // belongs to) and verification privacy are the caller's own.
+          start: AsyncResource.bind(() => {
             started = true;
             void Promise.resolve()
               .then(() => {
@@ -141,7 +145,7 @@ export function createHostQueue(options: {
                     );
                 },
               );
-          },
+          }),
         };
         signal.addEventListener("abort", cancel, { once: true });
         group.entries.push(entry);

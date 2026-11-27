@@ -22,6 +22,7 @@ import { handleRenderedPostings } from "./rendered-postings.mjs";
 import { handleImageChallenge } from "./image-challenge.mjs";
 import { handleVerificationReplica } from "./verification-replica.mjs";
 import { handleLongboard } from "./longboard.mjs";
+import { handleBroadfield } from "./broadfield.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -517,6 +518,7 @@ const server = http.createServer(async (req, res) => {
       return;
     if (handlePersonalClaims(req, res, url, { send })) return;
     if (await handleLongboard(req, res, url, { send, readPost })) return;
+    if (handleBroadfield(req, res, url, { send })) return;
     if (await handleUploadRepair(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleImageChallenge(req, res, url, { send, readPost, logPost }))
