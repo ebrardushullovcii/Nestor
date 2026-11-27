@@ -97,7 +97,7 @@ export function createVisualPageTools(
         const label = `${image.label}. Image bounds in top-level viewport CSS pixels: ${JSON.stringify(image.bounds)}. Viewport: ${JSON.stringify(image.viewport)}. For pointer, add bounds.x/bounds.y to a position within this image. Frames: ${JSON.stringify(image.frames)}`;
         return {
           kind: "ok",
-          content: "Captured screenshot.",
+          content: label,
           images: [{ dataUrl: image.dataUrl, label }],
         };
       }
