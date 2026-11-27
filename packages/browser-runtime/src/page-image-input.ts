@@ -3,8 +3,9 @@ import type {
   BrowserPointerInput,
   ApplyWriteResult,
 } from "@nestor/contracts";
-import type { Frame, Page } from "playwright";
+import type { ElementHandle, Frame, Page } from "playwright";
 import { captureModelPageImage } from "./trace-page";
+import { isDetachedFrameError } from "./visible-page-text";
 import { controlRefFrame } from "./page-control-refs";
 import { watchPagePress } from "./page-press-facts";
 
@@ -32,9 +33,15 @@ export async function screenshotPage(
       .frames()
       .filter((frame) => frame !== page.mainFrame())
       .map(async (frame) => {
-        const element = await frame.frameElement();
-        const bounds = await element.boundingBox();
-        await element.dispose();
+        // A frame that detaches while the screenshot is taken is not drawn.
+        let bounds: Awaited<ReturnType<ElementHandle["boundingBox"]>> = null;
+        try {
+          const element = await frame.frameElement();
+          bounds = await element.boundingBox();
+          await element.dispose().catch(() => undefined);
+        } catch (error) {
+          if (!isDetachedFrameError(frame, error)) throw error;
+        }
         let origin = "null";
         try {
           origin = new URL(frame.url()).origin;

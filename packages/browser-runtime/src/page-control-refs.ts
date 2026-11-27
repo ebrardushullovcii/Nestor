@@ -104,7 +104,7 @@ export function controlSnapshot(
               if(kind==='c'){
                 const rect=element.getBoundingClientRect();
                 let ariaHidden=false,cssHidden=false;
-                for(let node=element;node;node=node.parentElement??node.getRootNode().host){
+                for(let node=element;node;node=node.parentElement??(node.getRootNode() instanceof ShadowRoot?node.getRootNode().host:null)){
                   const style=getComputedStyle(node);
                   ariaHidden ||= node.getAttribute('aria-hidden')==='true';
                   cssHidden ||= style.display==='none'||style.visibility==='hidden'||style.visibility==='collapse'||style.opacity==='0';

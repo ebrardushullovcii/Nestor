@@ -8,7 +8,11 @@ export function readPressability(element: Element): {
   for (
     let node: Element | null = element;
     node;
-    node = node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null
+    node =
+      node.parentElement ??
+      (node.getRootNode() instanceof ShadowRoot
+        ? (node.getRootNode() as ShadowRoot).host
+        : null)
   ) {
     disabled ||= node.matches(":disabled,[aria-disabled='true']");
     inert ||= node.hasAttribute("inert");
