@@ -120,10 +120,10 @@ test("a prompt's lookup is the list Enter opens, never a field's pills", async (
       (await field(hands, "Country Phone Code")).ref,
       "Albania (+355)",
     );
-    expect(offered).toMatchObject({
-      ok: false,
-      offeredOptions: expect.arrayContaining(["Albania (+355) not checked"]),
-    });
+    expect(offered).toMatchObject({ ok: false });
+    expect(
+      (offered as { offeredOptions?: string[] }).offeredOptions,
+    ).toContain("Albania (+355) not checked");
     expect(JSON.stringify(offered)).not.toContain("press delete");
   } finally {
     await page.close();
