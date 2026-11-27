@@ -275,12 +275,13 @@ async function runApplyAgentPrivate(
   const views = createViewLedger();
   let appendOnlyHistory = false;
   let lastView: ApplyObservationView | undefined;
-  const describeView = (page: ApplyFormObservation): string => {
+  const describeView = (page: ApplyFormObservation, full = false): string => {
+    modelActivity.throwIfAborted();
     const view = applyObservationView(page);
     const previous = lastView;
     lastView = view;
     return appendOnlyHistory
-      ? formatApplyObservationView(view, previous)
+      ? formatApplyObservationView(view, full ? undefined : previous)
       : views.write(formatApplyObservationView(view), page);
   };
   const readPage = async () => {
@@ -612,7 +613,7 @@ async function runApplyAgentPrivate(
       status: outcome.kind === "refused" ? "failed" : "done",
       progress: outcome.kind !== "refused",
       content: includePage
-        ? `${content}\n\n${page ? describeView(page) : "Page unavailable."}`
+        ? `${content}\n\n${page ? describeView(page, proposal.tool === "observe") : "Page unavailable."}`
         : content,
     };
   };
@@ -1178,21 +1179,23 @@ async function runApplyAgentPrivate(
       model,
       tools: domainTools.map((tool) => ({
         ...tool,
-        execute: async (raw, context) => {
-          const result = await tool.execute(raw, context);
-          if (result.kind !== "ok") return result;
-          const fact = unresolvedSendsFact();
-          if (!appendOnlyHistory)
-            return fact
-              ? { ...result, content: `${result.content}\n\n${fact}` }
+        execute: (raw, context) =>
+          modelActivity.run(context, async () => {
+            const result = await tool.execute(raw, context);
+            context.signal?.throwIfAborted();
+            if (result.kind !== "ok") return result;
+            const fact = unresolvedSendsFact();
+            if (!appendOnlyHistory)
+              return fact
+                ? { ...result, content: `${result.content}\n\n${fact}` }
+                : result;
+            const update = fact || (lastSendFact ? noOpenSends : "");
+            if (update === lastSendFact) return result;
+            lastSendFact = update;
+            return update
+              ? { ...result, content: `${result.content}\n\n${update}` }
               : result;
-          const update = fact || (lastSendFact ? noOpenSends : "");
-          if (update === lastSendFact) return result;
-          lastSendFact = update;
-          return update
-            ? { ...result, content: `${result.content}\n\n${update}` }
-            : result;
-        },
+          }),
       })),
       subjectLabel: input.siteLabel,
       parallelToolCalls: false,

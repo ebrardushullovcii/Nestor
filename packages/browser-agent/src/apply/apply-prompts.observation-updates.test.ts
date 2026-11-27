@@ -168,12 +168,15 @@ test("redrawn handles reuse exact field descriptions when the old handles are go
   newFirst.ref = "c_redrawn";
   newSecond.ref = "c_changed";
   newSecond.label = "A different prompt";
+  after.controls.push({ ...newFirst, ref: "c_duplicate" });
 
   const update = describeObservationUpdate(after, before);
   expect(update).toContain(`- ${first.ref} → c_redrawn`);
   expect(update).toContain(
     "- c_changed [text] · Application — A different prompt",
   );
+  expect(update).toContain("- c_duplicate [text]");
+  expect(update).not.toContain(`${first.ref} → c_duplicate`);
   expect(update).toContain(
     `Removed fields (do not use these handles): ${first.ref}, ${second.ref}`,
   );

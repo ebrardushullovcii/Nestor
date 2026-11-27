@@ -1741,12 +1741,10 @@ async function requestsOfAnObservingRun(appendOnlyHistory: boolean) {
     );
   };
   const requests: unknown[][] = [];
-  const calls = [
-    { name: "observe", args: {} },
-    { name: "observe", args: {} },
-    { name: "observe", args: {} },
-    done,
-  ];
+  const refresh = appendOnlyHistory
+    ? { name: "wait", args: { milliseconds: 1 } }
+    : { name: "observe", args: {} };
+  const calls = [refresh, refresh, { name: "observe", args: {} }, done];
   const client: LLMClient = {
     chatWithTools: (messages) => {
       requests.push(structuredClone(messages));
@@ -1781,9 +1779,11 @@ test("on an append-only route each apply request starts with the previous reques
   }
   const transcript = JSON.stringify(requests.at(-1));
   expect(transcript).not.toContain("Saved-answer changes");
-  expect(transcript.match(/Fields:/gu)).toHaveLength(1);
-  expect(transcript.match(/Page update:/gu)).toHaveLength(3);
-  expect(transcript).toContain("View 4.");
+  expect(transcript.match(/Fields:/gu)).toHaveLength(2);
+  expect(transcript.match(/Page update:/gu)).toHaveLength(2);
+  const lastReceipt = JSON.stringify(requests.at(-1)?.at(-1));
+  expect(lastReceipt).toContain("Fields:\\n- c0");
+  expect(lastReceipt).toContain("Page text:\\nView 6.");
 });
 
 test("append-only history recovery restores a full page when its delta bases move to the archive", async () => {
@@ -1803,7 +1803,10 @@ test("append-only history recovery restores a full page when its delta bases mov
     );
   };
   const scripted = model([
-    ...Array.from({ length: 5 }, () => ({ name: "observe", args: {} })),
+    ...Array.from({ length: 5 }, () => ({
+      name: "wait",
+      args: { milliseconds: 1 },
+    })),
     done,
   ]);
   await runApplyAgent(input, {

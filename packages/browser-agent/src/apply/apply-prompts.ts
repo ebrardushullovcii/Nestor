@@ -605,13 +605,15 @@ export function formatApplyObservationView(
     const full = renderField(field);
     const prior = previous.fields.get(ref);
     if (prior && renderField(prior) === full) continue;
+    const descriptionKey = fieldDescriptionKey(field);
     const past = field.rows.every(({ ref }) => !previousRefs.has(ref))
-      ? pastFields.get(fieldDescriptionKey(field))
+      ? pastFields.get(descriptionKey)
       : undefined;
     if (!past) {
       changed.push(full);
       continue;
     }
+    pastFields.delete(descriptionKey);
     redrawn.push(
       `- ${field.rows
         .map(({ ref }, index) => {
