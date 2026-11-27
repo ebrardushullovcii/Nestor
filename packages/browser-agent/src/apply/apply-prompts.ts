@@ -609,19 +609,18 @@ export function formatApplyObservationView(
     const past = field.rows.every(({ ref }) => !previousRefs.has(ref))
       ? pastFields.get(descriptionKey)
       : undefined;
-    if (!past) {
+    const handles = field.rows.flatMap(({ ref }, index) => {
+      const earlier = past?.rows[index];
+      return earlier ? [{ from: earlier.ref, to: ref }] : [];
+    });
+    if (handles.length !== field.rows.length) {
       changed.push(full);
       continue;
     }
     pastFields.delete(descriptionKey);
+    for (const { from, to } of handles) reusedHandles.set(to, from);
     redrawn.push(
-      `- ${field.rows
-        .map(({ ref }, index) => {
-          const oldRef = past.rows[index].ref;
-          reusedHandles.set(ref, oldRef);
-          return `${oldRef} → ${ref}`;
-        })
-        .join(", ")}`,
+      `- ${handles.map(({ from, to }) => `${from} → ${to}`).join(", ")}`,
     );
   }
   return [
