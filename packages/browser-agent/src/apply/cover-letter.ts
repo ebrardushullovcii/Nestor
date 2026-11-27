@@ -186,6 +186,7 @@ export function buildCoverLetterRequest(input: {
     "- Compare this role’s employment type, hours and location with the person’s goals and availability. Do not repeat an incompatible generic career goal or promise hours or relocation they have not agreed to. State known material limits plainly. Do not ask the employer to accommodate incompatible hours, location or employment type unless the person has agreed to that wording for this application. If the role needs a change of intent, flag it for the person rather than claiming that change.",
     "- No invented employers, dates, numbers, qualifications, or enthusiasm for things not in the posting.",
     "- Choose two or three supported examples and explain how each meets a stated need in the posting. Do not recap the full career or skills list.",
+    "- Write in complete, natural sentences with the subjects each clause needs. When using facts from the resume, turn bullet fragments into sentences and avoid repeating words or phrases unnecessarily within a sentence or bullet.",
     "- Use the role dates and today’s date for any duration. If the dates do not establish it, omit the duration.",
     `- ${TONE_GUIDANCE[preference.tone]}`,
     `- ${LENGTH_GUIDANCE[preference.length]}`,

@@ -171,6 +171,12 @@ describe("the letter one application sends", () => {
     );
     expect(request.prompt).toContain("About 120 words");
     expect(request.prompt).toContain("Direct and brief");
+    expect(request.prompt).toContain(
+      "Write in complete, natural sentences with the subjects each clause needs",
+    );
+    expect(request.prompt).toContain(
+      "avoid repeating words or phrases unnecessarily within a sentence or bullet",
+    );
     expect(request.prompt).toContain("Match the voice, not the content");
     expect(request.prompt).toContain("Do not state anything else as fact");
     expect(request.prompt).toContain(
