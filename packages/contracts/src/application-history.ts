@@ -6,7 +6,17 @@ import type { TrackerEvent, TrackerStatus } from "./tracker";
 export interface CandidateApplicationHistory {
   applications: (ApplicationRow & {
     source: "applications";
-    submissionOutcome: SubmissionOutcomeRecord | null;
+    url: string;
+    applyUrl: string | null;
+    /** The send summary. Full page and network diagnostics stay on the receipt. */
+    submissionOutcome:
+      | (Omit<SubmissionOutcomeRecord, "browserAction"> & {
+          browserAction?: Omit<
+            NonNullable<SubmissionOutcomeRecord["browserAction"]>,
+            "detail" | "requestsAfterClick"
+          >;
+        })
+      | null;
   })[];
   tracker: {
     source: "tracker";

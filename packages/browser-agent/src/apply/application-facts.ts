@@ -106,6 +106,22 @@ export function applicationFacts(
   sources: ApplyAnswerSources,
   options: { payDisclosed: boolean },
 ) {
+  return {
+    ...applicationOwnerFacts(sources),
+    ...applicationJobFacts(sources, options),
+  };
+}
+
+export function applicationSavedAnswers(
+  answers: readonly CandidateReusableAnswer[],
+) {
+  return answers.map((saved) => ({
+    ...saved,
+    storedFactId: `answerLibrary.${saved.id}`,
+  }));
+}
+
+export function applicationOwnerFacts(sources: ApplyAnswerSources) {
   const profile = sources.profile;
   const { baseResume, ...profileFacts } = profile;
   return {
@@ -114,12 +130,6 @@ export function applicationFacts(
       label: "Original imported resume",
       text: baseResume.textContent,
     },
-    attachedResume: {
-      label: "Selected resume being sent with this application",
-      text: sources.resumeText,
-    },
-    payDisclosure: options.payDisclosed,
-    listingDiscovery: sources.listingDiscovery,
     name: {
       full: profile.fullName,
       first: profile.firstName,
@@ -150,15 +160,12 @@ export function applicationFacts(
     narrative: profile.narrative,
     targetRoles: profile.targetRoles,
     preferredLocations: profile.locations,
-    taskGuidance: sources.taskInstructions,
     preferences: sources.preferences
       ? (({ approvalMode: _legacy, ...preferences }) => {
           void _legacy;
           return preferences;
         })(sources.preferences)
       : undefined,
-    applicationAutomationMode: sources.applicationAutomationMode,
-    applicationHistory: sources.history ?? { applications: [], tracker: [] },
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length
@@ -167,10 +174,7 @@ export function applicationFacts(
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    savedAnswers: sources.reusableAnswers.map((saved) => ({
-      ...saved,
-      storedFactId: `answerLibrary.${saved.id}`,
-    })),
+    savedAnswers: applicationSavedAnswers(sources.reusableAnswers),
     spokenLanguages: profile.spokenLanguages,
     skills: profile.skills,
     skillGroups: profile.skillGroups,
@@ -179,6 +183,23 @@ export function applicationFacts(
     education: profile.education,
     certifications: profile.certifications,
     projects: profile.projects,
+  };
+}
+
+export function applicationJobFacts(
+  sources: ApplyAnswerSources,
+  options: { payDisclosed: boolean },
+) {
+  return {
+    attachedResume: {
+      label: "Selected resume being sent with this application",
+      text: sources.resumeText,
+    },
+    payDisclosure: options.payDisclosed,
+    listingDiscovery: sources.listingDiscovery,
+    taskGuidance: sources.taskInstructions,
+    applicationAutomationMode: sources.applicationAutomationMode,
+    applicationHistory: sources.history ?? { applications: [], tracker: [] },
   };
 }
 

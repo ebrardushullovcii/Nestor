@@ -326,9 +326,9 @@ export function buildMessagesRequestBody(input: {
    */
   oneShot?: boolean | undefined;
   /**
-   * One-shot only: text the final message starts with that repeats across
-   * requests of this work (the person's facts ahead of a batch). It is cached
-   * as its own block; the model reads the same text.
+   * Reusable text ahead of per-task data. One-shots split it from the final
+   * message. Conversations put it in the first user text block and also
+   * cache the evolving turn.
    */
   stableLead?: string | undefined;
 }): Record<string, unknown> {
@@ -394,6 +394,15 @@ export function buildMessagesRequestBody(input: {
     (lead as BetaTextBlockParam).cache_control = { type: "ephemeral" };
   const opening = finalUserBlocks[0];
   const stableLead = input.stableLead;
+  const first = built[0];
+  const firstBlock = first?.role === "user" ? first.content[0] : undefined;
+  if (
+    continuesConversation &&
+    stableLead &&
+    firstBlock?.type === "text" &&
+    firstBlock.text === stableLead
+  )
+    firstBlock.cache_control = { type: "ephemeral" };
   if (
     !continuesConversation &&
     stableLead &&

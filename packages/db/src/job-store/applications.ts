@@ -87,6 +87,18 @@ function toRow(row: Row): ApplicationRow {
   };
 }
 
+function historyOutcome(
+  receipt: SubmissionOutcomeRecord | null,
+): CandidateApplicationHistory["applications"][number]["submissionOutcome"] {
+  if (!receipt) return null;
+  const { browserAction, ...outcome } = receipt;
+  if (!browserAction) return outcome;
+  const { detail, requestsAfterClick, ...action } = browserAction;
+  void detail;
+  void requestsAfterClick;
+  return { ...outcome, browserAction: action };
+}
+
 /** These commands write only the selected rows, inside the shared transaction. */
 /**
  * Job `j` has an approved resume: the person's own marker (the Approved tab),
@@ -149,12 +161,17 @@ export function createApplicationStore(store: JobStore) {
     /** All stored application and hiring history, without list-view limits. */
     history(): CandidateApplicationHistory {
       const applications = (
-        sql(`SELECT ${COLUMNS} FROM applications a
-        JOIN jobs j ON j.id = a.job_id ORDER BY a.id`).all() as Row[]
+        sql(`SELECT ${COLUMNS}, j.url, j.apply_url FROM applications a
+        JOIN jobs j ON j.id = a.job_id ORDER BY a.id`).all() as (Row & {
+          url: string;
+          apply_url: string | null;
+        })[]
       ).map((record) => ({
         ...toRow(record),
         source: "applications" as const,
-        submissionOutcome: this.getSubmissionReceipt(record.id),
+        url: record.url,
+        applyUrl: record.apply_url,
+        submissionOutcome: historyOutcome(this.getSubmissionReceipt(record.id)),
       }));
       const events = new Map<number, TrackerEvent[]>();
       for (const event of sql(

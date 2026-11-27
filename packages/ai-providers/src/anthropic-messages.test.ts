@@ -193,19 +193,22 @@ interface Captured {
 }
 
 /** Stubs the global fetch the SDK is handed; records every request. */
-function scriptFetch(replies: Array<Response | (() => Response)>) {
+function scriptFetch(
+  replies: Array<Response | ((request: Captured) => Response)>,
+) {
   const captured: Captured[] = [];
   const original = globalThis.fetch;
   const queue = [...replies];
   const fetchImpl = vi.fn((url: string | URL | Request, init?: RequestInit) => {
-    captured.push({
+    const request = {
       url: url instanceof Request ? url.url : url.toString(),
       headers: new Headers(init?.headers),
       body: JSON.parse(init?.body as string) as Record<string, unknown>,
-    });
+    };
+    captured.push(request);
     const next = queue.shift();
     if (!next) throw new Error("no scripted reply left");
-    return Promise.resolve(typeof next === "function" ? next() : next);
+    return Promise.resolve(typeof next === "function" ? next(request) : next);
   });
   globalThis.fetch = fetchImpl as unknown as typeof fetch;
   return {
@@ -1071,6 +1074,69 @@ describe("Messages one-shot caching", () => {
         .content[0]!.text,
     ).toBe(leadText);
   });
+});
+
+test("a second application reads the first application's owner prefix", async () => {
+  const written = new Set<string>();
+  const answer = ({ body }: Captured) => {
+    const [opening] = body.messages as Array<{
+      content: Array<{ text: string; cache_control?: { type: string } }>;
+    }>;
+    expect(body.cache_control).toEqual({ type: "ephemeral" });
+    expect(opening?.content.map((block) => block.cache_control?.type)).toEqual([
+      "ephemeral",
+      undefined,
+    ]);
+    const prefix = JSON.stringify([
+      body.tools,
+      body.system,
+      opening?.content[0],
+    ]);
+    const hit = written.has(prefix);
+    written.add(prefix);
+    return sse({
+      content: [{ type: "text", text: "{}" }],
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: 0,
+        cache_read_input_tokens: hit ? 5_000 : 0,
+        cache_creation_input_tokens: hit ? 1_000 : 6_000,
+        output_tokens: 5,
+      },
+    });
+  };
+  const script = scriptFetch([answer, answer]);
+  restoreFetch = script.restore;
+  const model = client();
+  const owner = "Synthetic applicant facts. ".repeat(1_200);
+  const run = async (job: string) => {
+    const usage: ModelRequestUsage[] = [];
+    await model.chatWithTools(
+      [
+        { role: "system", content: "Apply to the selected posting." },
+        { role: "user", content: owner },
+        { role: "user", content: job },
+      ],
+      tools,
+      {
+        stableLead: owner,
+        reasoningTask: "apply",
+        onRequestUsage: (event) => usage.push(event),
+      },
+    );
+    return usage[0];
+  };
+  const first = await run("First employer and their application form");
+  const second = await run("Second employer and a different form");
+  expect(first).toMatchObject({
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 6_000,
+  });
+  expect(second).toMatchObject({
+    cachedInputTokens: 5_000,
+    cacheWriteInputTokens: 1_000,
+  });
+  expect(written.size).toBe(1);
 });
 
 describe("Messages tool input schemas", () => {
