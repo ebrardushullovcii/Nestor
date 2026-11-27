@@ -230,6 +230,7 @@ test("a supplied index can save its postings from data rather than ask for a vac
     company: `Employer ${id}`,
     location: "Remote",
     description: `Complete own duties and requirements for posting ${id}`,
+    fullPostingText: true,
   }));
   const result = await runJobSearchAgent({
     hands: hands({
@@ -269,6 +270,94 @@ test("a supplied index can save its postings from data rather than ask for a vac
   expect(result.accessBlockerReason).toBeUndefined();
 });
 
+test("a card saved from page data stays unread, so its posting is read before it is judged", async () => {
+  const card = {
+    canonicalUrl: "https://jobs.example.test/jobs/view/1",
+    title: "Senior Full Stack Engineer",
+    company: "Synthetic Employer",
+    location: "Lisbon, Portugal",
+    description:
+      "Job card from the search feed: Senior Full Stack Engineer at Synthetic Employer, Lisbon. Full posting text not yet read.",
+    fullPostingText: false,
+  };
+  const full = {
+    ...card,
+    canonicalUrl: "https://jobs.example.test/jobs/view/2",
+    description: "Complete posting: duties, requirements and benefits.",
+    fullPostingText: true,
+  };
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage({ bodyText: "Feed results" }) }),
+    config: config(),
+    llmClient: scripted([
+      { name: "save_jobs_from_data", args: { jobs: [card, full] } },
+      { name: "finish", args: { reason: "Saved the feed's cards." } },
+    ]),
+    jobExtractor: { extractJobsFromPage: vi.fn(() => Promise.resolve([])) },
+  });
+  const [savedCard, savedFull] = result.jobs;
+  expect(savedCard?.listingDetailFetch).toBeNull();
+  expect(savedCard?.detailQuality).toBe("card_only");
+  expect(savedFull?.listingDetailFetch?.outcome).toBe("enriched");
+});
+
+test("a first page read that fails mid-read hands the page to the model instead of ending the source", async () => {
+  const pages = { current: rawPage({ bodyText: "Remote jobs board" }) };
+  const liveHands = hands(pages);
+  let reads = 0;
+  const observe = liveHands.observe;
+  liveHands.observe = () =>
+    ++reads === 1
+      ? Promise.reject(
+          new Error("frame.frameElement: Frame has been detached."),
+        )
+      : observe();
+  const page = {
+    url: () => pages.current.url!,
+    content: () => Promise.resolve("<main><p>Remote jobs board</p></main>"),
+  } as unknown as Page;
+  const model = scripted([
+    { name: "finish", args: { reason: "Read the board myself." } },
+  ]);
+  const chat = vi.spyOn(model, "chatWithTools");
+  const result = await runJobSearchAgent({
+    page,
+    hands: liveHands,
+    config: config({ inventoryOnly: true }),
+    llmClient: model,
+    jobExtractor: { extractJobsFromPage: vi.fn(() => Promise.resolve([])) },
+  });
+  expect(chat).toHaveBeenCalled();
+  expect(result.phaseCompletionReason).toBe("Read the board myself.");
+  expect(JSON.stringify(result)).toContain("Frame has been detached");
+});
+
+test("a save from page data that does not say whether it holds the full posting is answered, not guessed", async () => {
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage({ bodyText: "Feed results" }) }),
+    config: config(),
+    llmClient: scripted([
+      {
+        name: "save_jobs_from_data",
+        args: {
+          jobs: [
+            {
+              canonicalUrl: "https://jobs.example.test/jobs/view/1",
+              title: "Senior Full Stack Engineer",
+              company: "Synthetic Employer",
+              location: "Lisbon, Portugal",
+              description: "Job card.",
+            },
+          ],
+        },
+      },
+      { name: "finish", args: { reason: "Done." } },
+    ]),
+    jobExtractor: { extractJobsFromPage: vi.fn(() => Promise.resolve([])) },
+  });
+  expect(result.jobs).toHaveLength(0);
+});
+
 test("the model can page a public API and save all responses before reporting coverage", async () => {
   const pages = {
     current: rawPage({
@@ -281,6 +370,7 @@ test("the model can page a public API and save all responses before reporting co
     company: `Employer ${id}`,
     location: "Remote",
     description: `Own complete description ${id}`,
+    fullPostingText: true,
   }));
   const get = vi.fn((url: string) => {
     const id = Number(new URL(url).searchParams.get("page"));
@@ -2928,6 +3018,7 @@ test("the search model can save complete listings read from JSON without rendere
     location: "Europe",
     description:
       `Unique listing ${index}. ` + "Full requirements. ".repeat(1500),
+    fullPostingText: true,
   }));
   const page = {
     url: () => pages.current.url!,

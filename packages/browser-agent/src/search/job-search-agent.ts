@@ -395,6 +395,9 @@ async function runJobSearchAgentPrivate(
   const collectionNotes: string[] = [];
   if (config.inventoryOnly && input.page && !isSourceCheck) {
     const postings = new Map<string, JobPosting>();
+    // A mechanical read that fails (an ad frame detaching mid-read, a page
+    // changing under the reader) is our failure, not the source's end: the
+    // model observes the page itself next, and is told if that read fails.
     const inventory = await collectRenderedInventory({
       page: input.page,
       hands,
@@ -440,6 +443,12 @@ async function runJobSearchAgentPrivate(
           phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
         });
       },
+    }).catch((error: unknown) => {
+      if (input.signal?.aborted) throw error;
+      collectionNotes.push(
+        `The first page read stopped on a page error and the browser agent carried on: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
     });
     if (inventory?.complete)
       return {
@@ -1151,6 +1160,7 @@ async function runJobSearchAgentPrivate(
     company: z.string().trim().min(1),
     location: z.string().trim().min(1),
     description: z.string().trim().min(1),
+    fullPostingText: z.boolean(),
     applicationUrl: z.string().url().nullable().optional(),
     workMode: z
       .array(z.enum(["remote", "hybrid", "onsite", "flexible"]))
@@ -1169,7 +1179,7 @@ async function runJobSearchAgentPrivate(
       function: {
         name: "save_jobs_from_data",
         description:
-          "Save listings you read from API JSON, feeds or other page data. Give each listing its own URL, complete description and facts. For unknown company or location use 'Company not stated' or 'Location not stated'. Omit optional unknown fields. This records your decisions; it does not reread the rendered page or assess fit.",
+          "Save listings you read from API JSON, feeds or other page data. Give each listing its own URL, its description as the data gives it, and its facts. Say with fullPostingText whether that description is the posting's complete text; a card or summary is read from its own URL before it is judged. For unknown company or location use 'Company not stated' or 'Location not stated'. Omit optional unknown fields. This records your decisions; it does not reread the rendered page or assess fit.",
         parameters: {
           type: "object",
           properties: {
@@ -1183,6 +1193,11 @@ async function runJobSearchAgentPrivate(
                   company: { type: "string", minLength: 1, pattern: "\\S" },
                   location: { type: "string", minLength: 1, pattern: "\\S" },
                   description: { type: "string", minLength: 1, pattern: "\\S" },
+                  fullPostingText: {
+                    type: "boolean",
+                    description:
+                      "true when description is this posting's complete published text from the data, with its duties and requirements; false when it is a card, snippet or summary.",
+                  },
                   applicationUrl: { type: ["string", "null"], format: "uri" },
                   workMode: {
                     type: "array",
@@ -1236,6 +1251,7 @@ async function runJobSearchAgentPrivate(
                   "company",
                   "location",
                   "description",
+                  "fullPostingText",
                 ],
               },
             },
@@ -1251,7 +1267,8 @@ async function runJobSearchAgentPrivate(
         .safeParse(parseToolArguments(raw));
       if (!parsed.success) return { kind: "ok", content: parsed.error.message };
       const added: JobPosting[] = [];
-      for (const { closedReason, ...facts } of parsed.data.jobs) {
+      for (const { closedReason, fullPostingText, ...facts } of parsed.data
+        .jobs) {
         const posting = toPosting({
           ...facts,
           sourceJobId: facts.sourceJobId ?? facts.canonicalUrl,
@@ -1275,13 +1292,17 @@ async function runJobSearchAgentPrivate(
           };
         posting.producingPageUrl =
           pageTools.state.observation?.url ?? facts.canonicalUrl;
-        posting.listingDetailFetch = {
-          attemptedAt: now().toISOString(),
-          outcome: "enriched",
-          method: "page_text",
-          detail:
-            "The model supplied this listing's complete text from read data.",
-        };
+        // A card saved from data is not a read posting: it stays unread, so
+        // the listing read opens its own URL before the posting is judged.
+        if (fullPostingText)
+          posting.listingDetailFetch = {
+            attemptedAt: now().toISOString(),
+            outcome: "enriched",
+            method: "page_text",
+            detail:
+              "The model supplied this listing's complete text from read data.",
+          };
+        else posting.detailQuality = "card_only";
         if (keep(posting)) added.push(posting);
       }
       if (added.length) await checkpoint();

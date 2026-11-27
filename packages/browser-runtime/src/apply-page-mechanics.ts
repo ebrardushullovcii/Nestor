@@ -208,7 +208,10 @@ function readFileFieldLabels(inputs: Element[]): string[] {
     return result;
   };
   const parent = (node: Element): Element | null =>
-    node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+    node.parentElement ??
+    (node.getRootNode() instanceof ShadowRoot
+      ? (node.getRootNode() as ShadowRoot).host
+      : null);
   return inputs.map((input) => {
     const own =
       input.getAttribute("aria-label")?.trim() ||
@@ -918,7 +921,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               node;
               node =
                 node.parentElement ??
-                ((node.getRootNode() as ShadowRoot).host || null)
+                (node.getRootNode() instanceof ShadowRoot
+                  ? (node.getRootNode() as ShadowRoot).host
+                  : null)
             )
               if (node.matches(owned)) return [];
             const html = element as HTMLElement;
@@ -1187,7 +1192,10 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
     // Follow their hosts as well as DOM parents; do not treat the body as a
     // field group just because some other part of the page has an input.
     const parent = (node: Element): Element | null =>
-      node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+      node.parentElement ??
+      (node.getRootNode() instanceof ShadowRoot
+        ? (node.getRootNode() as ShadowRoot).host
+        : null);
     const hasFields = (root: Element | ShadowRoot): boolean =>
       Boolean(
         root.querySelector(
@@ -1255,7 +1263,11 @@ export function collectApplyDocumentSnapshot(
     for (
       let node: Element | null = element;
       node;
-      node = node.parentElement ?? (node.getRootNode() as ShadowRoot).host
+      node =
+        node.parentElement ??
+        (node.getRootNode() instanceof ShadowRoot
+          ? (node.getRootNode() as ShadowRoot).host
+          : null)
     ) {
       const style = getComputedStyle(node);
       ariaHidden ||= node.getAttribute("aria-hidden") === "true";
@@ -1545,7 +1557,10 @@ export function collectApplyDocumentSnapshot(
       sectionBox = nearbyBox;
     }
     const parent = (node: Element): Element | null =>
-      node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+      node.parentElement ??
+      (node.getRootNode() instanceof ShadowRoot
+        ? (node.getRootNode() as ShadowRoot).host
+        : null);
     const hasFields = (root: Element | ShadowRoot): boolean =>
       Boolean(
         root.querySelector(
@@ -2213,7 +2228,9 @@ export function collectApplyDocumentSnapshot(
             node;
             node =
               node.parentElement ??
-              ((node.getRootNode() as ShadowRoot).host || null)
+              (node.getRootNode() instanceof ShadowRoot
+                ? (node.getRootNode() as ShadowRoot).host
+                : null)
           )
             if (node.matches(selectors.actions)) return [];
           const html = element as HTMLElement;

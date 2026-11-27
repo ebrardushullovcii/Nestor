@@ -104,7 +104,11 @@ function readToggle(node: Element): ToggleFacts {
   for (
     let at: Element | null = node;
     at;
-    at = at.parentElement ?? ((at.getRootNode() as ShadowRoot).host || null)
+    at =
+      at.parentElement ??
+      (at.getRootNode() instanceof ShadowRoot
+        ? (at.getRootNode() as ShadowRoot).host
+        : null)
   ) {
     const style = getComputedStyle(at);
     if (

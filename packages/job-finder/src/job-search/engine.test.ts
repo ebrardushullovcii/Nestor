@@ -629,3 +629,101 @@ test("a browser listing read marks only postings it read in full", async () => {
     [card.canonicalUrl, false],
   ]);
 });
+
+test("a card saved from page data is read from its own URL before it counts as a read posting", async () => {
+  // LinkedIn (R8): 37 of 38 feed cards were saved as full postings.
+  const seed = createSeed();
+  const target = JobDiscoveryTargetSchema.parse({
+    id: "1",
+    label: "Synthetic board",
+    startingUrl: "https://board.example/jobs",
+  });
+  const posting = (url: string, description: string, read: boolean) => ({
+    ...seed.savedJobs[0]!,
+    canonicalUrl: url,
+    sourceJobId: url,
+    source: "target_site",
+    description,
+    detailQuality: read ? "detail_enriched" : "card_only",
+    listingDetailFetch: read
+      ? {
+          attemptedAt: new Date().toISOString(),
+          outcome: "enriched",
+          method: "page_text",
+          detail:
+            "The model supplied this listing's complete text from read data.",
+        }
+      : null,
+  });
+  const cardUrl = "https://board.example/jobs/view/1";
+  const fullUrl = "https://board.example/jobs/view/2";
+  const cardText =
+    "Job card from the search feed. Full posting text not yet read.";
+  const postingText =
+    "Complete posting: TypeScript platform duties, requirements and benefits.";
+  const runAgentDiscovery = vi.fn<
+    NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
+  >((_source, options) =>
+    Promise.resolve(
+      DiscoveryRunResultSchema.parse({
+        source: "target_site",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        querySummary: "Synthetic search",
+        warning: null,
+        jobs: options.requestedListing
+          ? [posting(cardUrl, postingText, true)]
+          : [
+              posting(cardUrl, cardText, false),
+              posting(fullUrl, postingText, true),
+            ],
+        inventoryCompleteness: "complete",
+        agentMetadata: {
+          incomplete: false,
+          phaseCompletionMode: "structured_finish",
+        },
+      }),
+    ),
+  );
+  const engine = createListingSearchEngine({
+    aiClient: {
+      ...createDeterministicJobFinderAiClient(),
+      chatWithTools: () => Promise.resolve({ content: "{}" }),
+    },
+    browserRuntime: { runAgentDiscovery },
+  });
+  const context = {
+    profile: seed.profile,
+    searchPreferences: seed.searchPreferences,
+    sources: [],
+    sourceInstructionArtifacts: [],
+  };
+  const signal = new AbortController().signal;
+  const browser = await engine.collectSource({
+    target,
+    context,
+    settings: JobSearchSettingsSchema.parse({ depth: "thorough" }),
+    signal,
+    message: () => {},
+    knownUrls: () => [],
+    lane: "browser",
+  });
+  const card = browser.cards.find((entry) => entry.url === cardUrl);
+  expect(card?.listingText).toBeUndefined();
+  expect(
+    browser.cards.find((entry) => entry.url === fullUrl)?.listingText,
+  ).toBe(postingText);
+  const read = await engine.readListings({
+    cards: [card!],
+    context,
+    lane: "browser",
+    signal,
+  });
+  expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
+  expect(runAgentDiscovery.mock.calls[1]?.[1].requestedListing?.url).toBe(
+    cardUrl,
+  );
+  expect(read.jobs.map((job) => [job.description, job.facts])).toEqual([
+    [postingText, { fullListingRead: true }],
+  ]);
+});

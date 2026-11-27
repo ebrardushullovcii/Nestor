@@ -8,6 +8,18 @@ export function visiblePageText(
   const linked = options.linked ?? false;
   const refs = options.refs ?? {};
   let item = 0;
+  // Pages replace globals: Prototype.js (WeWorkRemotely bundles 1.7.3) sets
+  // Array.from to a copy that ignores its map function, which turned every
+  // read into "[object HTMLDivElement]...". Read children with a plain loop.
+  const readAll = (
+    nodes: ArrayLike<Node>,
+    each: (node: Node) => string,
+  ): string => {
+    let text = "";
+    for (let index = 0; index < nodes.length; index += 1)
+      text += each(nodes[index]!);
+    return text;
+  };
   const read = (node: Node): string => {
     if (node instanceof Text) {
       if (!node.data.trim()) return node.data;
@@ -67,12 +79,12 @@ export function visiblePageText(
           : "";
       const text =
         target +
-        Array.from(
+        readAll(
           children.length
             ? children
             : (node.shadowRoot?.childNodes ?? node.childNodes),
           (child) => (hidden && child instanceof Text ? "" : read(child)),
-        ).join("");
+        );
       if (linked && node instanceof HTMLAnchorElement && !hidden) {
         const label =
           text.trim() || node.getAttribute("aria-label") || node.title;
@@ -84,7 +96,7 @@ export function visiblePageText(
         ? text
         : `\n${text}\n`;
     }
-    return Array.from(node.childNodes, read).join("");
+    return readAll(node.childNodes, read);
   };
   // A selected element may have a hidden ancestor, including a shadow host.
   for (
@@ -95,7 +107,11 @@ export function visiblePageText(
           ? root.host
           : null;
     node;
-    node = node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null
+    node =
+      node.parentElement ??
+      (node.getRootNode() instanceof ShadowRoot
+        ? (node.getRootNode() as ShadowRoot).host
+        : null)
   ) {
     const style = getComputedStyle(node);
     if (
@@ -129,7 +145,19 @@ export async function isVisibleFrame(frame: Frame): Promise<boolean> {
   ) {
     // Lightweight page doubles do not expose the frame element.
     if (typeof current.frameElement !== "function") continue;
-    const element = await current.frameElement();
+    // An ad or tracker frame can detach while the page is read. A frame that
+    // is gone is not drawn; the rest of the page still reads.
+    const gone = (error: unknown) => {
+      if (isDetachedFrameError(current, error)) return false;
+      throw error;
+    };
+    if (current.isDetached?.()) return false;
+    let element: Awaited<ReturnType<Frame["frameElement"]>>;
+    try {
+      element = await current.frameElement();
+    } catch (error) {
+      return gone(error);
+    }
     try {
       if (
         !(await element.evaluate(
@@ -143,9 +171,24 @@ export async function isVisibleFrame(frame: Frame): Promise<boolean> {
         ))
       )
         return false;
+    } catch (error) {
+      return gone(error);
     } finally {
-      await element.dispose();
+      await element.dispose().catch(() => undefined);
     }
   }
   return true;
+}
+
+/** A frame removed from its page while it was being read. */
+export function isDetachedFrameError(
+  frame: Pick<Frame, "isDetached"> | null,
+  error: unknown,
+): boolean {
+  return (
+    Boolean(frame?.isDetached?.()) ||
+    /Frame (?:has been|was) detached/iu.test(
+      error instanceof Error ? error.message : String(error),
+    )
+  );
 }

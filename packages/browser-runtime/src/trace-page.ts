@@ -1,5 +1,5 @@
-import type { Page } from "playwright";
-import { readVisibleText } from "./visible-page-text";
+import type { Locator, Page } from "playwright";
+import { isDetachedFrameError, readVisibleText } from "./visible-page-text";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
@@ -57,24 +57,46 @@ export function bindTracePage(
   }
 }
 
+const SECRET_FIELDS =
+  'input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name="code" i],input[name="passcode" i]';
+
+/**
+ * Secret fields to mask, frame by frame. An ad frame that detaches during the
+ * capture is no longer drawn, so it has nothing to mask and no longer fails
+ * the capture.
+ */
+async function secretFieldMasks(page: Page): Promise<{
+  masks: Locator[];
+  boxes: TraceCaptureInput["masks"];
+  sensitive: boolean;
+}> {
+  const masks: Locator[] = [];
+  const boxes: TraceCaptureInput["masks"] = [];
+  let sensitive = false;
+  for (const frame of page.frames()) {
+    const mask = frame.locator(SECRET_FIELDS);
+    try {
+      const fields = await mask.all();
+      sensitive ||= fields.length > 0;
+      for (const locator of fields) {
+        const box = await locator.boundingBox();
+        if (box) boxes.push(box);
+      }
+      masks.push(mask);
+    } catch (error) {
+      if (frame === page.mainFrame() || !isDetachedFrameError(frame, error))
+        throw error;
+    }
+  }
+  return { masks, boxes, sensitive };
+}
+
 /** Hidden native capture when embedded; CSS-sized Playwright capture otherwise. */
 export async function captureModelPageImage(
   page: Page,
   clip?: TraceCaptureInput["clip"],
 ): Promise<Uint8Array> {
-  const masks = page
-    .frames()
-    .map((frame) =>
-      frame.locator(
-        'input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name="code" i],input[name="passcode" i]',
-      ),
-    );
-  const boxes: TraceCaptureInput["masks"] = [];
-  for (const mask of masks)
-    for (const locator of await mask.all()) {
-      const box = await locator.boundingBox();
-      if (box) boxes.push(box);
-    }
+  const { masks, boxes } = await secretFieldMasks(page);
   const viewport = await page.evaluate(() => ({
     width: innerWidth,
     height: innerHeight,
@@ -121,24 +143,8 @@ async function capturePageTrace(
   try {
     const started = Date.now();
     // Secrets remain masked in all frames. Text collection never reads input values.
-    const masks = page
-      .frames()
-      .map((frame) =>
-        frame.locator(
-          'input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name="code" i],input[name="passcode" i]',
-        ),
-      );
-    const sensitive = (
-      await Promise.all(masks.map((mask) => mask.count()))
-    ).some((count) => count > 0);
+    const { masks, boxes, sensitive } = await secretFieldMasks(page);
     const capture = captures.get(page.context());
-    const boxes: TraceCaptureInput["masks"] = [];
-    for (const mask of masks) {
-      for (const locator of await mask.all()) {
-        const box = await locator.boundingBox();
-        if (box) boxes.push(box);
-      }
-    }
     const viewport = await page.evaluate(() => ({
       width: innerWidth,
       height: innerHeight,

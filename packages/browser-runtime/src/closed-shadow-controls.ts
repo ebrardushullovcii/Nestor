@@ -1,6 +1,10 @@
 import type { ApplyWriteResult, RawApplyClickable } from "@nestor/contracts";
 import type { CDPSession, Frame, Page } from "playwright";
-import { isVisibleFrame, visiblePageText } from "./visible-page-text";
+import {
+  isDetachedFrameError,
+  isVisibleFrame,
+  visiblePageText,
+} from "./visible-page-text";
 import { pressableLabel } from "./pressable-label";
 import { readPressability, readFieldValidation } from "./element-state";
 interface DomNode {
@@ -121,7 +125,34 @@ export async function readClosedShadowControls(
   const text: string[] = [];
   const validationErrors: string[] = [];
   for (const frame of page.frames()) {
-    if (!(await isVisibleFrame(frame))) continue;
+    // An ad frame that detaches mid-read is gone, not a failed page read.
+    const frameStart = {
+      controls: controls.length,
+      text: text.length,
+      validationErrors: validationErrors.length,
+      refs: new Map(current),
+    };
+    try {
+      await readFrame(frame);
+    } catch (error) {
+      if (frame === page.mainFrame() || !isDetachedFrameError(frame, error))
+        throw error;
+      controls.length = frameStart.controls;
+      text.length = frameStart.text;
+      validationErrors.length = frameStart.validationErrors;
+      current.clear();
+      for (const [ref, target] of frameStart.refs) current.set(ref, target);
+    }
+  }
+  targets.set(page, current);
+  return {
+    clickables: controls,
+    bodyText: text.join("\n\n"),
+    validationErrors,
+  };
+
+  async function readFrame(frame: Frame): Promise<void> {
+    if (!(await isVisibleFrame(frame))) return;
     let session: CDPSession;
     try {
       session = await page
@@ -129,8 +160,7 @@ export async function readClosedShadowControls(
         .newCDPSession(frame === page.mainFrame() ? page : frame);
     } catch (error) {
       // In-process frames are included by their parent target's DOM tree.
-      if (String(error).includes("part of the parent frame's session"))
-        continue;
+      if (String(error).includes("part of the parent frame's session")) return;
       throw error;
     }
     try {
@@ -205,12 +235,6 @@ export async function readClosedShadowControls(
       await session.detach().catch(() => undefined);
     }
   }
-  targets.set(page, current);
-  return {
-    clickables: controls,
-    bodyText: text.join("\n\n"),
-    validationErrors,
-  };
 }
 
 /** Click through Chromium's input router, including out-of-process frames. */
