@@ -261,7 +261,7 @@ export function createSearchPipeline(input: {
         // A reader that does not hand groups over returns them all at once.
         if (handled.size === 0) await keep(relatedCards, result);
       };
-      const readDone = async (
+      const readDone = (
         relatedCards: readonly ListingCard[],
         result: ReadListingResult,
       ) => {

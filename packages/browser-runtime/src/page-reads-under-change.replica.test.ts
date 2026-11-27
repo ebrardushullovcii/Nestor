@@ -26,9 +26,9 @@ test("a native compositor failure falls back to a screenshot of the same page", 
   const page = await browser.newPage();
   try {
     await page.setContent(board);
-    configureTraceCapture(page.context(), async () => {
-      throw new Error("UnknownVizError");
-    });
+    configureTraceCapture(page.context(), () =>
+      Promise.reject(new Error("UnknownVizError")),
+    );
     const image = await screenshotPage(page);
     expect(image.dataUrl).toMatch(/^data:image\/png;base64,iVBORw0KGgo/u);
   } finally {

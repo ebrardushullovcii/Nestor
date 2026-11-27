@@ -1,5 +1,8 @@
 import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
-import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
+import type {
+  AgentDiscoveryOptions,
+  BrowserSessionRuntime,
+} from "@nestor/browser-runtime";
 import {
   DiscoveryRunResultSchema,
   JobDiscoveryTargetSchema,
@@ -193,23 +196,24 @@ test.each([null, "structured_finish"] as const)(
         savedAt: new Date().toISOString(),
         outcome: { complete: false, pagesRead: 2, notes },
       });
-    const runAgentDiscovery = vi.fn(
-      (_source: unknown, _options: AgentDiscoveryOptions) =>
-        Promise.resolve(
-          DiscoveryRunResultSchema.parse({
-            source: "target_site",
-            startedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
-            querySummary: "Synthetic",
-            warning:
-              "The AI service is unavailable right now. Nothing was changed.",
-            jobs: [],
-            agentMetadata: {
-              incomplete: true,
-              phaseCompletionMode,
-            },
-          }),
-        ),
+    const runAgentDiscovery = vi.fn<
+      NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
+    >(() =>
+      Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          querySummary: "Synthetic",
+          warning:
+            "The AI service is unavailable right now. Nothing was changed.",
+          jobs: [],
+          agentMetadata: {
+            incomplete: true,
+            phaseCompletionMode,
+          },
+        }),
+      ),
     );
     const engine = createListingSearchEngine({
       aiClient: scriptedModel(),

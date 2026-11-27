@@ -11,7 +11,7 @@ test("live browser traffic keeps the same call alive beyond three minutes, and s
     send: vi.fn().mockResolvedValue(undefined),
   });
   const page = Object.assign(new EventEmitter(), {
-    context: () => ({ newCDPSession: async () => traffic }),
+    context: () => ({ newCDPSession: () => Promise.resolve(traffic) }),
   }) as unknown as Page;
   const work = vi.fn(() => new Promise<never>(() => {}));
   const finished = vi.fn();
@@ -28,6 +28,6 @@ test("live browser traffic keeps the same call alive beyond three minutes, and s
   expect(finished).toHaveBeenCalledOnce();
   expect(traffic.listenerCount("Network.dataReceived")).toBe(0);
   await expect(
-    withPageConnectionLiveness(page, async () => "next read"),
+    withPageConnectionLiveness(page, () => Promise.resolve("next read")),
   ).resolves.toBe("next read");
 });

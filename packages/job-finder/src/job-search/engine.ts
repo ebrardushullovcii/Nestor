@@ -349,8 +349,8 @@ export function createListingSearchEngine(deps: {
             inventoryOnly: true,
             ...(earlier && input.collectedUrls
               ? {
-                  lookupKnownUrls: async (urls: readonly string[]) =>
-                    input.collectedUrls!(urls),
+                  lookupKnownUrls: (urls: readonly string[]) =>
+                    Promise.resolve(input.collectedUrls!(urls)),
                 }
               : {}),
             ...(earlier

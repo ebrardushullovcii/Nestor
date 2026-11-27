@@ -543,7 +543,7 @@ test("a replaced Next control gives the model a fresh full page and waits for it
   const liveHands = hands(pages);
   const click = vi
     .spyOn(liveHands, "clickElement")
-    .mockImplementationOnce(async () => {
+    .mockImplementationOnce(() => {
       pages.current = rawPage({
         bodyText: "The pager drew a replacement control",
         actions: [
@@ -556,7 +556,10 @@ test("a replaced Next control gives the model a fresh full page and waits for it
           },
         ],
       });
-      return { ok: false, error: "Stale control; observe again." };
+      return Promise.resolve({
+        ok: false,
+        error: "Stale control; observe again.",
+      });
     });
   const model = scripted([
     { name: "next_page", args: { ref: "a-old" } },
