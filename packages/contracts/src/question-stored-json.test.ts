@@ -69,7 +69,7 @@ test("the site's text in pickers, form steps, ask reasons and send diagnostics i
       },
     ],
   });
-  expect(result.pickerAttempts[0]!.offeredOptions).toHaveLength(900);
+  expect(result.pickerAttempts?.[0]?.offeredOptions).toHaveLength(900);
   expect(
     ApplicationQuestionAskReasonSchema.parse({
       kind: "no_source",
