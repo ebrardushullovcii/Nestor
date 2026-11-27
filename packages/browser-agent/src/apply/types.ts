@@ -559,6 +559,7 @@ export type ApplyAgentOutcome =
   | "ready_to_send"
   | "awaiting_your_review"
   | "paused"
+  | "interrupted"
   | "stuck";
 
 export interface ApplyAgentResult {
@@ -672,8 +673,12 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     options: readonly string[];
   }>;
   recordSendOutcome?: (
-    decision: ApplySendOutcomeDecision & { pageUrl: string | null },
-  ) => Promise<{ recorded: boolean; content: string }>;
+    decision: ApplySendOutcomeDecision & {
+      pageUrl: string | null;
+      /** The call ID identifies the finish report because no send ID was given. */
+      inferSendCallId?: true;
+    },
+  ) => Promise<{ recorded: boolean; content: string; sendCallId?: string }>;
   submitApplication?: (decision: {
     actionRef: string;
     actionLabel: string;

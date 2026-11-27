@@ -893,6 +893,44 @@ test("submit returns page and ledger facts, then the model records its observed 
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
   ).toContain("POST employer.example.test/api/apply 200");
 });
+
+test("finish without a send ID lets the ledger associate a confirmation from a restarted run", async () => {
+  const input = config(
+    page({ url: "https://apply.example.test/candidate-home" }),
+  );
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({
+      recorded: true,
+      sendCallId: "send-before-restart",
+      content: "Confirmed send-before-restart.",
+    }),
+  );
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "finish",
+        id: "finish-after-restart",
+        args: {
+          reason: "Candidate Home lists the earlier application.",
+          sendOutcome: {
+            outcome: "confirmed",
+            evidence: "Application received",
+          },
+        },
+      },
+    ]),
+  );
+  expect(input.recordSendOutcome).toHaveBeenCalledExactlyOnceWith({
+    sendCallId: "finish-after-restart",
+    inferSendCallId: true,
+    outcome: "confirmed",
+    evidence: "Application received",
+    pageUrl: "https://apply.example.test/candidate-home",
+  });
+  expect(result.outcome).toBe("submitted");
+});
+
 test("a mailbox send records the mailbox as its destination after finish returns to the form", async () => {
   const formUrl = "https://employer.example.test/kontakt";
   const mailUrl = "https://mail.google.com/mail/u/0/#inbox?compose=new";
@@ -1265,7 +1303,7 @@ test("finishWhenReady after batched clicks stays prepared without send records",
   expect(input.recordSendOutcome).not.toHaveBeenCalled();
 });
 
-test("Stop prevents the next batch write", async () => {
+test("Stop interrupts the attempt and prevents the next batch write", async () => {
   const source = page({
     controls: [0, 1].map((index) => ({
       ...nameControl(),
@@ -1282,7 +1320,7 @@ test("Stop prevents the next batch write", async () => {
     controller.abort();
     return result;
   };
-  await runApplyAgent(
+  const result = await runApplyAgent(
     input,
     model([
       {
@@ -1295,7 +1333,8 @@ test("Stop prevents the next batch write", async () => {
         },
       },
     ]),
-  ).catch(() => {});
+  );
+  expect(result.outcome).toBe("interrupted");
   expect(source.controls[1]?.value).toBe("");
 });
 test("malformed and stale calls return a contract failure before writing", async () => {

@@ -435,21 +435,24 @@ async function runApplyAgentPrivate(
     report: ApplyFinishSendOutcome,
     callId: string,
   ): Promise<string | null> => {
-    const sendCallId =
-      report.sendCallId ?? [...sendDecisions.keys()].at(-1) ?? callId;
+    const knownSendCallId =
+      report.sendCallId ?? [...sendDecisions.keys()].at(-1);
+    const sendCallId = knownSendCallId ?? callId;
     if (!config.recordSendOutcome)
       return "The send ledger is unavailable in this run.";
     const result = await config.recordSendOutcome({
       outcome: report.outcome,
       evidence: redactVerificationText(report.evidence),
       sendCallId,
+      ...(knownSendCallId === undefined ? { inferSendCallId: true } : {}),
       // The destination is the page the send was pressed on, such as the
       // mailbox, not the form tab finish returns to.
       pageUrl: pressedSends.get(sendCallId)?.url ?? page?.url ?? null,
     });
     if (!result.recorded) return result.content;
-    recordedSends.add(sendCallId);
-    updateSendOutcome(sendCallId, report.outcome);
+    const recordedCallId = result.sendCallId ?? sendCallId;
+    recordedSends.add(recordedCallId);
+    updateSendOutcome(recordedCallId, report.outcome);
     note(result.content);
     return null;
   };
@@ -1242,21 +1245,23 @@ async function runApplyAgentPrivate(
     // A step the model handed to the person outranks a send the site did not
     // confirm: the ledger keeps that send, and the run waits on the person.
     const outcome: ApplyAgentResult["outcome"] =
-      (sendOutcome === "waiting" ||
-      (pauses.length > 0 && sendOutcome !== "submitted")
-        ? null
-        : sendOutcome) ??
-      (applicationClosed
-        ? "closed"
-        : readyToSend
-          ? "ready_to_send"
-          : pauses.length
-            ? "paused"
-            : loop.finish?.stuck || loop.ending !== "finished"
-              ? "stuck"
-              : input.authority.mode === "confirm_before_submit"
-                ? "awaiting_your_review"
-                : "prepared");
+      loop.ending === "aborted"
+        ? "interrupted"
+        : ((sendOutcome === "waiting" ||
+          (pauses.length > 0 && sendOutcome !== "submitted")
+            ? null
+            : sendOutcome) ??
+          (applicationClosed
+            ? "closed"
+            : readyToSend
+              ? "ready_to_send"
+              : pauses.length
+                ? "paused"
+                : loop.finish?.stuck || loop.ending !== "finished"
+                  ? "stuck"
+                  : input.authority.mode === "confirm_before_submit"
+                    ? "awaiting_your_review"
+                    : "prepared"));
     traceEvent("apply_outcome", { outcome, pauses, notes });
     return {
       outcome,
@@ -1282,6 +1287,10 @@ async function runApplyAgentPrivate(
       formPath: [],
       stepReceipts: receipts.finish(page, now().toISOString()),
     };
+  } catch (error) {
+    if (signal.aborted)
+      traceEvent("apply_outcome", { outcome: "interrupted", pauses, notes });
+    throw error;
   } finally {
     await input.hands.closeAuxiliaryTabs?.();
     abort.abort();

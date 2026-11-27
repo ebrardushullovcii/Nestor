@@ -75,6 +75,8 @@ const preparation = vi.hoisted(() => ({
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
   recordSendOutcome:
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["recordSendOutcome"],
+  submitApplication:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["submitApplication"],
 }));
 
 // The run trace is evidence only; tests read what it was told to record.
@@ -91,6 +93,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
       preparation.recordSendOutcome = input.recordSendOutcome;
+      preparation.submitApplication = input.submitApplication;
       preparation.givenAnswers.push(input.reusableAnswers ?? []);
       preparation.replays.push(input.replay ?? null);
       preparation.activities.push(input.earlierActivity ?? []);
@@ -201,6 +204,7 @@ it.each([
     expect(await guards.listSubmissionArmedMarkers()).toHaveLength(0);
     const decision = {
       sendCallId: "finish-reported-send",
+      inferSendCallId: true as const,
       outcome,
       evidence: "Employer page: application receipt",
       pageUrl: "https://replica.test/success",
@@ -482,6 +486,135 @@ it("the model can reconcile an older recorded send call while a later attempt is
       f.applications.listApplications().rows[0]!.id,
     ),
   ).toMatchObject({ resultId: original.resultId, outcome: "submitted" });
+});
+
+it("a confirmation after quitting during Submit settles the original call when finish omits the send ID", async () => {
+  const f = await setup(1, undefined, { onDisk: true });
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.notReadyToSend = true;
+  const observation = {
+    identity: { id: "form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "submit", signature: "c".repeat(64) },
+        ordinal: 0,
+        kind: "button" as const,
+        label: "Submit",
+        formIndex: -1,
+        action: { origin: "https://replica.test", safePath: "/jobs/0" },
+      },
+    ],
+  };
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(async (_source, input) => {
+    const control = observation.controls[0]!;
+    expect(await input.veto({ observation, control })).toBe(true);
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+    f.service.stop();
+    return {
+      outcome: "outcome_uncertain",
+      reason: "action_issued",
+      observation,
+      control,
+      facts: {
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted: true,
+        pageBefore: observation.page,
+        pageAfter: observation.page,
+        urlChanged: false,
+        requestsObservedDuringAction: 1,
+        requestsAfterClick: [],
+      },
+    };
+  });
+  Object.assign(f.browser, {
+    observeApplicationForm: () => Promise.resolve(observation),
+    executeExactlyOneFinalAction: action,
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  await preparation.submitApplication!({
+    callId: "submit-before-quit",
+    actionRef: "submit",
+    actionLabel: "Submit",
+  });
+  const [original] = await guards.listSubmissionOutcomeRecords();
+  expect(original).toMatchObject({
+    outcome: "outcome_uncertain",
+    browserAction: { actionIssued: true },
+  });
+
+  f.jobs.close();
+  const jobs = openJobStore(f.dbPath);
+  const applications = createApplicationStore(jobs);
+  const authorityRepository = createSendGuards(jobs);
+  const restarted = createApplicationService({
+    ...f.deps,
+    jobs,
+    applications,
+    authorityRepository,
+  });
+  cleanups.unshift(() => {
+    restarted.stop();
+    jobs.close();
+  });
+  await restarted.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  const row = applications.listApplications().rows[0]!;
+  expect(row.attempt).toBe(2);
+  expect(f.execute.mock.calls[1]?.[1].instructions).toContainEqual(
+    expect.stringContaining(`sendCallId=${original!.idempotencyKey}`),
+  );
+  const confirmation = {
+    sendCallId: "finish-after-restart",
+    inferSendCallId: true,
+    outcome: "confirmed",
+    evidence: "Candidate Home lists this application as received.",
+    pageUrl: "https://replica.test/candidate-home",
+  } as const;
+  expect(await preparation.recordSendOutcome!(confirmation)).toMatchObject({
+    recorded: true,
+    sendCallId: original!.idempotencyKey,
+  });
+  const outcomes = await authorityRepository.listSubmissionOutcomeRecords();
+  expect(await preparation.recordSendOutcome!(confirmation)).toMatchObject({
+    recorded: true,
+    sendCallId: original!.idempotencyKey,
+  });
+  expect(await authorityRepository.listSubmissionOutcomeRecords()).toEqual(
+    outcomes,
+  );
+  f.releases.at(-1)!();
+  await vi.waitFor(() =>
+    expect(applications.getApplication(row.id)?.state).toBe("submitted"),
+  );
+  const receipt = applications.getSubmissionReceipt(row.id)!;
+  expect(receipt).toMatchObject({
+    idempotencyKey: original!.idempotencyKey,
+    resultId: original!.resultId,
+    outcome: "submitted",
+    attemptedAt: original!.attemptedAt,
+    browserAction: { actionIssued: true },
+    evidence: [expect.objectContaining({ summary: confirmation.evidence })],
+  });
+  expect(Date.parse(receipt.verifiedAt ?? "")).toBeGreaterThanOrEqual(
+    Date.parse(receipt.attemptedAt),
+  );
+  expect(
+    await authorityRepository.getSubmissionIdempotencyRecord(
+      original!.idempotencyKey,
+    ),
+  ).toMatchObject({ status: "resolved", outcomeId: receipt.id });
+  expect(await authorityRepository.listSubmissionArmedMarkers()).toHaveLength(
+    1,
+  );
+  expect(action).toHaveBeenCalledOnce();
 });
 
 it("records a model-reported closed posting as closed instead of failed", async () => {

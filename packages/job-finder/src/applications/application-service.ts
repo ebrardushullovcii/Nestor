@@ -926,15 +926,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       origin,
       savedAnswers,
     );
-    const previousSends = await currentSendOutcomes(
-      deps.authorityRepository,
-      await deps.authorityRepository.listSubmissionOutcomeRecords({
-        jobId: String(row.jobId),
-      }),
-    );
+    const readSendHistory = async () =>
+      currentSendOutcomes(
+        deps.authorityRepository,
+        await deps.authorityRepository.listSubmissionOutcomeRecords({
+          jobId: String(row.jobId),
+        }),
+      );
+    const previousSends = await readSendHistory();
     for (const previousSend of previousSends)
       instructions.push(
-        `Send ledger: a send to this posting at ${previousSend.attemptedAt} is ${previousSend.outcome}. This is recorded history, not permission to replay it. Check the site's applied list or confirmation before a new send decision.`,
+        `Send ledger: a send to this posting at ${previousSend.attemptedAt} is ${previousSend.outcome} (sendCallId=${previousSend.idempotencyKey}). This is recorded history, not permission to replay it. Check the site's applied list or confirmation before a new send decision. If you find the outcome of this call, use its sendCallId in record_send_outcome or finish.sendOutcome.`,
       );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
@@ -1259,21 +1261,43 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           recordSendOutcome: async (decision) => {
             signal.throwIfAborted();
             const reportedKey = `model_report_${identity.applicationRecordId}_${decision.sendCallId}`;
-            const ledger =
-              (await deps.authorityRepository.getSubmissionIdempotencyRecord(
+            const repository = deps.authorityRepository;
+            const reportOutcomeId = `resolution_${reportedKey}`;
+            let ledger =
+              (await repository.getSubmissionIdempotencyRecord(
                 decision.sendCallId,
               )) ??
-              (await deps.authorityRepository.getSubmissionIdempotencyRecord(
-                reportedKey,
-              ));
+              (await repository.getSubmissionIdempotencyRecord(reportedKey));
+            let inferredSend = false;
+            let repeatedReport = false;
+            if (!ledger && decision.inferSendCallId) {
+              // A retry of this finish still refers to the same send after
+              // the first report has resolved its uncertainty.
+              const priorReport =
+                await repository.getSubmissionOutcomeRecord(reportOutcomeId);
+              let sendCallId = priorReport?.idempotencyKey;
+              repeatedReport = priorReport !== null;
+              if (!sendCallId) {
+                const unsettled = (await readSendHistory()).filter(
+                  (send) =>
+                    send.runId === identity.runId &&
+                    send.outcome === "outcome_uncertain",
+                );
+                if (unsettled.length === 1)
+                  sendCallId = unsettled[0]!.idempotencyKey;
+              }
+              if (sendCallId) {
+                ledger =
+                  await repository.getSubmissionIdempotencyRecord(sendCallId);
+                inferredSend = true;
+              }
+            }
             const previous = ledger?.outcomeId
-              ? await deps.authorityRepository.getSubmissionOutcomeRecord(
-                  ledger.outcomeId,
-                )
+              ? await repository.getSubmissionOutcomeRecord(ledger.outcomeId)
               : null;
             if (!ledger) {
               const recorded = await recordReportedSend({
-                repository: deps.authorityRepository,
+                repository,
                 lineage: {
                   ...identity,
                   jobId: String(row.jobId),
@@ -1307,7 +1331,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               };
             }
             if (
-              !ledger ||
               !previous ||
               previous.applicationRecordId !== identity.applicationRecordId ||
               previous.jobId !== String(row.jobId)
@@ -1315,7 +1338,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               return {
                 recorded: false,
                 content:
-                  "No send with that call ID belongs to this application. Read the ledger fact from submit_application.",
+                  "No send with that call ID belongs to this application. Read the send ledger and the result of submit_application.",
               };
             const outcome =
               decision.outcome === "confirmed"
@@ -1330,20 +1353,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             // One send call has one recorded outcome: the same report again
             // (record_send_outcome, then finish) adds no second row.
             if (
-              previous.outcome === outcome &&
-              (previous.browserAction?.reason === reason ||
-                previous.browserAction?.reason ===
-                  "model_reported_send_without_prior_intent")
-            )
+              repeatedReport ||
+              (!inferredSend &&
+                previous.outcome === outcome &&
+                (previous.browserAction?.reason === reason ||
+                  previous.browserAction?.reason ===
+                    "model_reported_send_without_prior_intent"))
+            ) {
+              retainSend(previous);
               return {
                 recorded: true,
-                content: `sendCallId=${decision.sendCallId} already has this ${decision.outcome} outcome recorded; nothing new was written. This call ID remains consumed and will never be replayed.`,
+                sendCallId: previous.idempotencyKey,
+                content: `sendCallId=${previous.idempotencyKey} already has this ${decision.outcome} outcome recorded; nothing new was written. This call ID remains consumed and will never be replayed.`,
               };
+            }
             const at = new Date().toISOString();
             const destination = new URL(decision.pageUrl ?? job.url);
             const receipt = SubmissionOutcomeRecordSchema.parse({
               ...previous,
-              id: `${previous.id}_model_${randomUUID()}`,
+              id: inferredSend
+                ? reportOutcomeId
+                : `${previous.id}_model_${randomUUID()}`,
               outcome,
               verifiedAt:
                 decision.outcome === "uncertain" ||
@@ -1374,12 +1404,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               },
               browserAction: { ...previous.browserAction, reason },
             });
-            const recorded =
-              await deps.authorityRepository.resolveSubmissionOutcome({
-                expectedOutcomeId: previous.id,
-                expectedIdempotencyRevision: ledger.revision,
-                outcome: receipt,
-              });
+            const recorded = await repository.resolveSubmissionOutcome({
+              expectedOutcomeId: previous.id,
+              expectedIdempotencyRevision: ledger.revision,
+              outcome: receipt,
+            });
             if (
               recorded.status !== "recorded" &&
               recorded.status !== "duplicate"
@@ -1393,7 +1422,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               applications.recordUnsettledSend(row.id, row.attempt, receipt);
             return {
               recorded: true,
-              content: `Recorded ${decision.outcome} for sendCallId=${decision.sendCallId}: ${decision.evidence}. The form remains bound. This call ID remains consumed and will never be replayed.`,
+              sendCallId: receipt.idempotencyKey,
+              content: `Recorded ${decision.outcome} for sendCallId=${receipt.idempotencyKey}: ${decision.evidence}. The form remains bound. This call ID remains consumed and will never be replayed.`,
             };
           },
           onPrepared: (outcome) => {
