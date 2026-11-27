@@ -1,23 +1,48 @@
 import { JobFitSchema, type JobFitSummary } from "@nestor/contracts";
 import type { Statements } from "./statements";
 
-// fit_stale: 0 = current, 1 = ready to recheck, 2 = earlier score awaiting view.
+// fit_stale: 0 = current, 1 = ready to recheck, 2 = waiting for view or priority,
+// 3 = waiting for view after an answer change, regardless of score or stage.
 const IMMEDIATE_SAVED_FIT =
   "(j.stage IN ('shortlisted','resume') OR j.fit_score>=40)";
 export const READY_FOR_FIT = `(j.fit_score=-1 OR j.fit_stale=1
   OR (j.fit_stale=2 AND ${IMMEDIATE_SAVED_FIT}))`;
 
-export function syncFitContext(sql: Statements, fingerprint: string): boolean {
-  const before = sql("SELECT fingerprint FROM fit_context WHERE id=1").get() as
-    | { fingerprint: string }
+export function syncFitContext(
+  sql: Statements,
+  fingerprint: string,
+  scoringFingerprint: string | null = null,
+): boolean {
+  const before = sql(
+    "SELECT fingerprint,scoring_fingerprint FROM fit_context WHERE id=1",
+  ).get() as
+    | { fingerprint: string; scoring_fingerprint: string | null }
     | undefined;
-  if (before?.fingerprint === fingerprint) return false;
-  sql(
-    "INSERT INTO fit_context(id,fingerprint) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint",
-  ).run(fingerprint);
-  sql(`UPDATE jobs AS j SET fit_stale=CASE WHEN ${IMMEDIATE_SAVED_FIT} THEN 1 ELSE 2 END
+  if (before?.fingerprint === fingerprint) {
+    // Seed the split fingerprint in an upgraded store without spending a fit.
+    if (scoringFingerprint !== null && before.scoring_fingerprint === null)
+      sql("UPDATE fit_context SET scoring_fingerprint=? WHERE id=1").run(
+        scoringFingerprint,
+      );
+    return false;
+  }
+  const onlySavedAnswers =
+    scoringFingerprint !== null &&
+    before?.scoring_fingerprint === scoringFingerprint;
+  sql(`INSERT INTO fit_context(id,fingerprint,scoring_fingerprint) VALUES (1,?,?)
+    ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,
+    scoring_fingerprint=excluded.scoring_fingerprint`).run(
+    fingerprint,
+    scoringFingerprint,
+  );
+  // Preserve work already due for a listing change or a previous view.
+  const stale = onlySavedAnswers
+    ? "3"
+    : `CASE WHEN ${IMMEDIATE_SAVED_FIT} THEN 1 ELSE 2 END`;
+  sql(`UPDATE jobs AS j SET fit_stale=${stale}
     WHERE j.fit_score>=0 AND j.stage IN ('found','shortlisted','resume','hidden')
-    AND j.hide_owner IS NOT 'closed_listing'`).run();
+    AND j.hide_owner IS NOT 'closed_listing'
+    ${onlySavedAnswers ? `AND j.fit_stale<>3 AND NOT ${READY_FOR_FIT}` : ""}`).run();
   return true;
 }
 
@@ -28,7 +53,7 @@ export function requestDeferredFits(
 ): number[] {
   if (!ids.length) return [];
   return (
-    sql(`UPDATE jobs SET fit_stale=1 WHERE fit_stale=2 AND stage<>'applied'
+    sql(`UPDATE jobs SET fit_stale=1 WHERE fit_stale IN (2,3) AND stage<>'applied'
       AND hide_owner IS NOT 'closed_listing'
       AND id IN (SELECT value FROM json_each(?)) RETURNING id`).all(
       JSON.stringify(ids),

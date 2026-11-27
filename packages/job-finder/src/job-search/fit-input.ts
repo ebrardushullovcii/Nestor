@@ -27,6 +27,17 @@ export const fitContextFingerprint = (
   context: JobSearchContext,
   request = "",
 ) => hash(fitContextInput(context, request));
+
+export function fitContextFingerprints(context: JobSearchContext) {
+  const input = fitContextInput(context);
+  // Country-list fallbacks also come from the saved answer bank.
+  const { scorerVersion, person, goals } = input;
+  return {
+    fingerprint: hash(input),
+    scoringFingerprint: hash({ scorerVersion, person, goals }),
+  };
+}
+
 export function fitInputFingerprint(
   contextKey: string,
   job: JobDetail,

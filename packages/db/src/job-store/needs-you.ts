@@ -262,6 +262,13 @@ function validateAnswer(
 
 export function createNeedsYouStore(store: JobStore, changed: () => void) {
   const { sql } = store;
+  const savedAnswersChanged = () =>
+    store.notify({
+      cause: "saved_answers",
+      stages: [],
+      ids: null,
+      searchId: null,
+    });
   const undo = createRowUndo(store, {
     journal: "form_answer_undo",
     cause: "application",
@@ -447,6 +454,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       rule,
       result.id,
     );
+    savedAnswersChanged();
     return result.id;
   }
   function uniqueWaitingTarget(
@@ -562,7 +570,12 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         }
       });
     },
-    undoAnswerChange: (undoId: number) => undo.undo(undoId),
+    undoAnswerChange: (undoId: number) =>
+      store.transaction(() => {
+        const result = undo.undo(undoId);
+        if (result.changed) savedAnswersChanged();
+        return result;
+      }),
     remember(input: RememberFormAnswerInput): SavedFormAnswer {
       return store.transaction(() => {
         const value = RememberFormAnswerInputSchema.parse(input);
@@ -749,6 +762,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           rule,
           value.id,
         );
+        savedAnswersChanged();
         resolveMatching(
           previous.answer_key,
           previous.prompt,
@@ -790,7 +804,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                   JSON.stringify(selection.except),
                   ...(match ? [match] : []),
                 );
-        if (result.changes) changed();
+        if (result.changes) {
+          savedAnswersChanged();
+          changed();
+        }
         return Number(result.changes);
       });
     },
@@ -1552,7 +1569,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const result = sql(
           "DELETE FROM form_answers WHERE answer_key = ? AND country = ? AND site_origin = ?",
         ).run(key, scope.country, scope.siteOrigin);
-        if (result.changes) changed();
+        if (result.changes) {
+          savedAnswersChanged();
+          changed();
+        }
         return !!result.changes;
       });
     },

@@ -136,6 +136,7 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   },
   // Why the source's last attempt failed; a resume tries it again.
   { table: "search_source_queue", column: "failure", definition: "TEXT" },
+  { table: "fit_context", column: "scoring_fingerprint", definition: "TEXT" },
 ];
 
 const JOBS = `
@@ -180,7 +181,7 @@ CREATE INDEX IF NOT EXISTS jobs_by_mode_posted ON jobs (stage, work_modes, poste
 CREATE INDEX IF NOT EXISTS jobs_by_mode_stage_at ON jobs (stage, work_modes, stage_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS jobs_pending_fit ON jobs (stage, fit_stale, fit_score DESC, found_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_waiting_fit ON jobs (stage, fit_score DESC, found_at DESC) WHERE fit_score=-1 OR fit_stale=1;
-CREATE TABLE IF NOT EXISTS fit_context (id INTEGER PRIMARY KEY CHECK (id=1), fingerprint TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS fit_context (id INTEGER PRIMARY KEY CHECK (id=1), fingerprint TEXT NOT NULL, scoring_fingerprint TEXT);
 
 CREATE TABLE IF NOT EXISTS job_stage_counts (
   stage TEXT PRIMARY KEY,
