@@ -70,7 +70,9 @@ test("cleared page errors, loading and removed buttons do not linger as current 
   after.loading = false;
   after.actions = [];
   const update = describeObservationUpdate(after, before);
-  expect(update).toContain("The page is showing problems: (no longer shown).");
+  expect(update).toContain(
+    "The page announces (its alert regions, word for word): (no longer shown).",
+  );
   expect(update).toContain("The page is still loading. (no longer shown).");
   expect(update).toContain("Buttons: (no longer shown).");
 });

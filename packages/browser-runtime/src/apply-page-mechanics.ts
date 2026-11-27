@@ -22,11 +22,13 @@ import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
 import {
   choosePageOption,
+  openListsBefore,
   readPageOptions,
   settleFieldLookup,
   watchControlRequests,
   type ControlRequests,
 } from "./choose-page-option";
+import { withListboxesReader, type ListsBefore } from "./listbox-relation";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 import {
   clickPresent,
@@ -1151,22 +1153,35 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
       if (section) sectionBox = part;
     }
     // The words beside it: the nearest box whose own text, without its
-    // buttons and fields, says something short.
+    // buttons and fields, says something short. Several buttons with one
+    // label in one section (Workday's "Add" per history block) are told
+    // apart by these words even when the section has a name.
+    let nearby = "";
+    let nearbyBox: Element | null = null;
     for (
       let box = element.parentElement, depth = 0;
-      !section && box && box !== document.body && depth < 5;
+      box && box !== document.body && depth < 5;
       box = box.parentElement, depth += 1
     ) {
+      // Beyond a named section, look only as far as small boxes reach.
+      if (section && box.getElementsByTagName("*").length > 400) break;
       const clone = box.cloneNode(true) as Element;
       clone
         .querySelectorAll(
           "button, a, input, select, textarea, svg, [role='button']",
         )
         .forEach((node) => node.remove());
-      const nearby = words(clone);
-      if (nearby.length > 300) break;
+      const text = words(clone);
+      if (text.length > 300) break;
+      if (text) {
+        nearby = text;
+        nearbyBox = box;
+        break;
+      }
+    }
+    if (!section && nearby) {
       section = nearby;
-      if (section) sectionBox = box;
+      sectionBox = nearbyBox;
     }
     // A field's menu may live inside several custom-element shadow roots.
     // Follow their hosts as well as DOM parents; do not treat the body as a
@@ -1216,6 +1231,7 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
         ? { formIndex: Array.from(document.forms).indexOf(owner) }
         : {}),
       section: section,
+      ...(nearby && nearby !== section ? { nearby } : {}),
       inForm,
       ...(sectionRequired ? { sectionRequired } : {}),
     };
@@ -1498,22 +1514,35 @@ export function collectApplyDocumentSnapshot(
       if (section) sectionBox = part;
     }
     // The words beside it: the nearest box whose own text, without its
-    // buttons and fields, says something short.
+    // buttons and fields, says something short. Several buttons with one
+    // label in one section (Workday's "Add" per history block) are told
+    // apart by these words even when the section has a name.
+    let nearby = "";
+    let nearbyBox: Element | null = null;
     for (
       let box = element.parentElement, depth = 0;
-      !section && box && box !== document.body && depth < 5;
+      box && box !== document.body && depth < 5;
       box = box.parentElement, depth += 1
     ) {
+      // Beyond a named section, look only as far as small boxes reach.
+      if (section && box.getElementsByTagName("*").length > 400) break;
       const clone = box.cloneNode(true) as Element;
       clone
         .querySelectorAll(
           "button, a, input, select, textarea, svg, [role='button']",
         )
         .forEach((node) => node.remove());
-      const nearby = words(clone);
-      if (nearby.length > 300) break;
+      const text = words(clone);
+      if (text.length > 300) break;
+      if (text) {
+        nearby = text;
+        nearbyBox = box;
+        break;
+      }
+    }
+    if (!section && nearby) {
       section = nearby;
-      if (section) sectionBox = box;
+      sectionBox = nearbyBox;
     }
     const parent = (node: Element): Element | null =>
       node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
@@ -1552,6 +1581,7 @@ export function collectApplyDocumentSnapshot(
         : false;
     return {
       section: section,
+      ...(nearby && nearby !== section ? { nearby } : {}),
       inForm,
       ...(sectionRequired ? { sectionRequired } : {}),
     };
@@ -2280,7 +2310,23 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
           number,
           { selectedOptionLabel: string; compositeVisible: boolean }
         >();
-  const enrichedControls = controls.map((control) => {
+  // A search box whose choices sit beside it as items (Workday's prompts)
+  // holds those items; its own text is only what was typed to search.
+  const held = await readHeldItems(
+    page,
+    controls
+      .filter(
+        (control) =>
+          control.tagName !== "select" &&
+          (control.role === "combobox" ||
+            (["input", "textarea"].includes(control.tagName) &&
+              ["text", "search", "", "textarea"].includes(control.inputType))),
+      )
+      .map((control) => control.index),
+  );
+  const enrichedControls = controls.map((withHeld) => {
+    const items = held.get(withHeld.index);
+    const control = items ? { ...withHeld, selectedItems: items } : withHeld;
     const custom = customStates.get(control.index);
     if (!custom) {
       return control;
@@ -2413,6 +2459,39 @@ async function readCustomComboboxStates(
     }
   }
   return byIndex;
+}
+
+const collectHeldItems = withListboxesReader(
+  (elements, wanted: number[], facts) =>
+    wanted.map((index) => {
+      const element = elements[index];
+      const own = element
+        ? facts(element, "data-nestor-option-list").filter(
+            (list) => list.relation === "own",
+          )
+        : [];
+      return [
+        index,
+        own.length ? own.flatMap((list) => list.items) : null,
+      ] as const;
+    }),
+);
+
+/** What each field holds in a list inside its own box, for fields that have one. */
+async function readHeldItems(
+  page: Page,
+  indexes: readonly number[],
+): Promise<Map<number, string[]>> {
+  if (indexes.length === 0) return new Map();
+  const read = await page
+    .locator(APPLY_CONTROL_SELECTOR)
+    .evaluateAll(collectHeldItems, [...indexes])
+    .catch(() => [] as ReadonlyArray<readonly [number, string[] | null]>);
+  return new Map(
+    read.flatMap(([index, items]) =>
+      items ? [[index, items] as [number, string[]]] : [],
+    ),
+  );
 }
 
 function locatorRootForRef(
@@ -2564,15 +2643,20 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
     .catch(() => undefined);
 }
 
-/** Adds what the field's lookup offered once it answered the typed text. */
+/**
+ * Adds what the field's lookup offered once it answered the typed text or
+ * the key: the list the field names, or the one that opened beside it after
+ * `before`, never a list of what it or another field already holds.
+ */
 async function withFieldLookup(
   page: Page,
   locator: Locator,
   requests: ControlRequests,
+  before: ListsBefore,
   typed: ApplyWriteResult,
 ): Promise<ApplyWriteResult> {
   if (!typed.ok) return typed;
-  const optionList = await settleFieldLookup(page, locator, requests);
+  const optionList = await settleFieldLookup(page, locator, requests, before);
   return {
     ...typed,
     controlState: await controlResultState(locator),
@@ -2720,12 +2804,14 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           markPrivateTracePage(page);
         }
         // Keys are how a search box is driven: return once its lookup answers.
+        const before = await openListsBefore(locator);
         const requests = watchControlRequests(page, locator);
         try {
           return await withFieldLookup(
             page,
             locator,
             requests,
+            before,
             await typeFieldKeys(locator, text),
           );
         } finally {
@@ -2785,12 +2871,14 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         }
         if (!metadata.lookup) return await replaceFieldText(locator, value);
         // A field that presents a list answers what was typed with choices.
+        const before = await openListsBefore(locator);
         const requests = watchControlRequests(page, locator);
         try {
           return await withFieldLookup(
             page,
             locator,
             requests,
+            before,
             await replaceFieldText(locator, value),
           );
         } finally {
@@ -2842,7 +2930,9 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           ...(await pressToggleButton(toggle, checked)),
           controlState: await controlResultState(toggle),
         };
-      const locator = controlLocator(page, ref);
+      // A box can be drawn as a clickable row (Workday's prompt choices are
+      // options that tick a box): set_checkbox reaches it as click does.
+      const locator = controlLocator(page, ref) ?? clickableLocator(page, ref);
       if (!locator) {
         return {
           ok: false,
@@ -2938,16 +3028,22 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
       }
     },
     pressKey: async (ref, key): Promise<ApplyWriteResult> => {
+      const field = ref ? controlLocator(page, ref) : null;
       const locator = ref
-        ? (controlLocator(page, ref) ??
+        ? (field ??
           actionLocator(page, ref) ??
           linkLocator(page, ref) ??
           clickableLocator(page, ref))
         : null;
+      let requests: ControlRequests | null = null;
       try {
         if (ref && !locator) {
           return { ok: false, error: `No element named ${ref} on this page.` };
         }
+        // A key in a search box can run its search (Workday's prompts
+        // search on Enter): report the list it then shows, as typing does.
+        const before = field ? await openListsBefore(field) : null;
+        requests = field ? watchControlRequests(page, field) : null;
         if (locator) {
           const element = await presentControl(locator);
           try {
@@ -2961,7 +3057,10 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         await page
           .waitForLoadState("domcontentloaded", { timeout: 0 })
           .catch(() => undefined);
-        return { ok: true, observedValue: key };
+        const pressed: ApplyWriteResult = { ok: true, observedValue: key };
+        return field && requests && before
+          ? await withFieldLookup(page, field, requests, before, pressed)
+          : pressed;
       } catch (error) {
         return {
           ok: false,
@@ -2970,6 +3069,8 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             `The ${key} key would not respond.`,
           ),
         };
+      } finally {
+        requests?.stop();
       }
     },
     followLink: async (ref): Promise<ApplyNavigationResult> => {

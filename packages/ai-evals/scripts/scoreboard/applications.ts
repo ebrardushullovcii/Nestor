@@ -513,3 +513,64 @@ export async function send(app: App, r: Result) {
     1,
   );
 }
+
+/** The record's skills as the replica's taxonomy names them. */
+const WORKDAY_PROMPT_SKILLS = new Set([
+  "React (Software)",
+  "TypeScript",
+  "Node.js",
+  "PostgreSQL",
+  "Docker (Software)",
+  "GraphQL",
+  "Amazon Web Services (AWS)",
+]);
+
+/**
+ * R8 J.D. Power: Workday prompts. Results open only after Enter, chosen
+ * items sit as pills in the field's own list, the phone code already holds
+ * one, Skills needs at least five. Send for me on the replica; the replica
+ * accepts only listed choices.
+ */
+export async function workdayPrompts(app: App, r: Result) {
+  await app.mode("Send for me");
+  const job = await app.fixture("workday-prompts", 1, false);
+  const receipts = () =>
+    app.ctx.sites
+      .submissions()
+      .filter((x) => x.path === "/workday-prompts/apply/1");
+  assert.equal(receipts().length, 0);
+  const started = Date.now();
+  await app.queue(job);
+  await app.settle([job]);
+  const a = app.application(job);
+  const posts = receipts();
+  const fields = (posts.at(-1)?.fields ?? {}) as Record<string, unknown>;
+  const list = (name: string): string[] => {
+    const raw = fields[name];
+    try {
+      const value = JSON.parse(typeof raw === "string" ? raw : "[]") as unknown;
+      return Array.isArray(value) ? value.map(String) : [];
+    } catch {
+      return [];
+    }
+  };
+  const skills = list("skills");
+  r.metrics.state = a.state;
+  r.metrics.error = a.error ?? null;
+  r.metrics.receipts = posts.length;
+  r.metrics.source = list("source");
+  r.metrics.phoneCode = list("phoneCode");
+  r.metrics.skills = skills;
+  r.metrics.veteran = list("veteran");
+  r.metrics.applySeconds = (Date.now() - started) / 1000;
+  r.metrics.summary = `state=${a.state}; receipts=${posts.length}; skills=${skills.length}; source=${list("source").join("")}; phone=${list("phoneCode").join("")}; ${Number(r.metrics.applySeconds).toFixed(0)}s`;
+  assert.equal(
+    a.state,
+    "submitted",
+    `Send for me: ${a.state}: ${a.error ?? ""}`,
+  );
+  assert.equal(posts.length, 1, "one final POST");
+  assert.ok(skills.length >= 5, `at least five skills, got ${skills.length}`);
+  for (const skill of skills)
+    assert.ok(WORKDAY_PROMPT_SKILLS.has(skill), `${skill} is in the record`);
+}

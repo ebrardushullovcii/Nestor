@@ -886,9 +886,11 @@ describe("reading the choices of lists the page draws itself", () => {
     `);
 
     const mechanics = createPlaywrightApplyPageMechanics(page);
+    // A key in a field also reports what the field then holds.
     expect(await mechanics.pressKey("c0", "Enter")).toEqual({
       ok: true,
       observedValue: "Enter",
+      controlState: { present: true, value: "" },
     });
     expect(await page.locator("#result").innerText()).toBe("Accepted");
 

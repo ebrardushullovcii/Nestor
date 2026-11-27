@@ -4,6 +4,13 @@ import { describeBrowserError } from "@nestor/contracts";
 import type { Frame, Locator, Page, Request, Response } from "playwright";
 import { pressableLabel } from "./pressable-label";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
+import {
+  heldItems,
+  pickLookupList,
+  withListboxReader,
+  type ListboxFacts,
+  type ListsBefore,
+} from "./listbox-relation";
 
 import {
   clickPresent,
@@ -87,15 +94,16 @@ export async function choosePageOption(
       (element) => element.tagName === "SELECT",
       undefined,
     );
+    const before = native ? {} : await openListsBefore(locator);
     const result = await (native
       ? chooseNativeOption(locator, label, progressAt, report)
-      : chooseCustomOption(page, locator, label, progressAt, report));
+      : chooseCustomOption(page, locator, label, progressAt, report, before));
     if (!native) {
       // A list this call opened and did not choose from is closed again, so
       // it does not lie over the next field.
       if (!result.ok) await closeList(locator);
       const scope = (await controlFrame(locator)) ?? page;
-      const list = await boundList(scope, locator);
+      const list = await boundList(scope, locator, before);
       const state = list ? await readList(list) : null;
       const expanded = await attribute(locator, "aria-expanded");
       if (state)
@@ -171,7 +179,8 @@ export async function readPageOptions(
     await requests.bound;
     const scope = (await controlFrame(locator)) ?? page;
     const expanded = await attribute(locator, "aria-expanded");
-    const list = await boundList(scope, locator);
+    const before = await openListsBefore(locator);
+    const list = await boundList(scope, locator, before);
     const open = list ? await readList(list) : null;
     if (expanded !== "true" && (expanded === "false" || !open?.visible))
       await clickPresent(locator);
@@ -180,6 +189,7 @@ export async function readPageOptions(
     const shown = await settle(
       scope,
       locator,
+      before,
       nothing,
       IDLE_MS,
       false,
@@ -288,13 +298,14 @@ export async function settleFieldLookup(
   page: Page,
   locator: Locator,
   requests: ControlRequests,
+  before: ListsBefore,
 ): Promise<ApplyWriteResult["optionList"]> {
   await requests.bound;
   const scope = (await controlFrame(locator).catch(() => null)) ?? page;
   let lastKey: string | null = null;
   let stableSince = Date.now();
   for (;;) {
-    const list = await boundList(scope, locator).catch(() => null);
+    const list = await boundList(scope, locator, before).catch(() => null);
     const state = list ? await readList(list) : null;
     const expanded = await attribute(locator, "aria-expanded").catch(
       () => null,
@@ -740,15 +751,37 @@ function attribute(locator: Locator, name: string): Promise<string | null> {
   );
 }
 
+/** Every list drawn on the page, as it relates to this control. */
+async function listFacts(locator: Locator): Promise<ListboxFacts[]> {
+  return evaluatePresent(
+    locator,
+    withListboxReader((element, mark: string, facts) => facts(element, mark)),
+    LIST_MARK,
+  ).catch(() => []);
+}
+
 /**
- * The list this control names as its own. A control that names none (some
- * pickers say so only while open, or not at all) owns the list its active
- * option sits in, else the one open list nearest to it, else the only list
- * open on the page.
+ * What each open list shows just before an action, so the list the action
+ * opened or changed can be told from lists that were already there. Take it
+ * before the click or the keys.
+ */
+export async function openListsBefore(locator: Locator): Promise<ListsBefore> {
+  return Object.fromEntries(
+    (await listFacts(locator)).map((list) => [list.mark, list.signature]),
+  );
+}
+
+/**
+ * The list this control names as its own (aria-controls or aria-owns, else
+ * the list its active option sits in). A control that names none answers in
+ * the list that floated open or changed since `before`, or the one open right
+ * beside it (`pickLookupList`). A list of what the field already holds, or a
+ * list belonging to another field, is never its lookup list.
  */
 async function boundList(
   scope: Frame | Page,
   locator: Locator,
+  before: ListsBefore | null,
 ): Promise<Locator | null> {
   const ids = (
     (await attribute(locator, "aria-controls")) ??
@@ -760,37 +793,8 @@ async function boundList(
     .filter(Boolean);
   if (ids.length === 1)
     return scope.locator(`[id="${ids[0]!.replace(/["\\]/gu, "\\$&")}"]`);
-  const near = await evaluatePresent(
-    locator,
-    (element, mark) => {
-      const shown = (node: Element) =>
-        node.getClientRects().length > 0 &&
-        getComputedStyle(node).visibility !== "hidden";
-      const root = element.getRootNode() as Document | ShadowRoot;
-      const active = element.getAttribute("aria-activedescendant");
-      let list =
-        (active
-          ? root.getElementById?.(active)?.closest("[role='listbox']")
-          : null) ?? null;
-      for (
-        let at = element.parentElement;
-        !list && at && at !== document.body;
-        at = at.parentElement
-      ) {
-        const open = [...at.querySelectorAll("[role='listbox']")].filter(shown);
-        if (open.length === 1) list = open[0]!;
-        if (open.length > 1) break;
-      }
-      if (!list) return null;
-      if (!list.getAttribute(mark))
-        list.setAttribute(mark, Math.random().toString(36).slice(2));
-      return list.getAttribute(mark);
-    },
-    LIST_MARK,
-  );
-  if (near) return scope.locator(`[${LIST_MARK}="${near}"]`);
-  const open = scope.locator("[role='listbox']:visible");
-  return (await open.count()) === 1 ? open : null;
+  const mark = pickLookupList(await listFacts(locator), before);
+  return mark ? scope.locator(`[${LIST_MARK}="${mark}"]`) : null;
 }
 
 /** Matches an accessible name as the label spells it, give or take spacing and case. */
@@ -895,9 +899,16 @@ async function shownChoices(
     .getByRole("option", { name: exactName(text), selected: true })
     .count()
     .catch(() => 0);
+  // A prompt that keeps its choices as items beside the search box.
+  const held = heldItems(await listFacts(locator)) ?? [];
   return [
     ...new Set(
-      [composite?.selectedOptionLabel ?? "", ...own, marked ? text : ""]
+      [
+        composite?.selectedOptionLabel ?? "",
+        ...own,
+        ...held,
+        marked ? text : "",
+      ]
         .map((value) => value.replace(/\s+/gu, " ").trim())
         .filter(Boolean),
     ),
@@ -968,6 +979,7 @@ async function selectRow(
 async function settle(
   scope: Frame | Page,
   locator: Locator,
+  before: ListsBefore,
   wanted: string,
   idleMs: number,
   searched: boolean,
@@ -985,7 +997,7 @@ async function settle(
   let stableSince = Date.now();
   let bound = false;
   for (;;) {
-    const list = await boundList(scope, locator);
+    const list = await boundList(scope, locator, before);
     const state = list ? await readList(list) : null;
     if (list && state) {
       bound = true;
@@ -1056,6 +1068,7 @@ async function chooseCustomOption(
   label: string,
   networkProgress: () => number,
   report: ListReport,
+  before: ListsBefore,
 ): Promise<ApplyWriteResult> {
   const selected = (
     await locator.evaluateAll(collectCustomComboboxStates, [0])
@@ -1079,6 +1092,7 @@ async function chooseCustomOption(
     searchable,
     networkProgress,
     report,
+    before,
   );
 }
 
@@ -1089,6 +1103,7 @@ async function chooseFromList(
   searchable: boolean,
   networkProgress: () => number,
   report: ListReport,
+  before: ListsBefore,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
   // Open it, type enough of the answer for the list to narrow to it, then
@@ -1096,7 +1111,7 @@ async function chooseFromList(
   // hundred countries usable at all.
   const scope = (await controlFrame(locator)) ?? page;
   const expanded = await attribute(locator, "aria-expanded");
-  const list = await boundList(scope, locator);
+  const list = await boundList(scope, locator, before);
   const open = list ? await readList(list) : null;
   // Selecting an already-open picker must not toggle it closed.
   if (expanded !== "true" && (expanded === "false" || !open?.visible))
@@ -1119,6 +1134,7 @@ async function chooseFromList(
   const first = await settle(
     scope,
     locator,
+    before,
     wanted,
     IDLE_MS,
     searchable,
@@ -1178,6 +1194,7 @@ async function chooseFromList(
   const listed = await settle(
     scope,
     locator,
+    before,
     wanted,
     3_000,
     false,
@@ -1203,6 +1220,7 @@ async function chooseFromList(
       const searched = await settle(
         scope,
         locator,
+        before,
         wanted,
         IDLE_MS,
         true,

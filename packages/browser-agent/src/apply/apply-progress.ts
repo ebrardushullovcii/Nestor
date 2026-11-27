@@ -26,6 +26,7 @@ export function createApplyProgressGuard(limit = 120) {
                   control.value,
                   control.checked,
                   control.selectedOptionLabel,
+                  control.selectedItems ?? null,
                   control.options,
                 ]),
                 actions: page.actions.map((action) => [

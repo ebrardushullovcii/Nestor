@@ -378,6 +378,9 @@ export function inferActionKind(label: string): ApplyActionKind {
 
 /** True when the control already holds an answer a person would call filled in. */
 export function isControlAnswered(control: ApplyFormControl): boolean {
+  // A search box beside the items it holds is answered by those items; its
+  // text is only a search.
+  if (control.selectedItems) return control.selectedItems.length > 0;
   switch (control.kind) {
     case "checkbox":
     case "radio":

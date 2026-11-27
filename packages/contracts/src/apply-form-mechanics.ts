@@ -85,6 +85,12 @@ export interface RawApplyControl {
   multiple: boolean;
   options: string[];
   selectedOptionLabel: string;
+  /**
+   * The items a search box holds in the list inside its own field (a
+   * Workday prompt's chosen pills), present when it has such a list. Its
+   * value is then only the text typed to search.
+   */
+  selectedItems?: string[];
   /** What a file input's own field shows about its upload. */
   upload?: RawApplyUpload;
 }
@@ -160,6 +166,8 @@ export interface RawApplyPlacement {
   formIndex?: number;
   frame?: ApplyFrameOwner;
   section?: string;
+  /** The short words nearest it, when they differ from its section. */
+  nearby?: string;
   inForm?: boolean;
   /** For a toggle button: the question it answers is marked required. */
   sectionRequired?: boolean;

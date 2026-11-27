@@ -125,12 +125,29 @@ function readToggle(node: Element): ToggleFacts {
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 100);
+  // A row that draws its box inside itself, or says it is chosen, as a
+  // prompt's options do (aria-selected).
+  const inner =
+    input || node.hasAttribute("aria-checked")
+      ? []
+      : Array.from(
+          node.querySelectorAll(
+            "input[type='checkbox'], input[type='radio'], [role='checkbox'][aria-checked], [role='radio'][aria-checked], [role='switch'][aria-checked]",
+          ),
+        );
+  const drawnBox = inner.length === 1 ? inner[0]! : null;
   return {
     checked: input
       ? input.checked
       : node.hasAttribute("aria-checked")
         ? node.getAttribute("aria-checked") === "true"
-        : null,
+        : drawnBox
+          ? drawnBox instanceof HTMLInputElement
+            ? drawnBox.checked
+            : drawnBox.getAttribute("aria-checked") === "true"
+          : node.hasAttribute("aria-selected")
+            ? node.getAttribute("aria-selected") === "true"
+            : null,
     disabled:
       (input?.disabled ?? false) ||
       node.getAttribute("aria-disabled") === "true",
