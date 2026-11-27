@@ -307,9 +307,16 @@ other routes:
   facts). Once such a request takes a tool turn it caches as a conversation.
 - **Thinking.** Always on (adaptive, summarized so long thoughts keep the
   stream alive). Each assistant turn's content blocks, thinking signatures
-  included, return unchanged on the next turn. A turn the app has since
-  rewritten is rebuilt from the transcript without its thinking, and
-  `prefix_mismatch_behavior: "drop_block"` keeps a folded history working.
+  included, return unchanged on the next turn.
+- **Append-only history.** The API reads the cache only at breakpoints and
+  an edit to an earlier message drops every later thinking block, so each
+  reply on this route asks the agent loop to keep the conversation
+  append-only: superseded page views are not folded to receipts, and the
+  apply agent states its saved-answer library where it changed instead of
+  re-adding it at the end of every request. Each turn's request then starts
+  with the previous one word for word. A turn the app has rewritten anyway
+  (compaction at the model window) is rebuilt without its thinking, and
+  `prefix_mismatch_behavior: "drop_block"` keeps that request working.
 - **Effort** goes in `output_config.effort` from the route or task effort.
   `none` becomes `low`, the lowest Messages offers.
 - **JSON.** A request with a schema uses `output_config.format`, through the

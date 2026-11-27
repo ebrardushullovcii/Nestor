@@ -1720,3 +1720,69 @@ test("22 batch entries return their resulting values before exactly one fresh pa
     returned.indexOf("Page:"),
   );
 });
+
+async function requestsOfAnObservingRun(appendOnlyHistory: boolean) {
+  let views = 0;
+  const source = page();
+  const input = config(source);
+  // Each look shows a changed page, so every earlier view is superseded.
+  input.hands.observe = () => {
+    views += 1;
+    return Promise.resolve(
+      buildApplyFormObservation(
+        {
+          ...source,
+          bodyText: `View ${views}. ${"Role details. ".repeat(900)}`,
+        },
+        "2026-09-14T10:00:00.000Z",
+      ),
+    );
+  };
+  const requests: unknown[][] = [];
+  const calls = [
+    { name: "observe", args: {} },
+    { name: "observe", args: {} },
+    { name: "observe", args: {} },
+    done,
+  ];
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      requests.push(structuredClone(messages));
+      const call = calls[requests.length - 1];
+      return Promise.resolve({
+        content: "",
+        toolCalls: [
+          {
+            id: `call_${requests.length}`,
+            type: "function" as const,
+            function: { name: call.name, arguments: JSON.stringify(call.args) },
+          },
+        ],
+        ...(appendOnlyHistory ? { appendOnlyHistory: true } : {}),
+      });
+    },
+  };
+  await runApplyAgent(input, client);
+  return requests;
+}
+
+test("on an append-only route each apply request starts with the previous request word for word", async () => {
+  const requests = await requestsOfAnObservingRun(true);
+  expect(requests).toHaveLength(4);
+  for (let turn = 1; turn < requests.length; turn += 1) {
+    const previous = requests[turn - 1];
+    const current = requests[turn];
+    expect(current.length).toBeGreaterThan(previous.length);
+    expect(JSON.stringify(current.slice(0, previous.length))).toBe(
+      JSON.stringify(previous),
+    );
+  }
+  // The saved-answer library was said once, where it was current.
+  const last = JSON.stringify(requests.at(-1));
+  expect(last.split("Complete saved-answer library").length - 1).toBe(1);
+});
+
+test("elsewhere superseded page views still fold to receipts", async () => {
+  const requests = await requestsOfAnObservingRun(false);
+  expect(JSON.stringify(requests.at(-1))).toContain("read_context_history");
+});

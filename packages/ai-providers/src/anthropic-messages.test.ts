@@ -1174,3 +1174,39 @@ describe("Messages tool input schemas", () => {
       expect(acceptable(tool.input_schema)).toBe(true);
   });
 });
+
+describe("Messages history", () => {
+  test("a Messages reply asks the loop to keep its history append-only", async () => {
+    const script = scriptFetch([
+      sse({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" }),
+    ]);
+    restoreFetch = script.restore;
+    const result = await client().chatWithTools(
+      [{ role: "user", content: "go" }],
+      tools,
+    );
+    expect(result.appendOnlyHistory).toBe(true);
+  });
+
+  test("other routes keep folding", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      )) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = original;
+    };
+    const result = await client({
+      baseUrl: "https://gateway.example/v1",
+      model: "deepseek-v4.1-flash",
+      apiMode: "chat_completions",
+    }).chatWithTools([{ role: "user", content: "go" }], tools);
+    expect(result.appendOnlyHistory).toBeUndefined();
+  });
+});

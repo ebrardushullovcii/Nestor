@@ -908,6 +908,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
         if (choice?.finish_reason) {
           result.finishReason = choice.finish_reason;
         }
+        // Messages caches only at breakpoints, and an edit to an earlier
+        // message drops every later thinking block: ask the loop not to fold.
+        if (apiMode === "messages") result.appendOnlyHistory = true;
         if (payload.usage) {
           result.usage = normalizeModelUsage(payload.usage);
         }

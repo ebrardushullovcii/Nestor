@@ -46,6 +46,8 @@ export interface LLMClient {
     reasoning?: string
     finishReason?: string
     usage?: ModelTokenUsage
+    /** Keep this conversation's earlier messages unedited (AgentLoopModel). */
+    appendOnlyHistory?: boolean
   }>
 }
 
