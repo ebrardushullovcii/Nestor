@@ -2188,8 +2188,8 @@ test("a finished public feed is logged after acceptance and skipped on restart",
   expect(await collectSource(input)).toMatchObject({ complete: true });
   expect(onPage).toHaveBeenCalledOnce();
   expect(record).toHaveBeenCalledWith(board.url, board.url, []);
-  expect(onPage.mock.invocationCallOrder[0]!).toBeLessThan(
-    record.mock.invocationCallOrder[0]!,
+  expect(onPage.mock.invocationCallOrder[0]).toBeLessThan(
+    record.mock.invocationCallOrder[0],
   );
   readPage.mockClear();
 
