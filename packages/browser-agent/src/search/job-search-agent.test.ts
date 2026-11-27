@@ -3132,6 +3132,74 @@ test("an infinite-scroll page reads only the cards this run has not saved yet", 
   expect(read.at(-1)).not.toContain("jobs/j1");
 });
 
+test("browser collection is told where the person lives, may work and would move, in a prefix every site shares", () => {
+  // Saved places say only Europe; the person may also work in the US and
+  // remotely from home, and would move to two named countries.
+  const person = (siteLabel: string, inventoryOnly: boolean) =>
+    config({
+      inventoryOnly,
+      userProfile: CandidateProfileSchema.parse({
+        ...config().userProfile,
+        currentLocation: "Prishtina, Kosovo",
+        currentCity: "Prishtina",
+        currentCountry: "Kosovo",
+        workEligibility: {
+          authorizedWorkCountries: ["Kosovo", "United States", "Spain"],
+          requiresVisaSponsorship: false,
+          willingToRelocate: true,
+          preferredRelocationRegions: ["Spain", "Portugal"],
+          remoteEligible: true,
+        },
+      }),
+      searchPreferences: {
+        targetRoles: ["Software Engineer"],
+        locations: ["Europe"],
+        workModes: ["remote", "hybrid"],
+      },
+      promptContext: {
+        siteLabel,
+        siteInstructions: [`On ${siteLabel}, use the location box.`],
+      },
+    });
+  for (const inventoryOnly of [true, false]) {
+    const first = createJobSearchPrompts(person("Built In", inventoryOnly));
+    const second = createJobSearchPrompts(
+      person("Working Nomads", inventoryOnly),
+    );
+    const facts = JSON.stringify({
+      location: "Prishtina, Kosovo",
+      currentCity: "Prishtina",
+      currentRegion: null,
+      currentCountry: "Kosovo",
+      workEligibility: person("x", inventoryOnly).userProfile.workEligibility,
+    });
+    expect(first.system).toContain(facts);
+    expect(facts).toContain(
+      '"authorizedWorkCountries":["Kosovo","United States","Spain"]',
+    );
+    expect(facts).toContain(
+      '"preferredRelocationRegions":["Spain","Portugal"]',
+    );
+    expect(facts).toContain('"remoteEligible":true');
+    const marker = "\nThis site: ";
+    const firstPrefix = first.system.slice(0, first.system.indexOf(marker));
+    const secondPrefix = second.system.slice(0, second.system.indexOf(marker));
+    expect(first.system.indexOf(marker)).toBeGreaterThan(0);
+    expect(firstPrefix).toBe(secondPrefix);
+    expect(firstPrefix).toContain(facts);
+    expect(firstPrefix).not.toContain("Built In");
+    expect(first.system.slice(firstPrefix.length)).toContain(
+      "This site: Built In.",
+    );
+    expect(first.system.slice(firstPrefix.length)).toContain(
+      "On Built In, use the location box.",
+    );
+  }
+  const inventory = createJobSearchPrompts(person("Built In", true)).system;
+  expect(inventory).toContain("also outside their saved locations");
+  expect(inventory).toContain('"locations":["Europe"]');
+});
+
 test("a restarted browser collection is told where the interrupted one had got to", () => {
   const fresh = createJobSearchPrompts(config({ inventoryOnly: true }));
   expect(fresh.user).not.toContain("interrupted");
