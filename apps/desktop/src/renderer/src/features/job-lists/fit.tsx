@@ -45,12 +45,14 @@ export function FitMeter(props: { level: FitLevel; size?: "row" | "detail" }) {
  */
 export function Fit(props: {
   score: number | null;
+  stale?: boolean;
   stage?: JobStage;
   size?: "row" | "detail";
   className?: string;
   labelClassName?: string;
 }) {
   const fit = describeFit(props.score, props.stage);
+  const label = props.stale ? "Earlier score" : fit.label;
   const detail = props.size === "detail";
   if (props.score === null)
     return (
@@ -73,7 +75,7 @@ export function Fit(props: {
         props.className,
       )}
       data-fit={fit.level}
-      title={`Fit ${props.score} of 100: ${fit.label}`}
+      title={`Fit ${props.score} of 100: ${label}`}
     >
       <span
         className={cn(
@@ -94,10 +96,10 @@ export function Fit(props: {
           detail
             ? "text-(length:--text-description) font-medium"
             : "text-(length:--text-small)",
-          props.labelClassName,
+          !props.stale && props.labelClassName,
         )}
       >
-        {fit.label}
+        {label}
       </span>
     </span>
   );

@@ -20,12 +20,17 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import { createFitQueue } from "./fit-queue";
-import { fitInputFingerprint } from "./fit-input";
+import {
+  fitContextInput,
+  fitInputFingerprint,
+  LISTING_FIT_SCORER_VERSION,
+} from "./fit-input";
 import { screenCards as screenListingCards } from "@nestor/browser-agent";
 import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import type { JobSearchContext, JobSearchRunner } from "./types";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -1922,6 +1927,100 @@ test("one pass scores the whole backlog, visible jobs first, in bounded batches"
   expect(Math.max(...sizes)).toBeLessThan(48);
   expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(ids.length);
   expect(store.unscoredJobIds(200)).toHaveLength(0);
+});
+
+test("a scorer bump refreshes only priority jobs, then takes displayed or opened jobs once", async () => {
+  const { runner, context, engine, store } = setup();
+  const previousContext = createHash("sha256")
+    .update(
+      JSON.stringify({
+        ...fitContextInput(context),
+        scorerVersion: LISTING_FIT_SCORER_VERSION - 1,
+      }),
+    )
+    .digest("hex");
+  store.syncFitContext(previousContext);
+  const ids = seedBacklog(store, 3400, "Complete listing: requires SQL.");
+  const visible = ids[600]!;
+  const scrolledTo = ids[601]!;
+  const opened = ids[602]!;
+  const shortlisted = ids[603]!;
+  const ready = ids[604]!;
+  const applied = ids[605]!;
+  const hidden = ids[606]!;
+  const untouched = ids[607]!;
+  const hiddenHigh = ids[0]!;
+  const newJob = ids.at(-1)!;
+  store.setFit(
+    ids.slice(0, -1).map((id, index) => ({
+      id,
+      score: index < 600 ? 40 : 39,
+      summary: "Earlier model verdict",
+      reasons: [],
+      gaps: [],
+    })),
+  );
+  store.setStage([shortlisted], "shortlisted");
+  store.setStage([ready], "resume");
+  store.setStage([applied], "applied");
+  store.moveJobs({ selection: { ids: [hidden, hiddenHigh] }, to: "hidden" });
+  runner.prioritizeFit([visible]);
+  const asked = () =>
+    engine.fitJobs.mock.calls.flatMap(([input]) =>
+      input.jobs.map((job) => job.id),
+    );
+  const sorted = (values: number[]) => values.toSorted((a, b) => a - b);
+  await runner.scoreUnscored();
+  expect(asked()[0]).toBe(visible);
+  expect(sorted(asked())).toEqual(
+    sorted([...ids.slice(0, 600), visible, shortlisted, ready, newJob]),
+  );
+  expect(runner.status()).toMatchObject({ fitChecking: 0, fitRechecking: 0 });
+  expect(store.getJob(applied)).toMatchObject({
+    fitScore: 39,
+    fitStale: false,
+  });
+  expect(store.getJob(untouched)).toMatchObject({
+    fitScore: 39,
+    fit: { summary: "Earlier model verdict" },
+    fitStale: true,
+  });
+  expect(store.countJobs({ stage: "found", minFit: 39 })).toBe(3395);
+  expect(
+    store.listJobs({ stage: "found", text: "Backend Engineer 607" }).rows[0],
+  ).toMatchObject({
+    id: untouched,
+    fitScore: 39,
+    fitStale: true,
+  });
+
+  engine.fitJobs.mockClear();
+  try {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    runner.prioritizeFit([scrolledTo]);
+    runner.prioritizeFit([scrolledTo, opened]);
+    runner.prioritizeFit([hidden]);
+    runner.prioritizeFit([]); // Leaving the page keeps the requested work.
+    expect(sorted(store.unscoredJobIds(20))).toEqual(
+      sorted([scrolledTo, opened, hidden]),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    await runner.scoreUnscored();
+    expect(sorted(asked())).toEqual(sorted([scrolledTo, opened, hidden]));
+    runner.prioritizeFit([scrolledTo, opened, hidden]);
+    await runner.scoreUnscored();
+    expect(sorted(asked())).toEqual(sorted([scrolledTo, opened, hidden]));
+    expect(store.getJob(opened)).toMatchObject({
+      fitScore: 82,
+      fitStale: false,
+    });
+    expect(store.getJob(untouched)).toMatchObject({
+      fitScore: 39,
+      fitStale: true,
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("validated cards record successful access, while later auth evidence wins", async () => {

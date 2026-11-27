@@ -58,7 +58,10 @@ function row(id: number): JobRow {
 }
 
 /** The Find jobs list as the screen wires it: stable handlers, J/K keys. */
-function FoundJobs(props: { rows: readonly JobRow[] }) {
+function FoundJobs(props: {
+  rows: readonly JobRow[];
+  onVisibleRows?: (rows: readonly JobRow[]) => void;
+}) {
   const [activeId, setActiveId] = useState<number | null>(
     props.rows[0]?.id ?? null,
   );
@@ -87,6 +90,7 @@ function FoundJobs(props: { rows: readonly JobRow[] }) {
       label="Found jobs"
       loading={false}
       onLoadMore={() => undefined}
+      {...(props.onVisibleRows ? { onVisibleRows: props.onVisibleRows } : {})}
       onSelectionChange={setSelection}
       renderRow={(job, state) => (
         <FindJobsRow
@@ -172,7 +176,8 @@ it("draws only the rows in view of 2,000, and a J press re-renders at most two",
 
 it("keeps the open row drawn when the person scrolls far from it", () => {
   const rows = Array.from({ length: 2000 }, (_, i) => row(i + 1));
-  render(<FoundJobs rows={rows} />);
+  const onVisibleRows = vi.fn<(rows: readonly JobRow[]) => void>();
+  render(<FoundJobs rows={rows} onVisibleRows={onVisibleRows} />);
   const scroller = document.querySelector<HTMLElement>(
     "[data-locked-pane-scroll-region]",
   )!;
@@ -183,6 +188,26 @@ it("keeps the open row drawn when the person scrolls far from it", () => {
   expect(screen.getByText("Designer 1500")).toBeTruthy();
   expect(rowNamed("Designer 1").getAttribute("aria-posinset")).toBe("1");
   expect(items().length).toBeLessThan(40);
+  // The pinned row and the render overscan don't become the visible range.
+  expect(onVisibleRows.mock.lastCall?.[0].map(({ id }) => id)).toEqual([
+    1501, 1502, 1503, 1504, 1505, 1506, 1507,
+  ]);
+});
+
+it("labels a retained score as earlier and clears that label with the new score", () => {
+  const earlier = { ...row(1), fitScore: 39, fitStale: true };
+  const { rerender } = render(<FoundJobs rows={[earlier]} />);
+  const item = rowNamed("Designer 1");
+  expect(item.querySelector("[data-fit]")?.textContent).toBe(
+    "39, Earlier score",
+  );
+  expect(
+    item.querySelector("[aria-controls]")?.getAttribute("aria-label"),
+  ).toContain("39, Earlier score");
+  rerender(
+    <FoundJobs rows={[{ ...earlier, fitScore: 82, fitStale: false }]} />,
+  );
+  expect(item.querySelector("[data-fit]")?.textContent).toBe("82, Good fit");
 });
 
 it("lays mixed-height rows out at the tallest, so none overlaps the next", () => {

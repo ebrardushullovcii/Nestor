@@ -66,7 +66,10 @@ export const FindJobsRow = memo(function FindJobsRow(
 ) {
   const { row } = props;
   const age = describeAge(row.postedAt ?? row.foundAt);
-  const fitLabel = describeFit(row.fitScore, row.stage).label;
+  const fitLabel =
+    row.fitScore !== null && row.fitStale
+      ? "Earlier score"
+      : describeFit(row.fitScore, row.stage).label;
   const reason = row.stageNote
     ? `Hidden by the search: ${row.stageNote}`
     : (row.fitSummary ?? row.salaryText ?? "");
@@ -88,6 +91,7 @@ export const FindJobsRow = memo(function FindJobsRow(
           labelClassName="sr-only @xs/row:not-sr-only"
           score={row.fitScore}
           stage={row.stage}
+          stale={row.fitStale === true}
         />
       }
       metaTrailing={

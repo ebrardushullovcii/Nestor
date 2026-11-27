@@ -7,7 +7,7 @@ import {
   type JobSort,
   type TriageStage,
 } from "@nestor/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { emptyFitReason, useEmptyFitSummary } from "./empty-fit";
 
@@ -19,6 +19,10 @@ import {
 import { useToast } from "@renderer/components/ui/toast";
 import { openUrlInJobFinderBrowser } from "@renderer/features/job-finder/components/open-outside-links";
 import { PageHeader } from "@renderer/features/job-finder/components/page-header";
+import {
+  KeptRouteVisibilityContext,
+  useEffectWhileKeptRouteShown,
+} from "@renderer/features/job-finder/lib/kept-route-visibility";
 import {
   ListDetailLayout,
   ListPane,
@@ -212,18 +216,33 @@ export function FindJobsScreen() {
         .run("count_jobs", filter)
         .then((result) => result.total),
   });
+  const visibility = useContext(KeptRouteVisibilityContext);
+  const visibleRows = useRef<readonly JobRow[]>([]);
+  const lastFitView = useRef("");
+  const reportFitView = useCallback((ids: number[]) => {
+    const key = ids.join(",");
+    if (key === lastFitView.current) return;
+    lastFitView.current = key;
+    void window.nestor.jobs.run("prioritize_fit", { ids }).catch(() => {
+      if (key === lastFitView.current) lastFitView.current = "";
+    });
+  }, []);
   const prioritizeVisible = useCallback(
     (rows: readonly JobRow[]) => {
-      if (stage === "found" && rows.length) {
-        void window.nestor.jobs
-          .run("prioritize_fit", {
-            ids: rows.slice(0, 200).map((row) => row.id),
-          })
-          .catch(() => undefined);
-      }
+      visibleRows.current = rows;
+      if (visibility.isHidden()) return;
+      const ids = rows
+        .filter((row) => row.id !== activeId)
+        .map((row) => row.id);
+      if (activeId !== null) ids.unshift(activeId);
+      reportFitView(ids.slice(0, 200));
     },
-    [stage],
+    [activeId, reportFitView, visibility],
   );
+  useEffectWhileKeptRouteShown(() => {
+    prioritizeVisible(visibleRows.current);
+    return () => reportFitView([]);
+  }, [reportFitView]);
   const actions = TRIAGE_ACTIONS[stage];
 
   // A job asked for by link stays open even when it is not on the first page.

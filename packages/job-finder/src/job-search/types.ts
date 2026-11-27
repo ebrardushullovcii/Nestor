@@ -77,7 +77,7 @@ export interface JobSearchRunner {
   status(): JobSearchStatus;
   /** Coalesced to at most four notifications per second. */
   onStatus(listener: (status: JobSearchStatus) => void): () => void;
-  /** Retries unscored found/shortlisted jobs, without re-scoring existing fits. */
+  /** Scores new jobs and saved jobs that are due for a refresh. */
   scoreUnscored(): Promise<number>;
   prioritizeFit(ids: readonly number[]): void;
 }

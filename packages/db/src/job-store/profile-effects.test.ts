@@ -234,7 +234,7 @@ test("Profile body edits restart unreviewed writing while an approved Original s
   expect(resumes.get(1)).toEqual(original);
 });
 
-test("changing remote location policy retires active fit scores without changing drafts or applied history", () => {
+test("a location policy change keeps earlier scores, drafts and application history", () => {
   const { store, preferences, resumes } = setup();
   store.setFit(
     [1, 2].map((id) => ({
@@ -258,12 +258,17 @@ test("changing remote location policy retires active fit scores without changing
   preferences.settings.patch({
     fields: { "aiBehavior.jobSearch.remoteCountsAsAnyLocation": false },
   });
-  expect(store.getJob(1)?.fitScore).toBeNull();
-  expect(store.getJob(1)?.fit).toBeNull();
-  expect(store.getJob(1)?.stage).toBe("resume");
+  // The runner synchronizes the new context before taking fit work.
+  store.syncFitContext("new-location-policy");
+  expect(store.getJob(1)).toMatchObject({
+    fitScore: 90,
+    fit: { summary: "Remote match" },
+    fitStale: true,
+    stage: "resume",
+  });
   expect(store.unscoredJobIds(10)).toContain(1);
   expect(store.unscoredJobIds(10)).not.toContain(2);
-  expect(store.getJob(2)?.fitScore).toBe(90);
+  expect(store.getJob(2)).toMatchObject({ fitScore: 90, fitStale: false });
   expect(resumes.get(1)).toEqual(draft);
 });
 
