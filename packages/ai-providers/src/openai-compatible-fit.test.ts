@@ -7,6 +7,7 @@ import {
 import { normalizeExtractedJobs } from "./openai-compatible-jobs";
 
 import {
+  JOB_FIT_JUDGING_BATCH_SIZE,
   buildFitEvidenceInstructions,
   buildFitScoringInstructions,
   buildJobFitAssessmentPayload,
@@ -53,7 +54,19 @@ test.each([
       reasons: ["Check a requirement"],
       gaps: [],
     };
-    const result = { ...verdict, judgments: [{ ...verdict, jobId: "0" }] };
+    const jobs = Array.from(
+      { length: JOB_FIT_JUDGING_BATCH_SIZE },
+      (_, index) => ({
+        jobId: `workspace-${index}`,
+        posting: createJobPosting(),
+      }),
+    );
+    const result = {
+      ...verdict,
+      judgments: jobs
+        .map((_, index) => ({ ...verdict, jobId: String(index) }))
+        .reverse(),
+    };
     const mock = mockCapturingJsonFetch({
       output_text: JSON.stringify(result),
       choices: [{ message: { content: JSON.stringify(result) } }],
@@ -72,10 +85,7 @@ test.each([
         profile: createProfile(),
         searchPreferences: createPreferences(),
       };
-      const batch = await client.judgeJobFits!({
-        ...input,
-        jobs: [{ jobId: "one", posting: createJobPosting() }],
-      });
+      const batch = await client.judgeJobFits!({ ...input, jobs });
       const batchBody = JSON.parse(mock.getCapturedBody()) as Record<
         string,
         unknown
@@ -85,7 +95,7 @@ test.each([
           format: {
             type: "json_schema",
             strict: true,
-            ...buildJobFitJudgingResponseSchema(["0"]),
+            ...buildJobFitJudgingResponseSchema(),
           },
         });
       } else {
@@ -108,7 +118,9 @@ test.each([
         expect(messages[0]!.content).toContain(buildFitScoringInstructions());
       }
       // The rubric guides the model; the app does not replace its verdict.
-      expect(batch[0]?.score).toBe(58);
+      expect(batch.map(({ jobId, score }) => ({ jobId, score }))).toEqual(
+        jobs.map(({ jobId }) => ({ jobId, score: 58 })).reverse(),
+      );
       expect(full?.score).toBe(58);
     } finally {
       mock.restore();
@@ -228,20 +240,21 @@ describe("batch fit judging", () => {
     ]);
   });
 
-  test("requires every job key and limits scores and recommendations to the rubric", () => {
-    const { schema } = buildJobFitJudgingResponseSchema(["0", "1"]);
-    expect(schema.properties.judgments.required).toEqual(["0", "1"]);
-    expect(Object.keys(schema.properties.judgments.properties)).toEqual([
-      "0",
-      "1",
-    ]);
-    expect(schema.properties.judgments.additionalProperties).toBe(false);
-    expect(schema.$defs.judgment.properties.score).toEqual({
+  test("reuses one judgment row schema with an explicit job id and the original rubric", () => {
+    const { schema } = buildJobFitJudgingResponseSchema();
+    const judgments = schema.properties.judgments;
+    expect(judgments.type).toBe("array");
+    expect(judgments.items.required).toEqual(
+      Object.keys(judgments.items.properties),
+    );
+    expect(judgments.items.properties.jobId).toEqual({ type: "string" });
+    expect(judgments.items.additionalProperties).toBe(false);
+    expect(judgments.items.properties.score).toEqual({
       type: "integer",
       minimum: 0,
       maximum: 100,
     });
-    expect(schema.$defs.judgment.properties.recommendation.enum).toEqual([
+    expect(judgments.items.properties.recommendation.enum).toEqual([
       "skip",
       "review_before_applying",
       "apply_with_original",

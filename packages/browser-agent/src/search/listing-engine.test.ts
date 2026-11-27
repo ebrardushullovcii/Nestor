@@ -416,40 +416,64 @@ test.each([{ "0": 1, "1": 0 }, { "keep{": { "0": 1, "1": 0 } }])(
   },
 );
 
-test("B2 repairs only missing or invalid screen judgments, including small batches", async () => {
-  const requests: unknown[][] = [];
-  const result = await screenCards({
-    cards: [card("Research Assistant"), card("Dental Nurse")],
-    goals: {
-      targetRoles: ["Data Analyst"],
-      relatedRoles: [],
-      strategy: "target_roles",
-    },
-    client: {
-      chatWithTools: vi.fn(
-        (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
-          const titles = (
-            JSON.parse(messages[1].content) as { titles: unknown[][] }
-          ).titles;
-          requests.push(titles);
-          return Promise.resolve({
-            content: JSON.stringify({
-              keep:
-                requests.length === 1 ? { "0": 1, "1": "invalid" } : { "0": 0 },
-            }),
-          });
-        },
-      ),
-    },
-  });
-  expect(requests.map((rows) => rows.length)).toEqual([2, 1]);
-  expect(JSON.stringify(requests[1])).toContain("dental nurse");
-  expect(result.related.map((row) => row.title)).toEqual([
-    "Research Assistant",
-  ]);
-  expect(result.seen).toHaveLength(1);
-  expect(result.failed).toEqual([]);
-});
+test.each([
+  { issue: "missing", middle: [] },
+  { issue: "invalid", middle: [{ index: 1, verdict: "invalid" }] },
+  {
+    issue: "duplicated",
+    middle: [
+      { index: 1, verdict: 0 },
+      { index: 1, verdict: 1 },
+    ],
+  },
+])(
+  "B2 repairs only the $issue screen judgment in a small batch",
+  async ({ middle }) => {
+    const requests: unknown[][] = [];
+    const result = await screenCards({
+      cards: [
+        card("Research Assistant"),
+        card("Dental Nurse"),
+        card("Data Quality Assistant"),
+      ],
+      goals: {
+        targetRoles: ["Data Analyst"],
+        relatedRoles: [],
+        strategy: "target_roles",
+      },
+      client: {
+        chatWithTools: vi.fn(
+          (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
+            const titles = (
+              JSON.parse(messages[1].content) as { titles: unknown[][] }
+            ).titles;
+            requests.push(titles);
+            return Promise.resolve({
+              content: JSON.stringify({
+                keep:
+                  requests.length === 1
+                    ? [
+                        { index: 2, verdict: 1 },
+                        ...middle,
+                        { index: 0, verdict: 1 },
+                      ]
+                    : [{ index: 0, verdict: 0 }],
+              }),
+            });
+          },
+        ),
+      },
+    });
+    expect(requests.map((rows) => rows.length)).toEqual([3, 1]);
+    expect(JSON.stringify(requests[1])).toContain("dental nurse");
+    expect(result.related.map((row) => row.title)).toEqual([
+      "Research Assistant",
+      "Data Quality Assistant",
+    ]);
+    expect(result.seen).toHaveLength(1);
+    expect(result.failed).toEqual([]);
+  },
+);
 
 test("B2 title cache distinguishes actual duties and preserves evidence beyond a short byline", async () => {
   const decisions = new Map<string, boolean>();
