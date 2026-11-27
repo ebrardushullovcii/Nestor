@@ -21,6 +21,10 @@ import { ProfileSetupPathCard } from "./profile-setup-screen-sections";
 import { ProfileSetupExtrasStep } from "./profile-setup-step-sections-extra";
 import { ProfileSetupTargetingStep } from "./profile-setup-step-sections";
 
+// Its own test covers it against a real store.
+vi.mock("./setup-agent-permissions", () => ({
+  SetupAgentPermissions: () => null,
+}));
 vi.mock("@renderer/features/job-lists/setup-sites", () => ({
   SetupSites: () => null,
 }));

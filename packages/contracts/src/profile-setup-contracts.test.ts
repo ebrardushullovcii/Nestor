@@ -1220,13 +1220,29 @@ describe("contracts profile setup schemas", () => {
       createdAt: "2026-09-23T10:00:00.000Z",
     });
 
-    // Basics is complete; Job targets owns the source and the eligibility
-    // answers, so that is where the import lands.
+    // A fresh import lands on the first step it filled that the person has
+    // not reviewed (Basics, then Work history), not past them on Job targets.
     expect(
       getProfileSetupLandingStep(readiness, [
         optionalProofPoint,
         recommendedSummary,
       ]),
+    ).toBe("essentials");
+    expect(
+      getProfileSetupLandingStep(
+        readiness,
+        [optionalProofPoint, recommendedSummary],
+        ["essentials"],
+      ),
+    ).toBe("background");
+    // Both reviewed and Basics complete: Job targets owns the source and the
+    // eligibility answers, so that is where it lands.
+    expect(
+      getProfileSetupLandingStep(
+        readiness,
+        [optionalProofPoint, recommendedSummary],
+        ["essentials", "background"],
+      ),
     ).toBe("targeting");
 
     // A critical item on an earlier step still wins.
@@ -1249,6 +1265,7 @@ describe("contracts profile setup schemas", () => {
           1,
         ),
         [optionalProofPoint],
+        ["essentials", "background"],
       ),
     ).toBe("targeting");
 

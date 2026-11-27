@@ -2657,9 +2657,15 @@ export class EmbeddedBrowser {
     else if (command.type === "close_finished_tabs") this.closeFinishedTabs();
     else if (command.type === "new_tab") this.openPersonTab("about:blank");
     else if (command.type === "close_tab") {
+      // The closed page leaves pageMap only when Electron destroys it, after
+      // this returns; decide from the other tabs, so closing the last one
+      // hides the panel instead of leaving the empty browser over the app.
+      const othersOpen = [...this.pageMap.values()].some(
+        (page) => page.id !== command.tabId && !page.contents.isDestroyed(),
+      );
       this.takeTabByPerson(command.tabId, false, true);
       this.closePage(command.tabId);
-      if (this.pageMap.size === 0) await this.close(false);
+      if (!othersOpen) await this.close(false);
     } else {
       if (this.activeTabId) this.takeTabByPerson(this.activeTabId, false);
       const page = this.activeTabId
@@ -2739,15 +2745,6 @@ export class EmbeddedBrowser {
     if (action.type === "take_tab") this.takeTab(tabId, action.operationIds);
     else if (holdEvenIfIdle && !this.parkedTabs.has(tabId))
       this.takeTab(tabId, []);
-  }
-
-  /**
-   * Stops everything the browser runs (importing sign-ins from another
-   * browser). Background work waits until the person's next deliberate
-   * start or Resume.
-   */
-  takeControl(): Promise<void> {
-    return this.stopEverythingForClose();
   }
 
   /** Close from the browser menu: everything the browser runs stops. */

@@ -598,7 +598,13 @@ export function createOpenAiCompatibleResumeVisionProvider(
                         "githubUrl",
                         "personalWebsiteUrl",
                       ],
-                      location: ["currentLocation"],
+                      location: ["currentLocation", "timeZone"],
+                      // Stated availability: "no notice period" is 0 days;
+                      // "Available now" is the start date as written.
+                      work_eligibility: [
+                        "noticePeriodDays (number of days)",
+                        "availableStartDate (as written, e.g. Available now)",
+                      ],
                       experience: {
                         key: "record",
                         valueShape:

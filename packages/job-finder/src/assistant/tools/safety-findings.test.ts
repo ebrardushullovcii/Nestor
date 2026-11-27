@@ -709,6 +709,24 @@ it("browser permissions start off and save one at a time without touching other 
 
 it("the sidebar exposes permission changes and describes the current saved choices", async () => {
   const ctx = world();
+  // A new profile starts with full access; the sidebar can turn each off.
+  const fresh = await ctx.ports.readPersonalState();
+  expect(buildProfileDigest(fresh)).toContain(
+    "website sign-in ON; Google sign-in/sign-up ON; CAPTCHA ON; account creation ON",
+  );
+  await updateAiBehaviorTool.execute(
+    updateAiBehaviorTool.input.parse({
+      aiBehavior: {
+        browserPermissions: {
+          signIn: false,
+          googleSignIn: false,
+          solveCaptchas: false,
+          createAccounts: false,
+        },
+      },
+    }),
+    ctx,
+  );
   const before = await ctx.ports.readPersonalState();
   expect(buildProfileDigest(before)).toContain(
     "website sign-in OFF; Google sign-in/sign-up OFF; CAPTCHA OFF; account creation OFF",

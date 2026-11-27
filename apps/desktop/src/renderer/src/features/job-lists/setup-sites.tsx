@@ -47,7 +47,8 @@ export function SetupSites(props: {
             onChange={(event) => setText(event.target.value)}
           />
           <p className="text-sm text-foreground-muted">
-            {list.enabledTotal} sources turned on
+            {list.enabledTotal} {list.enabledTotal === 1 ? "source" : "sources"}{" "}
+            turned on
           </p>
           <ul className="grid list-none gap-2 p-0">
             {list.rows.map((site) => (

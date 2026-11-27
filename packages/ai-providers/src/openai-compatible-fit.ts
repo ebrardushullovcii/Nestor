@@ -180,7 +180,8 @@ function plainEligibility(profile: CandidateProfile) {
   const yesNo = (value: boolean | null) =>
     value === null ? "Not known" : value ? "Yes" : "No";
   return {
-    "Countries where you can work": facts.authorizedWorkCountries,
+    "Countries where the person is legally allowed to work (citizenship, residence, visa or permit)":
+      facts.authorizedWorkCountries,
     "Limited work permissions": (facts.limitedWorkPermissions ?? []).map(
       (permit) => ({
         Country: permit.country,
@@ -192,7 +193,9 @@ function plainEligibility(profile: CandidateProfile) {
     "Willing to relocate": yesNo(facts.willingToRelocate),
     "Preferred places to relocate": facts.preferredRelocationRegions,
     "Willing to travel": yesNo(facts.willingToTravel),
-    "Can work remotely": yesNo(facts.remoteEligible),
+    "Legally allowed to work remotely from where they live": yesNo(
+      facts.remoteEligible,
+    ),
     "Notice period in days": facts.noticePeriodDays,
     "Available start date": facts.availableStartDate,
     "Security clearance": facts.securityClearance,

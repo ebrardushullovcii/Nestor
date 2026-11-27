@@ -277,7 +277,7 @@ describe("batch fit judging", () => {
       jobs: [],
     });
     expect(payload.person.workEligibility).toMatchObject({
-      "Countries where you can work":
+      "Countries where the person is legally allowed to work (citizenship, residence, visa or permit)":
         profile.workEligibility.authorizedWorkCountries,
       "Need visa sponsorship":
         profile.workEligibility.requiresVisaSponsorship === null
@@ -486,7 +486,7 @@ test("bounds twenty-job batch evidence while keeping eligibility facts", () => {
   expect(payload.person.projects).toHaveLength(8);
   expect(payload.person.proofBank).toHaveLength(8);
   expect(payload.person.workEligibility).toMatchObject({
-    "Countries where you can work":
+    "Countries where the person is legally allowed to work (citizenship, residence, visa or permit)":
       profile.workEligibility.authorizedWorkCountries,
     "Need visa sponsorship":
       profile.workEligibility.requiresVisaSponsorship === null

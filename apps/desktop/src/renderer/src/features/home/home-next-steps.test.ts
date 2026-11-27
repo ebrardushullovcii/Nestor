@@ -1,6 +1,7 @@
 import {
   trackerFilterStatusValues,
   type HomeSummary,
+  type JobSearchStatus,
   type TrackerFilterStatus,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
@@ -108,5 +109,58 @@ describe("what Apply is doing", () => {
         applyWaiting: { needsYou: 0, ready: 1 },
       }),
     ).toBe("Apply is working on 1 application · 1 ready to send.");
+  });
+});
+
+describe("Home's next steps while the AI or a search is stopped", () => {
+  const parkedSearch = (parked: JobSearchStatus["parked"]) => ({
+    search: { state: "running" } as never,
+    parked,
+  });
+
+  it("says a search paused on Nestor's own error, with what happens next", () => {
+    const steps = nextSteps(summary(0), "completed", {
+      search: parkedSearch({
+        owner: "nestor",
+        requestRejected: true,
+        message: "Nestor sent an invalid request to the AI provider.",
+        providerMessage: null,
+      }),
+    });
+    expect(steps.map((step) => step.text)).toEqual([
+      "Your search is paused: Nestor sent an invalid AI request",
+    ]);
+    expect(steps[0]!.detail).toMatch(/Nestor's error.*restarts.*Try again/);
+    expect(steps[0]!.to).toBe("/job-finder/discovery");
+  });
+
+  it("puts the AI account step first and does not repeat it as a paused search", () => {
+    const steps = nextSteps(summary(2), "completed", {
+      aiAccount: [
+        {
+          id: "funding:1",
+          owner: "person",
+          reason: "funding",
+          provider: "https://api.example.test",
+          providerMessage: null,
+          actionUrl: null,
+        } as never,
+      ],
+      search: parkedSearch({
+        owner: "person",
+        message: "Your AI account refused.",
+        providerMessage: null,
+      }),
+    });
+    expect(steps.map((step) => step.id)).toEqual(["ai-account", "review"]);
+    expect(steps[0]!.text).toBe("Top up your AI account");
+  });
+
+  it("says nothing about a search that is running normally", () => {
+    expect(
+      nextSteps(summary(0), "completed", {
+        search: { search: { state: "running" } as never, parked: null },
+      }),
+    ).toEqual([]);
   });
 });

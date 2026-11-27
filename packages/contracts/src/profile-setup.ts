@@ -268,22 +268,31 @@ export function getProfileSetupReadinessBlockers(
   return blockers;
 }
 
+/** The steps an import fills that the stepper marks "Ready to review". */
+const IMPORTED_REVIEW_STEPS = ["essentials", "background"] as const;
+
 /**
  * The first guided-setup step that still needs the person: the step of the
- * earliest canonical blocker or critical review item. When nothing blocks,
+ * earliest canonical blocker or critical review item, or, after a resume
+ * import, the first step it filled that the person has not reviewed yet
+ * (Basics, then Work history). Landing on Job targets there skipped what
+ * the import wrote while it was still being read. When nothing is left,
  * Job targets, which owns Finish. Optional and recommended suggestions never
- * choose the step, so an import lands where there is something to do rather
- * than on a step whose only content is an optional hint.
+ * choose the step on their own.
  */
 export function getProfileSetupLandingStep(
   readiness: Parameters<typeof getProfileSetupReadinessBlockers>[0] &
     Pick<ProfileSetupReadiness, "hasResumeText">,
   reviewItems: readonly ProfileReviewItem[],
+  reviewedSteps: readonly string[] = [],
 ): ProfileSetupVisibleStep {
   if (!readiness.hasResumeText && !readiness.hasCoreIdentity) {
     return "import";
   }
   const candidateSteps = [
+    ...(readiness.hasResumeText
+      ? IMPORTED_REVIEW_STEPS.filter((step) => !reviewedSteps.includes(step))
+      : []),
     ...getProfileSetupReadinessBlockers(readiness).map((blocker) =>
       normalizeProfileSetupStep(blocker.step),
     ),
@@ -653,7 +662,14 @@ export function deriveProfileSetupState(
           : // An optional suggestion (a proof point on Extras, a summary to
             // confirm on Basics) used to choose this step, so a fresh import
             // landed where there was nothing to do.
-            getProfileSetupLandingStep(readiness, pendingReviewItems);
+            // A setup finished before already had its imported steps read.
+            getProfileSetupLandingStep(
+              readiness,
+              pendingReviewItems,
+              currentState?.status === "completed"
+                ? IMPORTED_REVIEW_STEPS
+                : (currentState?.reviewedSteps ?? []),
+            );
 
   return ProfileSetupStateSchema.parse({
     status,

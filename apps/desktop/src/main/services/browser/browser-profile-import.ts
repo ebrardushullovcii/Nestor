@@ -957,6 +957,15 @@ export function readFirefoxCookies(file: string): CookiesSetDetails[] {
   }
 }
 
+/** google.com and its country and service hosts (accounts, mail, youtube). */
+export function isGoogleAccountHost(hostname: string): boolean {
+  const host = hostname.replace(/^\./u, "").toLowerCase();
+  return (
+    /(^|\.)google\.(?:com|[a-z]{2}|(?:co|com)\.[a-z]{2})$/u.test(host) ||
+    /(^|\.)youtube\.com$/u.test(host)
+  );
+}
+
 /**
  * Reads the chosen profile's cookies and writes them into the embedded
  * browser session. Cookie values never leave main and are never logged.
@@ -990,7 +999,9 @@ export async function importSignInsFromBrowser(
       source.note ??
         "Sign-ins from this browser cannot be read on this device.",
     );
-  await host.takeControl();
+  // Writing cookies does not touch the pages the agent works in, so the
+  // import leaves running searches and applications alone: nothing is
+  // stopped and there is no control to hand back afterwards.
   let cookies: CookiesSetDetails[] = [];
   let diagnostics: ImportDiagnostics | null = null;
   const snapshot = await snapshotDatabase(source.cookiesPath).catch(() => null);
@@ -1054,6 +1065,15 @@ export async function importSignInsFromBrowser(
   const skippedMessage = diagnostics
     ? `Found ${diagnostics.found} cookies. ${diagnostics.appBound} blocked by app-bound encryption; ${diagnostics.unsupportedEncryption} use unsupported encryption; ${diagnostics.decryptFailed} could not be decrypted; ${diagnostics.filtered} expired, partitioned or invalid.`
     : "";
+  // Google ties a sign-in to the browser it was made in, so its cookies come
+  // over but Gmail and "Sign in with Google" still ask again. Said plainly
+  // whenever the browser had Google cookies; the dialog offers the sign-in.
+  const hadGoogle = cookies.some((cookie) =>
+    isGoogleAccountHost(new URL(cookie.url).hostname),
+  );
+  const googleMessage = hadGoogle
+    ? "Your Google accounts do not come over: Google ties each sign-in to the browser it was made in. Sign in to Google here once and Nestor keeps it."
+    : "";
   if (!cookies.length)
     return result(
       "unsupported",
@@ -1089,7 +1109,15 @@ export async function importSignInsFromBrowser(
   return result(
     imported ? "imported" : "failed",
     imported
-      ? `${skippedMessage} Imported ${imported} cookies for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}; ${cookies.length - imported} rejected by Nestor's browser. Cookies do not guarantee a working sign-in. For any site still signed out, sign in here directly in Nestor once. Saved passwords are imported separately from Saved passwords.`
+      ? [
+          `Imported ${imported} cookies for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}.`,
+          googleMessage,
+          "Cookies do not guarantee a working sign-in. For any site still signed out, sign in here directly in Nestor once.",
+          skippedMessage,
+          `${cookies.length - imported} rejected by Nestor's browser. Saved passwords are imported separately from Saved passwords.`,
+        ]
+          .filter(Boolean)
+          .join(" ")
       : `${skippedMessage} No cookies could be imported from ${source.browserLabel}; ${cookies.length} rejected by Nestor's browser. Sign in here directly in Nestor instead.`,
     imported,
     sites.size,

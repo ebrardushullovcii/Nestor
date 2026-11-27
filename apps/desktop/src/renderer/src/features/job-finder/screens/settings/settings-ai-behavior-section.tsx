@@ -27,8 +27,9 @@ import { SettingsSectionSaveControl } from "./settings-section-save-control";
  * with the send choice it belongs to, and how picky a search is gets chosen
  * per search on Find jobs. The first two change what the model is told
  * and how it talks. The in-app browser group is the only one that widens
- * what the agent may do, and each of its switches is off until the person
- * turns it on. Sending an application stays the send choice under
+ * what the agent may do; a new profile starts with each of its switches on
+ * (Guided setup shows them too), and the person turns off any they want to
+ * do themselves. Sending an application stays the send choice under
  * Applying (ADR 0012, ADR 0022), and every stretched resume line still
  * needs their confirmation (ADR 0018).
  *
@@ -83,7 +84,7 @@ function ChoiceField(props: { label: string; children: ReactNode }) {
   );
 }
 
-const browserPermissionChoices: readonly {
+export const browserPermissionChoices: readonly {
   key: keyof BrowserAgentPermissions;
   label: string;
   description: string;
@@ -249,7 +250,7 @@ export function SettingsAiBehaviorSection({
       >
         <GroupHeading
           title="In-app browser"
-          description="What the agent may do by itself in the in-app browser, in searches, applications and any other browser work. Each is off until you turn it on. When one is off, or a step needs something only you have, it stops and asks you. Whether an application is sent stays your choice under Applying."
+          description="What the agent may do by itself in the in-app browser, in searches, applications and any other browser work. A new profile starts with all of them on; turn off any you would rather do yourself. When one is off, or a step needs something only you have, it stops and asks you. Whether an application is sent stays your choice under Applying."
         />
         <div className="grid min-w-0">
           {browserPermissionChoices.map((choice) => (

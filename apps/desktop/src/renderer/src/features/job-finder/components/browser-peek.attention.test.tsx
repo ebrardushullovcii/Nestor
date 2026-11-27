@@ -522,3 +522,93 @@ describe("BrowserPeek during a walk through sign-ins", () => {
     }
   });
 });
+
+it("names each import row by its browser and profile, and offers Google sign-in after an import", async () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const previous = window.nestor;
+  const state: DesktopBrowserState = {
+    ...staleAttentionState,
+    phase: "ready",
+    attention: null,
+    presentation: "peek",
+  };
+  const note =
+    "macOS asks once for Keychain access to read the saved sign-ins.";
+  const sources = ["Ebrar", "James"].map((profileLabel) => ({
+    id: `chrome-${profileLabel}`,
+    browser: "chrome" as const,
+    browserLabel: "Google Chrome",
+    profileLabel,
+    supported: true,
+    note,
+  }));
+  const command = vi.fn().mockResolvedValue(state);
+  const importFromBrowser = vi.fn().mockResolvedValue({
+    status: "imported",
+    cookieCount: 3,
+    siteCount: 2,
+    message:
+      "Imported 3 cookies for 2 sites from Google Chrome. Your Google accounts do not come over.",
+  });
+  Object.defineProperty(window, "nestor", {
+    configurable: true,
+    value: {
+      browser: {
+        getState: vi.fn().mockResolvedValue(state),
+        command,
+        setViewport: vi.fn().mockResolvedValue(undefined),
+        captureActivePage: vi.fn().mockResolvedValue({ dataUrl: null }),
+        listImportSources: vi.fn().mockResolvedValue({ sources, note: null }),
+        importFromBrowser,
+        siteIcons: {
+          get: vi.fn().mockResolvedValue({ icons: {} }),
+          onChanged: vi.fn().mockReturnValue(() => undefined),
+        },
+        onStateChanged: () => () => undefined,
+        onFocusAddress: () => () => undefined,
+      },
+    },
+  });
+  try {
+    render(<BrowserPeek />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Bring sign-ins from Google Chrome/,
+      }),
+    );
+    const row = await screen.findByRole("button", {
+      name: /Google Chrome\s*Ebrar/,
+    });
+    expect(
+      screen.getByRole("button", { name: /Google Chrome\s*James/ }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: note })).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    fireEvent.click(row);
+    await screen.findByText(/Your Google accounts do not come over/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign in to Google here" }),
+    );
+    await waitFor(() =>
+      expect(command).toHaveBeenCalledWith({
+        type: "navigate",
+        url: "https://accounts.google.com/",
+      }),
+    );
+    // A blank browser loads it in place; no extra tab.
+    expect(command).not.toHaveBeenCalledWith({ type: "new_tab" });
+  } finally {
+    cleanup();
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: previous,
+    });
+    vi.unstubAllGlobals();
+  }
+});

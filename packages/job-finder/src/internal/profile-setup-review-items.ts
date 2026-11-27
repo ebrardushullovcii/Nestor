@@ -75,6 +75,8 @@ function getCurrentTargetValue(
           return profile.workEligibility.remoteEligible;
         case "availableStartDate":
           return profile.workEligibility.availableStartDate;
+        case "noticePeriodDays":
+          return profile.workEligibility.noticePeriodDays;
         default:
           return null;
       }

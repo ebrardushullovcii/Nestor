@@ -363,7 +363,10 @@ export const AiBehaviorPreferenceSchema = z
     profileAssistant: AiProfileAssistantBehaviorSchema.default({}),
     jobSearch: AiJobSearchBehaviorSchema.default({}),
     applying: AiApplyingBehaviorSchema.default({}),
-    /** What the agent may do on its own in the in-app browser; all off. */
+    /**
+     * What the agent may do on its own in the in-app browser. A new profile
+     * stores all on; an absent value (an older workspace) reads as off.
+     */
     browserPermissions: BrowserAgentPermissionsSchema.default({}),
   })
   .strict();

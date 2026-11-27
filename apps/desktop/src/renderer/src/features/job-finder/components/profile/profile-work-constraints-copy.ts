@@ -7,9 +7,11 @@
  */
 export const PROFILE_WORK_CONSTRAINT_COPY = {
   authorizedWorkCountries: {
+    // R10: read as "where I would work from", so a remote preference became
+    // a claim of US and UK work authorization on applications.
     description:
-      "Where you have unrestricted permission to work. Save limited permits in Profile under Work eligibility.",
-    label: "Countries where you can work",
+      "Only where your citizenship, permanent residence, visa or permit lets you work without sponsorship. Not where you would like to work, and not remote work from home, which is asked separately. Save limited permits in Profile under Work eligibility.",
+    label: "Countries where you are legally allowed to work",
     placeholder: "Example: United States, Germany",
   },
   preferredRelocationRegions: {
@@ -22,8 +24,9 @@ export const PROFILE_WORK_CONSTRAINT_COPY = {
     label: "Would you need employer visa sponsorship?",
   },
   remoteEligible: {
-    description: "Whether you can, not whether you prefer it.",
-    label: "Can you legally work remotely?",
+    description:
+      "Whether the law lets you do a remote job from the country you live in, for an employer elsewhere. Not whether you prefer remote work.",
+    label: "Can you legally work remotely from where you live?",
   },
   willingToRelocate: {
     description: "Whether you would move for a role.",
