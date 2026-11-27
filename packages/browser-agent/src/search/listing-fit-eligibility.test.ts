@@ -347,11 +347,11 @@ test("different fit batches retain the exact context prefix and response schema"
   );
   expect(prefixes[0]).toBe(prefixes[1]);
   expect(Object.keys(JSON.parse(requests[0][0][1].content) as object)).toEqual([
-    "assessmentDate",
     "person",
     "goals",
     "countryOptionFallbacks",
     "request",
+    "assessmentDate",
     "listings",
   ]);
   expect(requests[0][0][1].content).not.toBe(requests[1][0][1].content);

@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
+import {
+  AgentTaskNonRetryableProviderError,
+  readAgentTaskState,
+} from "@nestor/agent-runtime";
 import {
   ResumeDraftSchema,
   ResumeImportFieldCandidateDraftSchema,
@@ -361,9 +364,7 @@ describe("tool-using AI capabilities", () => {
       chatWithTools(messages) {
         turn += 1;
         if (turn === 2) {
-          const payload = JSON.parse(
-            messages.find((message) => message.role === "user")!.content,
-          ) as {
+          const payload = readAgentTaskState(messages) as {
             languageFields: unknown;
             lastCheck: {
               renderedCleanly: boolean;
@@ -453,9 +454,9 @@ describe("tool-using AI capabilities", () => {
       chatWithTools(messages) {
         turn += 1;
         if (turn === 2) {
-          const payload = JSON.parse(
-            messages.find((message) => message.role === "user")!.content,
-          ) as { lastCheck: { validationIssues: Array<{ path: unknown }> } };
+          const payload = readAgentTaskState(messages) as {
+            lastCheck: { validationIssues: Array<{ path: unknown }> };
+          };
           repairPath = payload.lastCheck.validationIssues[0]?.path;
         }
         return Promise.resolve({
@@ -576,11 +577,7 @@ describe("tool-using AI capabilities", () => {
     const client: AgentCapableJobFinderAiClient = {
       ...createDeterministicJobFinderAiClient(),
       chatWithTools(messages) {
-        payloads.push(
-          JSON.parse(
-            messages.find((message) => message.role === "user")!.content,
-          ) as Record<string, unknown>,
-        );
+        payloads.push(readAgentTaskState(messages));
         return Promise.resolve({
           toolCalls: [
             composeCall("compose", {
@@ -893,11 +890,7 @@ describe("tool-using AI capabilities", () => {
       ...createDeterministicJobFinderAiClient(),
       chatWithTools(messages) {
         turn += 1;
-        payloads.push(
-          JSON.parse(
-            messages.find((message) => message.role === "user")!.content,
-          ) as Record<string, unknown>,
-        );
+        payloads.push(readAgentTaskState(messages));
         toolResults.push(
           ...messages
             .filter((message) => message.role === "tool")
@@ -1082,9 +1075,9 @@ describe("tool-using AI capabilities", () => {
         ...createDeterministicJobFinderAiClient(),
         chatWithTools(messages) {
           offeredTemplates = (
-            JSON.parse(
-              messages.find((message) => message.role === "user")!.content,
-            ) as { templateSelection: { availableTemplates: unknown } }
+            readAgentTaskState(messages) as {
+              templateSelection: { availableTemplates: unknown };
+            }
           ).templateSelection.availableTemplates;
           return Promise.resolve({
             toolCalls: [

@@ -48,6 +48,11 @@ import { readAtsListing } from "./ats-public-feed";
 import { buildListingFitPerson } from "./listing-fit-person";
 import { fitSchema, fitResponseSchema } from "./listing-fit-response";
 import { fitCountryCodes } from "./fit-country-codes";
+import {
+  splitLinksOnEveryPage,
+  textCoveredBy,
+  withoutRepeatedBlocks,
+} from "./prompt-material";
 
 export interface ListingEngineModel {
   client: LLMClient;
@@ -1006,6 +1011,52 @@ export async function readListings(
     jobs: FoundJob[] = [];
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
+  /**
+   * One request's pages. Navigation on every page is listed once, ahead of
+   * the listings, so consecutive requests for one site share it as a cached
+   * prefix; a body the page text already holds is not sent a second time.
+   */
+  const pageReadInput = (batch: readonly Read[]) => {
+    const pages = batch.map((read) => {
+      const pageText = withoutRepeatedBlocks(
+        read.page.visibleText ?? listingPageText(read.page.html),
+      );
+      const description = withoutRepeatedBlocks(read.body.text);
+      return {
+        pageText,
+        links: listingPageLinks(read.page.html, read.page.finalUrl),
+        ...(textCoveredBy(description, pageText) ? {} : { description }),
+      };
+    });
+    const links = splitLinksOnEveryPage(pages.map((page) => page.links));
+    return {
+      ...(links.shared.length ? { linksOnEveryPage: links.shared } : {}),
+      listings: batch.map((read, id) => ({
+        id,
+        title: read.card.title,
+        url: read.card.url,
+        finalUrl: read.page.finalUrl,
+        card: read.card.text,
+        pageText: pages[id].pageText,
+        links: links.own[id],
+        ...("description" in pages[id]
+          ? { description: pages[id].description }
+          : {}),
+        published: read.structured
+          ? {
+              title: read.structured.title,
+              company: read.structured.company,
+              location: read.structured.location,
+              workModeHints: read.structured.workModeHints,
+              employmentType: read.structured.employmentType,
+              salaryText: read.structured.salaryText,
+              validThrough: read.structured.validThrough,
+              directApplyUrl: read.structured.directApplyUrl,
+            }
+          : null,
+      })),
+    };
+  };
   const append = (read: Read, fields: Omit<Fields, "id">): void => {
     const { closed, isListing, index, canonicalUrl, applyUrl, ...facts } =
       fields;
@@ -1070,31 +1121,8 @@ export async function readListings(
   const readMetadata = async (batch: Read[]): Promise<void> => {
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete body; never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
-      {
-        listings: batch.map((read, id) => ({
-          id,
-          title: read.card.title,
-          url: read.card.url,
-          finalUrl: read.page.finalUrl,
-          card: read.card.text,
-          pageText: read.page.visibleText ?? listingPageText(read.page.html),
-          links: listingPageLinks(read.page.html, read.page.finalUrl),
-          description: read.body.text,
-          published: read.structured
-            ? {
-                title: read.structured.title,
-                company: read.structured.company,
-                location: read.structured.location,
-                workModeHints: read.structured.workModeHints,
-                employmentType: read.structured.employmentType,
-                salaryText: read.structured.salaryText,
-                validThrough: read.structured.validThrough,
-                directApplyUrl: read.structured.directApplyUrl,
-              }
-            : null,
-        })),
-      },
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
+      pageReadInput(batch),
       z.object({ jobs: z.array(z.unknown()) }),
       Math.max(2000, batch.length * 220),
       "page_read",
@@ -1228,9 +1256,8 @@ export async function fitJobs(
   const { profile } = input;
   const person = buildListingFitPerson(profile);
   // Keep candidate evidence ahead of batch-specific text, including retries.
+  // The date follows the person's facts so a new day keeps their cached prefix.
   const context = {
-    assessmentDate:
-      input.assessmentDate ?? new Date().toISOString().slice(0, 10),
     person: compactFacts(person),
     goals: input.goals,
     ...(input.countryOptionFallbacks?.length
@@ -1238,6 +1265,8 @@ export async function fitJobs(
       : {}),
     ...(input.savedAnswers?.length ? { savedAnswers: input.savedAnswers } : {}),
     request: input.request,
+    assessmentDate:
+      input.assessmentDate ?? new Date().toISOString().slice(0, 10),
   };
   const output: JobFitUpdate[] = [];
   const repairIssues = new Map<number, string[]>();
@@ -1267,11 +1296,11 @@ export async function fitJobs(
           employmentType: job.employmentType,
           salaryText: job.salaryText,
           seniority: job.seniority,
-          description: job.description,
+          description: withoutRepeatedBlocks(job.description),
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing's description is its complete unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : " The person counts remote jobs as any location: a remote role they can work from where they live matches their preferred places. This setting is about their preferences only; it never removes a listing's residency or hiring-region rule."} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
+          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing's description is its complete unabridged text; a block the page repeated verbatim appears once. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : " The person counts remote jobs as any location: a remote role they can work from where they live matches their preferred places. This setting is about their preferences only; it never removes a listing's residency or hiring-region rule."} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
           {
             ...context,
             listings,

@@ -304,6 +304,73 @@ function reportUnadvertisedBounds(
   }
 }
 
+const TASK_STATE_INSTRUCTION =
+  "Use the available tools to update the task draft. Validate it, repair any reported issues, then call finish_task. The typed task state is authoritative; chat history is not. This message holds the task state as the task began; once it changes, a later message ends with a taskStateUpdate whose keys replace the same keys here, and removedTaskStateKeys names keys that no longer apply.";
+
+const TASK_STATE_UPDATE_LEAD =
+  "Current task state, replacing the same keys in the first message: ";
+
+/**
+ * The task state a request shows the model: its opening task message with
+ * the keys of the update a later message carries. For readers of recorded
+ * or captured requests; the runtime itself never parses its own messages.
+ */
+export function readAgentTaskState(
+  messages: ReadonlyArray<{ role: string; content: string }>,
+): Record<string, unknown> {
+  const opening = JSON.parse(
+    messages.find((message) => message.role === "user")?.content ?? "{}",
+  ) as Record<string, unknown>;
+  const carrier = messages.findLast((message) =>
+    message.content.includes(TASK_STATE_UPDATE_LEAD),
+  );
+  if (!carrier) return opening;
+  const update = JSON.parse(
+    carrier.content.slice(
+      carrier.content.lastIndexOf(TASK_STATE_UPDATE_LEAD) +
+        TASK_STATE_UPDATE_LEAD.length,
+    ),
+  ) as {
+    taskStateUpdate: Record<string, unknown>;
+    removedTaskStateKeys?: string[];
+  };
+  const state = { ...opening, ...update.taskStateUpdate };
+  for (const key of update.removedTaskStateKeys ?? []) delete state[key];
+  return state;
+}
+
+/**
+ * The result a tool message carries, without the task-state update the
+ * runtime may have appended after it.
+ */
+export function agentToolResultText(content: string): string {
+  const at = content.lastIndexOf(`\n\n${TASK_STATE_UPDATE_LEAD}`);
+  return at < 0 ? content : content.slice(0, at);
+}
+
+/**
+ * The task-state keys whose values differ from the opening message, as the
+ * text that follows the newest message, or null when nothing changed.
+ */
+function taskStateUpdate(
+  opening: Record<string, unknown>,
+  current: Record<string, unknown>,
+): string | null {
+  const changed = Object.fromEntries(
+    Object.entries(current).filter(
+      ([key, value]) =>
+        !(key in opening) ||
+        JSON.stringify(value) !== JSON.stringify(opening[key]),
+    ),
+  );
+  const removed = Object.keys(opening).filter((key) => !(key in current));
+  if (!Object.keys(changed).length && !removed.length) return null;
+  return `${TASK_STATE_UPDATE_LEAD}${JSON.stringify({
+    taskStateUpdate: changed,
+    ...(removed.length ? { removedTaskStateKeys: removed } : {}),
+  })}`;
+}
+
 export async function runAgentTask<TState, TDraft>(
   options: AgentTaskRunOptions<TState, TDraft>,
 ): Promise<AgentTaskRunResult<TDraft>> {
@@ -319,6 +386,7 @@ export async function runAgentTask<TState, TDraft>(
   let stopReason: AgentTaskStopReason = "cancelled";
   const toolReceipts: AgentTaskExecutionReceipt["toolReceipts"][number][] = [];
   const recentMessages: AgentTaskMessage[] = [];
+  let openingPayload: Record<string, unknown> | undefined;
 
   const emitProgress = (phase: string, message: string) => {
     const progress = AgentTaskProgressSchema.parse({
@@ -358,26 +426,25 @@ export async function runAgentTask<TState, TDraft>(
       draft,
       validationIssues,
     });
-    const taskPayload =
+    const taskPayload: Record<string, unknown> =
       context && typeof context === "object" && !Array.isArray(context)
         ? {
             ...(context as Record<string, unknown>),
-            instruction:
-              "Use the available tools to update the task draft. Validate it, repair any reported issues, then call finish_task. The typed task state below is authoritative; chat history is not.",
+            instruction: TASK_STATE_INSTRUCTION,
           }
         : {
             task: context,
-            instruction:
-              "Use the available tools to update the task draft. Validate it, repair any reported issues, then call finish_task. The typed task state below is authoritative; chat history is not.",
+            instruction: TASK_STATE_INSTRUCTION,
           };
+    // The first task message stays byte-identical for the whole task, so
+    // every turn's request extends the previous one and the provider serves
+    // it from its prompt cache; the current values of keys that changed
+    // since then ride on the newest message instead.
+    openingPayload ??= taskPayload;
+    const stateUpdate = taskStateUpdate(openingPayload, taskPayload);
     const recentTail = recentMessages;
-    const messages: AgentTaskMessage[] = [
-      { role: "system", content: options.systemPrompt },
-      {
-        role: "user",
-        content: JSON.stringify(taskPayload),
-      },
-      ...(options.draftShownInContext
+    const renderedTail: AgentTaskMessage[] = (
+      options.draftShownInContext
         ? recentTail.map((message) =>
             message.role === "assistant" && message.toolCalls?.length
               ? {
@@ -397,7 +464,26 @@ export async function runAgentTask<TState, TDraft>(
                 }
               : message,
           )
-        : recentTail),
+        : recentTail
+    ).map((message, index, tail) =>
+      stateUpdate && index === tail.length - 1 && message.role !== "assistant"
+        ? { ...message, content: `${message.content}\n\n${stateUpdate}` }
+        : message,
+    );
+    // The model's own words never carry the update.
+    if (
+      stateUpdate &&
+      renderedTail.at(-1)?.role !== "tool" &&
+      renderedTail.at(-1)?.role !== "user"
+    )
+      renderedTail.push({ role: "user", content: stateUpdate });
+    const messages: AgentTaskMessage[] = [
+      { role: "system", content: options.systemPrompt },
+      {
+        role: "user",
+        content: JSON.stringify(openingPayload),
+      },
+      ...renderedTail,
     ];
 
     emitProgress("thinking", "Working on the next useful change");

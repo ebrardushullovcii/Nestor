@@ -84,10 +84,11 @@ test("structured search reads all visible frame facts in parts and recovers an i
           ],
         });
       const facts = JSON.parse(exact) as {
-        listings: { pageText: string; description: string }[];
+        listings: { pageText: string; description?: string }[];
       };
       expect(facts.listings[0].pageText).toBe(visibleText);
-      expect(facts.listings[0].description).toBe(visibleText);
+      // The body is this page text; it is sent once.
+      expect(facts.listings[0]).not.toHaveProperty("description");
       expect(exact).not.toContain("HIDDEN_SOURCE");
       return Promise.resolve({
         content: JSON.stringify({
@@ -1987,4 +1988,63 @@ test("hidden promotional markup is not a vacancy card, and unlinked published va
   expect(result.notes.join(" ")).toContain(
     "2 published vacancies at https://board.example/ have no address of their own",
   );
+});
+
+test("a page read lists navigation on every page once, ahead of the listings, and sends a body the page text already holds once", async () => {
+  const nav = '<a href="/jobs">All jobs</a><a href="/about">About</a>';
+  const html = (title: string, extra: string) =>
+    `<body>${nav}<main><h1>${title}</h1><p>Build the synthetic order service for venues.</p>${extra}</main></body>`;
+  const pages: Record<string, string> = {
+    "https://board.example/one": html("One", '<a href="/apply/one">Apply</a>'),
+    "https://board.example/two": html("Two", '<a href="/apply/two">Apply</a>'),
+  };
+  const requests: Parameters<LLMClient["chatWithTools"]>[0][] = [];
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      requests.push(messages);
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: [0, 1].map((id) => ({
+            id,
+            title: id ? "Two" : "One",
+            company: "Real Employer",
+            location: "Berlin",
+            workModes: [],
+            sourceJobId: null,
+            employmentType: null,
+            seniority: null,
+            salaryText: null,
+            closed: false,
+          })),
+        }),
+      });
+    },
+  };
+  await readListings({
+    client,
+    cards: [card("One", "one"), card("Two", "two")],
+    readPage: (url) => Promise.resolve({ finalUrl: url, html: pages[url] }),
+  });
+  expect(requests).toHaveLength(1);
+  const input = JSON.parse(requests[0][1].content) as {
+    linksOnEveryPage: { label: string; url: string }[];
+    listings: {
+      links: { label: string; url: string }[];
+      pageText: string;
+      description?: string;
+    }[];
+  };
+  expect(Object.keys(input)).toEqual(["linksOnEveryPage", "listings"]);
+  expect(input.linksOnEveryPage.map((link) => link.label)).toEqual([
+    "All jobs",
+    "About",
+  ]);
+  expect(input.listings.map((listing) => listing.links)).toEqual([
+    [{ label: "Apply", url: "https://board.example/apply/one" }],
+    [{ label: "Apply", url: "https://board.example/apply/two" }],
+  ]);
+  for (const listing of input.listings) {
+    expect(listing.pageText).toContain("synthetic order service");
+    expect(listing).not.toHaveProperty("description");
+  }
 });
