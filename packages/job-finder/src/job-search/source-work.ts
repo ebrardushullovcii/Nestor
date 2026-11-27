@@ -1,4 +1,8 @@
-import type { JobDiscoveryTarget, JobSearchSourceRow } from "@nestor/contracts";
+import type {
+  JobDiscoveryTarget,
+  JobSearchSettings,
+  JobSearchSourceRow,
+} from "@nestor/contracts";
 
 export interface SourceWork {
   target: JobDiscoveryTarget;
@@ -6,6 +10,8 @@ export interface SourceWork {
   full: boolean;
   row: JobSearchSourceRow;
   urls: Set<string>;
+  /** Index page addresses this run has read on the site, requested and landed. */
+  indexPages: Set<string>;
   processed: number;
   /** Listings the site answered as removed; recorded closed, never read. */
   removed: number;
@@ -17,6 +23,14 @@ export interface SourceWork {
   readFailures: string[];
   completeAccess?: () => void;
 }
+/** Keep reading reads the whole site, as a Thorough search does. */
+export function sourceSettings(
+  settings: JobSearchSettings,
+  source: SourceWork,
+): JobSearchSettings {
+  return source.full ? { ...settings, depth: "thorough" } : settings;
+}
+
 /** A site's outcome is settled: later work on it must not mark it searching or done. */
 export function settledState(state: JobSearchSourceRow["state"]): boolean {
   return (
@@ -35,6 +49,7 @@ export function sourceWork(
     target,
     full,
     urls: new Set(),
+    indexPages: new Set(),
     processed: 0,
     removed: 0,
     screened: 0,

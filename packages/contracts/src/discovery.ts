@@ -94,6 +94,8 @@ export const JobFinderSearchRequestSchema = z.object({
   intent: z.string().trim().max(1_000).default(""),
   /** A run-scoped override of the saved search selectivity. */
   breadth: z.enum(["best_only", "wide"]).optional(),
+  /** The person's search depth: thorough reads every listing on each site. */
+  depth: z.enum(["quick", "thorough"]).optional(),
   freshness: z.enum(["any", "recent"]).default("any"),
   sourceIds: z
     .union([z.literal("all"), z.array(NonEmptyStringSchema).min(1).max(1_000)])

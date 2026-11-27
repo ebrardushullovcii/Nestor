@@ -5,7 +5,7 @@ import type {
   SourceInventory,
 } from "@nestor/contracts";
 import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
-import { settledState, type SourceWork } from "./source-work";
+import { settledState, sourceSettings, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 import { concurrency } from "./async";
@@ -341,8 +341,10 @@ export function createSearchPipeline(input: {
         target: { ...source.target, startingUrl: url },
         lane,
         context,
-        settings,
+        settings: sourceSettings(settings, source),
         signal: laneSignal,
+        indexPages: source.indexPages,
+        skipReadIndexPages: true,
         knownUrls: (urls) => deps.store.findKnownUrls(urls),
         onCards: (cards) => accept(source, cards),
         message: () => {},
@@ -373,7 +375,7 @@ export function createSearchPipeline(input: {
     input.settled(source);
   };
   const accept = async (source: SourceWork, cards: readonly ListingCard[]) => {
-    const quick = settings.depth === "quick" && !source.full;
+    const quick = sourceSettings(settings, source).depth === "quick";
     const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
     for (let offset = 0; offset < cards.length; offset += chunk) {
       const fresh: ListingCard[] = [];

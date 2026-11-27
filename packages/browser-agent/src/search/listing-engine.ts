@@ -265,6 +265,10 @@ async function collectSourceObserved(
     /** Opt-in permits the browser agent to attempt a sign-in or verification wall. */
     browserAccessAuthorized?: boolean;
     lane?: "http" | "browser";
+    /** Index page addresses this search has read on the site; pages read here are added. */
+    indexPages?: Set<string>;
+    /** Pages in indexPages are not read again: their cards are already collected. */
+    skipReadIndexPages?: boolean;
   },
 ): Promise<SourceInventory> {
   try {
@@ -281,13 +285,21 @@ async function collectSourceObserved(
   let complete = true,
     recognized = false,
     emptyConfirmed = false,
-    needsAccess = false;
+    needsAccess = false,
+    alreadyRead = 0;
+  const readEarlier = (url: string) =>
+    input.skipReadIndexPages === true && input.indexPages?.has(url) === true;
   while (queue.length) {
     input.signal?.throwIfAborted();
     const urls = queue.splice(0, 4).filter((url) => !visited.has(url));
     urls.forEach((url) => visited.add(url));
     await mapConcurrent(urls, 2, async (url) => {
       try {
+        if (readEarlier(url)) {
+          recognized = true;
+          alreadyRead++;
+          return;
+        }
         if (url !== input.source.url && input.lane !== "browser") {
           const feed = await collectPublicFeed({
             ...input,
@@ -308,6 +320,15 @@ async function collectSourceObserved(
           notes.push("Sign-in or verification is required.");
           return;
         }
+        // A listing that redirects to an index this search already read
+        // adds nothing: that index's cards are already collected.
+        if (readEarlier(page.finalUrl)) {
+          recognized = true;
+          alreadyRead++;
+          return;
+        }
+        input.indexPages?.add(url);
+        input.indexPages?.add(page.finalUrl);
         const parsed = readInventoryHtml(
           page.html,
           page.finalUrl,
@@ -437,9 +458,12 @@ async function collectSourceObserved(
       ...(fallback.needsYou ? { needsYou: true } : {}),
     };
   }
-  const covered = complete && recognized && (cards.size > 0 || emptyConfirmed);
+  const covered =
+    complete &&
+    recognized &&
+    (cards.size > 0 || emptyConfirmed || alreadyRead > 0);
   notes.push(
-    `${cards.size} listings collected; ${visited.size} page ${visited.size === 1 ? "address" : "addresses"} attempted; ${covered ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected; ${visited.size} page ${visited.size === 1 ? "address" : "addresses"} attempted${alreadyRead ? `, ${alreadyRead} of them already read earlier in this search` : ""}; ${covered ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],

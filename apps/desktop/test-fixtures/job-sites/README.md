@@ -24,6 +24,8 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/upload-recovery/` lists seven synthetic upload forms. `chooser` needs its own chooser click; `drop` needs a drop; `slow` empties the input and takes ten seconds to upload and parse; `transient` refuses the first request with 503; `stale` starts with the previous attempt's failure text; `refused` always returns 503; `vanished` clears the input without confirming anything. Forms live at `/upload-recovery/<shape>/apply/<id>`; each id has its own retry count. These forms refuse final submissions. Upload diagnostics retain HTTP status and host/path, excluding the synthetic query signature.
 
+`http://127.0.0.1:47950/longboard/` is a long board for reading a whole inventory: the landing page is a search form with no cards, `/longboard/jobs` has 60 jobs on six pages with a Next link, and signing in (any made-up email and password) adds 20 members-only jobs on two more pages. Members-only postings answer 401 until then.
+
 `http://127.0.0.1:47950/atlas/` has 300 jobs and exercises page numbers, query filters, sorting, duplicate jobs, sponsored cards and discovery decoys.
 
 `http://127.0.0.1:47950/ripple/` has 300 jobs and exercises load more, query filters, duplicate jobs, initials-only companies and a local ATS redirect.

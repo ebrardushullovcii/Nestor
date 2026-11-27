@@ -539,6 +539,36 @@ const extractor: JobExtractor = {
   ),
 };
 
+test("the browser inventory is told the search depth, and Thorough means the whole board", () => {
+  const prompt = (depth?: "quick" | "thorough") =>
+    createJobSearchPrompts(
+      config({
+        inventoryOnly: true,
+        promptContext: {
+          siteLabel: "Replica",
+          searchRequest: {
+            intent: "",
+            breadth: "wide",
+            freshness: "any",
+            sourceIds: ["replica"],
+            ...(depth ? { depth } : {}),
+          },
+        },
+      }),
+    ).system;
+  const thorough = prompt("thorough");
+  expect(thorough).toContain("Search depth: Thorough.");
+  expect(thorough).toContain("until the list ends");
+  expect(thorough).toContain("When signing in shows more listings");
+  expect(thorough).not.toContain("rather than walking every location portal");
+  for (const system of [thorough, prompt("quick"), prompt()]) {
+    expect(system).toContain("Nothing reads remainingWork later");
+    expect(system).not.toContain("does not mean the source was exhausted");
+  }
+  expect(prompt("quick")).toContain("Search depth: Quick.");
+  expect(prompt()).toContain("Search depth: Quick.");
+});
+
 test("browser inventory fallback collects cards without premature detail reads or fit preferences", async () => {
   const card = posting("Senior Data Analyst", "Northwind", "inventory");
   const inventory = config({ inventoryOnly: true });
