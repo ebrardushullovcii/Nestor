@@ -1,6 +1,7 @@
 import {
   CandidateProfileSchema,
   CandidateReusableAnswerSchema,
+  type CandidateApplicationHistory,
 } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import {
@@ -94,11 +95,8 @@ function dereference(facts: Record<string, unknown>, row: CatalogRow): unknown {
     }, facts);
 }
 
-function messageData(message: string): Record<string, unknown> {
-  return JSON.parse(message.slice(message.indexOf("\n") + 1)) as Record<
-    string,
-    unknown
-  >;
+function messageData<T = Record<string, unknown>>(message: string): T {
+  return JSON.parse(message.slice(message.indexOf("\n") + 1)) as T;
 }
 
 test("the smaller model catalog preserves every fact, source id and record relationship", () => {
@@ -107,7 +105,15 @@ test("the smaller model catalog preserves every fact, source id and record relat
   const messages = applicationModelFactsMessages(input, true);
   const { storedFactCatalog, ...facts } = messageData(messages.owner);
   const catalog = storedFactCatalog as CatalogRow[];
-  expect({ ...facts, ...messageData(messages.job) }).toEqual(
+  const savedAnswers = messageData<
+    ReturnType<typeof applicationFacts>["savedAnswers"]
+  >(messages.savedAnswers!);
+  expect({
+    ...facts,
+    savedAnswers,
+    ...messageData(messages.job),
+    applicationHistory: {},
+  }).toEqual(
     JSON.parse(
       serializeApplicationData(applicationFacts(input, { payDisclosed: true })),
     ),
@@ -126,17 +132,91 @@ test("the smaller model catalog preserves every fact, source id and record relat
       id: row.id,
       value: dereference(facts, row),
     })),
-  ).toEqual(original.map((row) => ({ id: row.sourceId, value: row.value })));
-  expect(catalog.filter((row) => row.at).length).toBeGreaterThanOrEqual(
-    selected.length + 4,
+  ).toEqual(
+    original
+      .filter((row) => row.sourceKind !== "answer_library")
+      .map((row) => ({ id: row.sourceId, value: row.value })),
+  );
+  expect(
+    savedAnswers.map((entry) => ({
+      id: entry.storedFactId,
+      value: entry.answer,
+    })),
+  ).toEqual(
+    original
+      .filter((row) => row.sourceKind === "answer_library")
+      .map((row) => ({ id: row.sourceId, value: row.value })),
   );
   expect(
     catalog.find((row) => row.id === "profile.experiences.role-2.summary")?.at,
   ).toBe("/experiences/2/summary");
-  expect(catalog.find((row) => row.id === "answerLibrary.saved-2")?.at).toBe(
-    "/savedAnswers/2/answer",
-  );
   expect(JSON.stringify(input)).toBe(before);
+});
+
+test("new applications and saved answers preserve the complete history blocks", () => {
+  const input = sources();
+  const at = "2026-01-02T00:00:00Z";
+  const applications: CandidateApplicationHistory["applications"] = Array.from(
+    { length: 10 },
+    (_, index) => ({
+      source: "applications",
+      id: index + 1,
+      jobId: index + 20,
+      mode: "autonomous_submit",
+      title: "Engineer",
+      company: "Example Test Employer",
+      location: "Remote",
+      state: "running",
+      attempt: 1,
+      queuedAt: at,
+      updatedAt: at,
+      submittedAt: null,
+      error: null,
+      url: `https://example.test/jobs/${index}`,
+      applyUrl: null,
+      submissionOutcome: null,
+    }),
+  );
+  const active = applications[8];
+  const tracker: CandidateApplicationHistory["tracker"] = [
+    {
+      source: "tracker",
+      jobId: active.jobId,
+      title: active.title,
+      company: active.company,
+      status: "interview",
+      statusAt: at,
+      appliedAt: at,
+      events: [],
+    },
+  ];
+  const first = applicationModelFactsMessages(
+    {
+      ...input,
+      history: { applications: applications.slice(0, 9), tracker },
+    },
+    true,
+    "application_9",
+  );
+  const next = applicationModelFactsMessages(
+    {
+      ...input,
+      reusableAnswers: input.reusableAnswers.slice(1),
+      history: { applications, tracker },
+    },
+    true,
+    "application_10",
+  );
+  expect(next.owner).toBe(first.owner);
+  expect(next.historyCacheEnd).toBe(first.historyCacheEnd);
+  expect(first.history).toEqual([next.history[0]]);
+  expect(next.history[1]).toContain('"status":"interview"');
+  expect(messageData(first.job)).toMatchObject({
+    currentApplication: { id: 9, tracker: { status: "interview" } },
+  });
+  expect(messageData(next.job)).toMatchObject({
+    currentApplication: { id: 10 },
+  });
 });
 
 test("job facts and application answers do not change the reusable owner block", () => {
@@ -167,7 +247,6 @@ test("job facts and application answers do not change the reusable owner block",
     payDisclosure: false,
     savedAnswers: [
       {
-        id: localAnswer.id,
         answer: "In June",
         storedFactId: `answerLibrary.${localAnswer.id}`,
       },

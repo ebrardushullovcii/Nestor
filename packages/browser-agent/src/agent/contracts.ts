@@ -39,6 +39,8 @@ export interface LLMClient {
       oneShot?: boolean
       /** Repeating text in the first user block, or the last message opening for oneShot. */
       stableLead?: string
+      /** A later reusable block in the same conversation opening. */
+      stableLeadEnd?: string
     }
   ) => Promise<{
     content?: string

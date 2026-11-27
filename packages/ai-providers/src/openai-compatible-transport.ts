@@ -434,6 +434,8 @@ export function buildModelRequestBody(input: {
   oneShot?: boolean | undefined;
   /** Messages only: the final message's repeating opening text. */
   stableLead?: string | undefined;
+  /** Messages only: a later reusable text block in the conversation opening. */
+  stableLeadEnd?: string | undefined;
 }): Record<string, unknown> {
   if (input.apiMode === "messages") return buildMessagesRequestBody(input);
   // Complete every tool reply before attaching its images in a user message.

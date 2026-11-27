@@ -1,5 +1,8 @@
 import type { ApplicationRow } from "./applications";
-import type { SubmissionOutcomeRecord } from "./application-authority";
+import type {
+  SubmissionOutcomeEvidenceEntry,
+  SubmissionOutcomeRecord,
+} from "./application-authority";
 import type { TrackerEvent, TrackerStatus } from "./tracker";
 
 /** Recorded history, with its source; missing records do not establish absence. */
@@ -8,13 +11,16 @@ export interface CandidateApplicationHistory {
     source: "applications";
     url: string;
     applyUrl: string | null;
-    /** The send summary. Full page and network diagnostics stay on the receipt. */
+    /** Send facts for comparing postings. The full receipt is stored separately. */
     submissionOutcome:
-      | (Omit<SubmissionOutcomeRecord, "browserAction"> & {
-          browserAction?: Omit<
-            NonNullable<SubmissionOutcomeRecord["browserAction"]>,
-            "detail" | "requestsAfterClick"
-          >;
+      | (Pick<
+          SubmissionOutcomeRecord,
+          "outcome" | "attemptedAt" | "verifiedAt"
+        > & {
+          evidence: Pick<
+            SubmissionOutcomeEvidenceEntry,
+            "kind" | "observedAt" | "destination" | "summary"
+          >[];
         })
       | null;
   })[];

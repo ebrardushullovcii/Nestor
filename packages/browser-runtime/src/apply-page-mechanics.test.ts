@@ -543,6 +543,31 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("a widget response textarea is reported as hidden and its token stays on the page", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
+        <textarea aria-label="Cover letter">Hello</textarea>
+        <textarea name="g-recaptcha-response" style="position:absolute; left:-9999px">synthetic-token</textarea>
+      `);
+      const raw = await readRawApplyPage(page);
+      expect(raw.controls).toMatchObject([
+        { label: "Cover letter", visible: true, value: "Hello" },
+        {
+          name: "g-recaptcha-response",
+          label: "Site verification response",
+          visible: false,
+          value: "",
+        },
+      ]);
+      expect(
+        await page.locator('[name="g-recaptcha-response"]').inputValue(),
+      ).toBe("synthetic-token");
+    } finally {
+      await page.close();
+    }
+  });
+
   afterAll(async () => {
     await browser?.close();
   });

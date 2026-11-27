@@ -863,6 +863,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
             parallelToolCalls: options?.parallelToolCalls,
             ...(options?.oneShot ? { oneShot: true } : {}),
             ...(options?.stableLead ? { stableLead: options.stableLead } : {}),
+            ...(options?.stableLeadEnd
+              ? { stableLeadEnd: options.stableLeadEnd }
+              : {}),
           }),
           apiMode,
           totalTimeoutMs: timeoutMs,

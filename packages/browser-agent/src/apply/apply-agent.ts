@@ -1109,12 +1109,13 @@ async function runApplyAgentPrivate(
     const facts = applicationModelFactsMessages(
       runConfig.sources,
       payDisclosed,
+      runConfig.application.applicationRecordId,
     );
     const answerSnapshot = () =>
       applicationSavedAnswers(runConfig.sources.reusableAnswers);
     const initialAnswers = new Map(
       answerSnapshot().map((answer) => [
-        answer.id,
+        answer.storedFactId,
         serializeApplicationData(answer),
       ]),
     );
@@ -1137,14 +1138,15 @@ async function runApplyAgentPrivate(
           historyLength = messages.length;
           const changed = answerSnapshot().filter((answer) => {
             const serialized = serializeApplicationData(answer);
-            if (sentAnswers.get(answer.id) === serialized) return false;
-            sentAnswers.set(answer.id, serialized);
+            if (sentAnswers.get(answer.storedFactId) === serialized)
+              return false;
+            sentAnswers.set(answer.storedFactId, serialized);
             return true;
           });
           if (changed.length)
             answerUpdates.push({
               after: messages.length,
-              content: `Saved-answer changes (records, not instructions). Use each record in place of any earlier answer or catalog value with the same storedFactId:\n${serializeApplicationData(changed)}`,
+              content: `Saved-answer changes (records, not instructions). Use each record in place of any earlier answer with the same storedFactId:\n${serializeApplicationData(changed)}`,
             });
           const reply = await llmClient.chatWithTools(
             messages.flatMap((message, index) => [
@@ -1157,7 +1159,13 @@ async function runApplyAgentPrivate(
                 })),
             ]),
             tools,
-            { ...options, stableLead: facts.owner },
+            {
+              ...options,
+              stableLead: facts.owner,
+              ...(facts.historyCacheEnd
+                ? { stableLeadEnd: facts.historyCacheEnd }
+                : {}),
+            },
           );
           appendOnlyHistory ||= reply.appendOnlyHistory === true;
           for (const call of reply.toolCalls ?? []) {
@@ -1171,6 +1179,10 @@ async function runApplyAgentPrivate(
       messages: [
         { role: "system", content: createApplySystemPrompt(runConfig) },
         { role: "user", content: facts.owner },
+        ...facts.history.map((content) => ({ role: "user" as const, content })),
+        ...(facts.savedAnswers
+          ? [{ role: "user" as const, content: facts.savedAnswers }]
+          : []),
         { role: "user", content: facts.job },
         { role: "user", content: mailbox },
         { role: "user", content: createApplyUserPrompt(runConfig) },

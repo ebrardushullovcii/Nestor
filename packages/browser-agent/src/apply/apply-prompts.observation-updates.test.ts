@@ -14,6 +14,30 @@ const observation = () =>
     "2026-10-05T07:40:00.000Z",
   );
 
+test("a hidden site response is described without an editable type or value", () => {
+  const before = observation();
+  const after = structuredClone(before);
+  after.controls.push({
+    ...after.controls[0],
+    ref: "site_response",
+    kind: "long_text",
+    label: "Site verification response",
+    groupLabel: "",
+    required: false,
+    visible: false,
+    value: "synthetic-response",
+  });
+  for (const text of [
+    describeObservation(after),
+    describeObservationUpdate(after, before),
+  ]) {
+    expect(text).toContain(
+      "site_response [hidden] · Site verification response",
+    );
+    expect(text).not.toContain("synthetic-response");
+  }
+});
+
 test("a recorded local synthetic form sends only changed fields with its earlier facts retained", () => {
   const before = observation();
   const after = structuredClone(before);

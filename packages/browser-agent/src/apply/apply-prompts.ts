@@ -190,10 +190,12 @@ function describeControl(
     .filter((value) => value.length > 0)
     .join(" — ");
   const parts = [
-    `[${control.kind}]`,
+    `[${control.visible || control.kind === "file" ? control.kind : "hidden"}]`,
     question || control.placeholder || "(no label)",
     control.required ? "required" : "optional",
-    describeAnswered(control),
+    ...(control.visible || control.kind === "file"
+      ? [describeAnswered(control)]
+      : []),
   ];
   if (control.frame) parts.push(`frame: ${control.frame.origin}`);
   if (!asChoice && control.sectionPath?.length)
