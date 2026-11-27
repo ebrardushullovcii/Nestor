@@ -2429,12 +2429,10 @@ export const ApplyExecutionResultSchema = z.object({
     ApplicationApplyUsageTotalsSchema.nullable(),
     null,
   ),
+  // A form's own question and step text, kept whole: a long question is the
+  // site's, and a length limit here failed a sent application's record.
   questionContexts: optionalStoredField(
-    z
-      .array(
-        z.object({ prompt: z.string().max(2000), step: z.string().max(5000) }),
-      )
-      .max(2000),
+    z.array(z.object({ prompt: z.string(), step: z.string() })),
     [],
   ),
   answerDependencies: ApplicationAnswerDependenciesSchema.optional(),
