@@ -605,7 +605,8 @@ export interface ToolCall {
 
 /** Private model state retained only across turns on its originating route. */
 export interface ModelContinuation {
-  kind: "reasoning_content";
+  /** DeepSeek reasoning text, or Anthropic Messages content blocks as JSON. */
+  kind: "reasoning_content" | "message_content";
   route: string;
   text: string;
 }

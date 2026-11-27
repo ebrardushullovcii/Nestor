@@ -52,6 +52,7 @@ import {
   parseModelApiMode,
   parseModelReasoningEffort,
   resolveTaskReasoningEffortsFromEnvironment,
+  type ModelApiMode,
   type ModelReasoningEffort,
   type ModelReasoningTask,
 } from "./openai-compatible-transport";
@@ -111,7 +112,7 @@ const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
 function isStableFitRoute(route: {
   model: string;
   baseUrl: string;
-  apiMode: "responses" | "chat_completions";
+  apiMode: ModelApiMode;
 }): boolean {
   return (
     route.apiMode === "responses" &&
@@ -241,7 +242,8 @@ export function createOpenAiCompatibleJobFinderAiClient(
     baseUrl: validatedOptions?.baseUrl ?? null,
     modelContextWindowTokens: configuredOptions.success
       ? (validatedOptions?.contextWindowTokens ??
-        (validatedOptions?.model === "deepseek-v4.1-flash"
+        (validatedOptions?.model === "deepseek-v4.1-flash" ||
+        validatedOptions?.model === "claude-opus-5-5"
           ? 1_000_000
           : DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS))
       : null,
@@ -803,7 +805,8 @@ export function createOpenAiCompatibleJobFinderAiClient(
               : {}),
             ...(options?.jsonOutput ? { jsonOutput: true } : {}),
             ...(options?.jsonSchema &&
-            isStableFitRoute({ ...validatedOptions, apiMode })
+            (apiMode === "messages" ||
+              isStableFitRoute({ ...validatedOptions, apiMode }))
               ? { jsonSchema: options.jsonSchema }
               : {}),
             reasoningSummary: streamingEnabled,
@@ -822,6 +825,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
                   msg.continuation.route === continuationRoute &&
                   apiMode === "chat_completions"
                     ? { reasoning_content: msg.continuation.text }
+                    : {}),
+                  ...(msg.continuation?.kind === "message_content" &&
+                  msg.continuation.route === continuationRoute &&
+                  apiMode === "messages"
+                    ? {
+                        anthropic_content: parseMessageContinuation(
+                          msg.continuation.text,
+                        ),
+                      }
                     : {}),
                   ...(msg.toolCalls
                     ? {
@@ -882,6 +894,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
             text: message.reasoning_content,
           };
         }
+        if (message?.anthropic_content?.length) {
+          // Thinking blocks (with their signatures) go back unchanged on the
+          // next turn; the API reads them only in the conversation that made them.
+          result.continuation = {
+            kind: "message_content",
+            route: continuationRoute,
+            text: JSON.stringify(message.anthropic_content),
+          };
+        }
         if (choice?.finish_reason) {
           result.finishReason = choice.finish_reason;
         }
@@ -936,6 +957,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
       }
     },
   };
+}
+
+function parseMessageContinuation(text: string): unknown[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The agent's opening placeholder before it has worked; never an answer. */

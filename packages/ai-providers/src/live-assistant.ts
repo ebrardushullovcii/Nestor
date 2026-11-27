@@ -30,10 +30,46 @@ import {
   modelApiModes,
   modelReasoningEfforts,
   parseModelApiMode,
+  extractModelJsonFromPayload,
   parseModelJsonResponse,
   parseModelReasoningEffort,
+  type ModelApiMode,
 } from "./openai-compatible-transport";
 import { buildModelRequestHeaders } from "./model-request-identity";
+import { performModelRequest } from "./model-request-transport";
+
+/**
+ * One JSON request. Anthropic's Messages route goes through the shared
+ * transport (its SDK and SSE stream); the OpenAI-compatible routes keep
+ * their single fetch.
+ */
+async function postModelJson(input: {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+  apiMode: ModelApiMode;
+  signal: AbortSignal;
+  purpose: string;
+}): Promise<unknown> {
+  if (input.apiMode === "messages") {
+    const payload = await performModelRequest({
+      purpose: input.purpose,
+      url: input.url,
+      headers: input.headers,
+      body: input.body,
+      apiMode: input.apiMode,
+      signal: input.signal,
+    });
+    return extractModelJsonFromPayload(payload);
+  }
+  const response = await fetch(input.url, {
+    method: "POST",
+    signal: input.signal,
+    headers: input.headers,
+    body: JSON.stringify(input.body),
+  });
+  return parseModelJsonResponse(response, input.apiMode);
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -549,35 +585,30 @@ export function createOpenAiCompatibleInterviewCueCardProvider(
 
     try {
       const apiMode = validatedOptions.apiMode ?? "chat_completions";
-      const response = await fetch(
-        buildModelUrl(validatedOptions.baseUrl, apiMode),
-        {
-          method: "POST",
-          signal: controller.signal,
-          headers: buildModelRequestHeaders({
-            apiKey: validatedOptions.apiKey,
-            baseUrl: validatedOptions.baseUrl,
-            conversationKey: `interview:${input.sessionId}`,
-          }),
-          body: JSON.stringify(
-            buildModelRequestBody({
-              apiMode,
-              model: validatedOptions.model,
-              reasoningEffort: validatedOptions.reasoningEffort,
-              jsonOutput: true,
-              messages: [
-                { role: "system", content: buildCueCardPrompt() },
-                {
-                  role: "user",
-                  content: JSON.stringify(buildCueCardPayload(input)),
-                },
-              ],
-            }),
-          ),
-        },
-      );
-
-      return parseModelJsonResponse(response, apiMode);
+      return await postModelJson({
+        url: buildModelUrl(validatedOptions.baseUrl, apiMode),
+        signal: controller.signal,
+        headers: buildModelRequestHeaders({
+          apiKey: validatedOptions.apiKey,
+          baseUrl: validatedOptions.baseUrl,
+          conversationKey: `interview:${input.sessionId}`,
+        }),
+        body: buildModelRequestBody({
+          apiMode,
+          model: validatedOptions.model,
+          reasoningEffort: validatedOptions.reasoningEffort,
+          jsonOutput: true,
+          messages: [
+            { role: "system", content: buildCueCardPrompt() },
+            {
+              role: "user",
+              content: JSON.stringify(buildCueCardPayload(input)),
+            },
+          ],
+        }),
+        apiMode,
+        purpose: "interview_cue_card",
+      });
     } catch (error) {
       throw normalizeAbortLikeError(error, timeoutMs);
     } finally {
@@ -695,46 +726,41 @@ export function createOpenAiCompatibleInterviewScreenshotVisionProvider(
 
     try {
       const apiMode = validatedOptions.apiMode ?? "chat_completions";
-      const response = await fetch(
-        buildModelUrl(validatedOptions.baseUrl, apiMode),
-        {
-          method: "POST",
-          signal: controller.signal,
-          headers: buildModelRequestHeaders({
-            apiKey: validatedOptions.apiKey,
-            baseUrl: validatedOptions.baseUrl,
-            conversationKey: `interview-screenshots:${input.batchId}`,
-          }),
-          body: JSON.stringify(
-            buildModelRequestBody({
-              apiMode,
-              model: validatedOptions.model,
-              reasoningEffort: validatedOptions.reasoningEffort,
-              jsonOutput: true,
-              messages: [
-                { role: "system", content: buildScreenshotVisionPrompt() },
+      return await postModelJson({
+        url: buildModelUrl(validatedOptions.baseUrl, apiMode),
+        signal: controller.signal,
+        headers: buildModelRequestHeaders({
+          apiKey: validatedOptions.apiKey,
+          baseUrl: validatedOptions.baseUrl,
+          conversationKey: `interview-screenshots:${input.batchId}`,
+        }),
+        body: buildModelRequestBody({
+          apiMode,
+          model: validatedOptions.model,
+          reasoningEffort: validatedOptions.reasoningEffort,
+          jsonOutput: true,
+          messages: [
+            { role: "system", content: buildScreenshotVisionPrompt() },
+            {
+              role: "user",
+              content: [
                 {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: JSON.stringify(buildScreenshotVisionPayload(input)),
-                    },
-                    ...input.images.slice(0, 3).map((image) => ({
-                      type: "image_url",
-                      image_url: {
-                        url: `data:${image.mimeType};base64,${image.base64}`,
-                      },
-                    })),
-                  ],
+                  type: "text",
+                  text: JSON.stringify(buildScreenshotVisionPayload(input)),
                 },
+                ...input.images.slice(0, 3).map((image) => ({
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${image.mimeType};base64,${image.base64}`,
+                  },
+                })),
               ],
-            }),
-          ),
-        },
-      );
-
-      return parseModelJsonResponse(response, apiMode);
+            },
+          ],
+        }),
+        apiMode,
+        purpose: "interview_screenshot_vision",
+      });
     } catch (error) {
       throw normalizeAbortLikeError(error, timeoutMs);
     } finally {
@@ -1320,8 +1346,7 @@ export function createLiveAssistantProvidersFromEnvironment(
       ) ?? DEFAULT_TEXT_MODEL_API_MODE,
     reasoningEffort:
       parseModelReasoningEffort(
-        env.NESTOR_INTERVIEW_REASONING_EFFORT ??
-          env.NESTOR_AI_REASONING_EFFORT,
+        env.NESTOR_INTERVIEW_REASONING_EFFORT ?? env.NESTOR_AI_REASONING_EFFORT,
       ) ?? DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     requestTimeoutMs,
   };

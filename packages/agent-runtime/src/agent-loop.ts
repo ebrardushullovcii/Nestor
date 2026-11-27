@@ -38,7 +38,8 @@ import {
  * send it only to the route that produced it.
  */
 export interface AgentLoopContinuation {
-  kind: "reasoning_content";
+  /** DeepSeek reasoning text, or Anthropic Messages content blocks as JSON. */
+  kind: "reasoning_content" | "message_content";
   route: string;
   text: string;
 }

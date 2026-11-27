@@ -1,7 +1,13 @@
 import { modelOutputLimit } from "./model-output-limit";
+import { buildMessagesRequestBody } from "./anthropic-messages";
 import type { ModelTokenUsage, ModelImageInput } from "@nestor/contracts";
 
-export const modelApiModes = ["responses", "chat_completions"] as const;
+/** `messages` is Anthropic's native Messages API (anthropic-messages.ts). */
+export const modelApiModes = [
+  "responses",
+  "chat_completions",
+  "messages",
+] as const;
 export type ModelApiMode = (typeof modelApiModes)[number];
 
 export const modelReasoningEfforts = [
@@ -36,6 +42,8 @@ export type CompatibleMessage = {
   images?: ModelImageInput[];
   /** DeepSeek thinking-mode continuation, sent back on later tool turns. */
   reasoning_content?: string;
+  /** Anthropic Messages: the assistant's content blocks, sent back unchanged. */
+  anthropic_content?: unknown[];
   tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
@@ -64,6 +72,8 @@ export type ModelUsagePayload = {
     | undefined;
   /** DeepSeek reports cache hits under its own names. */
   prompt_cache_hit_tokens?: number | undefined;
+  /** Anthropic Messages: input written to the prompt cache this request. */
+  cache_creation_input_tokens?: number | undefined;
 };
 
 export type ChatCompletionsPayload = {
@@ -73,6 +83,7 @@ export type ChatCompletionsPayload = {
     message?: {
       content?: string;
       reasoning_content?: string;
+      anthropic_content?: unknown[];
       tool_calls?: Array<{
         id: string;
         type: string;
@@ -403,7 +414,10 @@ export function buildModelRequestBody(input: {
   temperature?: number | undefined;
   messages: readonly CompatibleMessage[];
   jsonOutput?: boolean;
-  /** Responses only; callers must verify strict schema support on the route. */
+  /**
+   * Responses and Messages; callers must verify strict schema support on a
+   * Responses route.
+   */
   jsonSchema?: { name: string; schema: Record<string, unknown> } | undefined;
   tools?: readonly CompatibleTool[];
   parallelToolCalls?: boolean | undefined;
@@ -417,6 +431,7 @@ export function buildModelRequestBody(input: {
   /** Chat Completions only: ask for a usage chunk at the end of a stream. */
   includeStreamUsage?: boolean | undefined;
 }): Record<string, unknown> {
+  if (input.apiMode === "messages") return buildMessagesRequestBody(input);
   // Complete every tool reply before attaching its images in a user message.
   // Chat Completions tool content is text; both APIs accept user image parts.
   const messages: CompatibleMessage[] = [];
@@ -595,6 +610,8 @@ export function resolveTaskReasoningEffortsFromEnvironment(
 }
 
 export function buildModelUrl(baseUrl: string, apiMode: ModelApiMode): string {
+  if (apiMode === "messages")
+    return `${baseUrl.replace(/\/+$/u, "").replace(/\/v1$/u, "")}/v1/messages`;
   const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return new URL(
     apiMode === "responses" ? "responses" : "chat/completions",

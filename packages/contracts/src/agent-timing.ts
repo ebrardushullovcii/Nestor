@@ -28,6 +28,8 @@ export interface ModelRequestUsage extends ModelTokenUsage {
   outcome: "completed" | "failed" | "cancelled";
   httpStatus?: number;
   providerTotalTokens?: number;
+  /** Input written to the prompt cache (Anthropic Messages); part of inputTokens. */
+  cacheWriteInputTokens?: number;
   failureKind?:
     | "network"
     | "http_status"

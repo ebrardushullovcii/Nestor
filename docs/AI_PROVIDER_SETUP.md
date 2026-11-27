@@ -207,6 +207,123 @@ Before using it with candidate data:
 
   npx --yes openai-oauth@2.0.0 stop
 
+## Choosing the provider: one env block
+
+The provider is chosen only in the env file (`.env.local`, gitignored). There
+is no in-app switcher, setting or runtime toggle. Keep exactly one of the
+blocks below uncommented, put that provider's key in its
+`NESTOR_AI_API_KEY`, and restart Nestor. Never put keys in docs or evidence.
+
+What each line means:
+
+| Line                                     | Meaning                                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `NESTOR_AI_API_KEY`                      | The provider's API key.                                                                                                             |
+| `NESTOR_AI_BASE_URL`                     | The provider's API root. Vision, the assistant and Live Assistant use it too unless their own `_BASE_URL` is set.                   |
+| `NESTOR_AI_MODEL`                        | Model for text, tools, search, fit, screening, apply and resume work.                                                               |
+| `NESTOR_AI_API_MODE`                     | Wire protocol: `chat_completions`, `responses` or `messages` (Anthropic).                                                           |
+| `NESTOR_AI_REASONING_EFFORT`             | Effort for every task without its own `NESTOR_AI_<TASK>_REASONING_EFFORT` (search, page reads, fit, screening, apply, resume work). |
+| `NESTOR_AI_AGENT_REASONING_EFFORT`       | Effort for model requests that name no task.                                                                                        |
+| `NESTOR_AI_AGGRESSIVE_*`                 | The separate aggressive resume-tailoring route (ADR 0019).                                                                          |
+| `NESTOR_AI_VISION_*`                     | Resume and browser vision, and Live Assistant screenshots.                                                                          |
+| `NESTOR_AI_ASSISTANT_MODEL`, `_API_MODE` | The Job Finder assistant sidebar.                                                                                                   |
+
+Task efforts (`NESTOR_AI_FIT_REASONING_EFFORT` and the others above) and the
+narrow role overrides (`NESTOR_RESUME_VISION_*`, `NESTOR_BROWSER_VISION_*`,
+`NESTOR_INTERVIEW_*`, `NESTOR_AI_VISION_BASE_URL`,
+`NESTOR_AI_ASSISTANT_BASE_URL`) apply to whichever block is active. If you set
+one, make it name the same provider, or leave it unset to inherit.
+
+### 1. OpenCode Go: DeepSeek V4.1 Flash (default)
+
+The block under "Production defaults and overrides" above, with the code's
+default efforts. The roles that block leaves unset (the assistant and the
+narrow overrides) already default to this route. To run it at another effort,
+change the `_REASONING_EFFORT` lines, for example to `high`.
+
+OpenCode Go caches prompt prefixes on its side; Job Finder sends its
+`x-opencode-session` header so a conversation stays on one upstream.
+
+### 2. OpenAI: GPT-6.2 Sol through the Responses API
+
+```dotenv
+NESTOR_AI_API_KEY=your-openai-key
+NESTOR_AI_BASE_URL=https://api.openai.com/v1
+NESTOR_AI_MODEL=gpt-6.2-sol
+NESTOR_AI_API_MODE=responses
+NESTOR_AI_REASONING_EFFORT=medium
+NESTOR_AI_AGENT_REASONING_EFFORT=medium
+NESTOR_AI_AGGRESSIVE_MODEL=gpt-6.2-sol
+NESTOR_AI_AGGRESSIVE_API_MODE=responses
+NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=medium
+NESTOR_AI_VISION_MODEL=gpt-6.2-sol
+NESTOR_AI_VISION_API_MODE=responses
+NESTOR_AI_VISION_REASONING_EFFORT=medium
+NESTOR_AI_ASSISTANT_MODEL=gpt-6.2-sol
+NESTOR_AI_ASSISTANT_API_MODE=responses
+```
+
+Responses streams reasoning summaries, which keep a long thought visibly
+alive. JSON tasks use JSON mode; strict schemas are sent only on the verified
+Muse route.
+
+### 3. Claude: Opus 5.5 through Anthropic's native Messages API
+
+```dotenv
+NESTOR_AI_API_KEY=your-anthropic-key
+NESTOR_AI_BASE_URL=https://api.anthropic.com/v1
+NESTOR_AI_MODEL=claude-opus-5-5
+NESTOR_AI_API_MODE=messages
+NESTOR_AI_REASONING_EFFORT=medium
+NESTOR_AI_AGENT_REASONING_EFFORT=medium
+NESTOR_AI_AGGRESSIVE_MODEL=claude-opus-5-5
+NESTOR_AI_AGGRESSIVE_API_MODE=messages
+NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=medium
+NESTOR_AI_VISION_MODEL=claude-opus-5-5
+NESTOR_AI_VISION_API_MODE=messages
+NESTOR_AI_VISION_REASONING_EFFORT=medium
+NESTOR_AI_ASSISTANT_MODEL=claude-opus-5-5
+NESTOR_AI_ASSISTANT_API_MODE=messages
+```
+
+Use `messages`, not `chat_completions`, with Anthropic. Anthropic's
+OpenAI-compatible endpoint has no prompt caching, rejects
+`response_format: json_object` with HTTP 400, ignores `reasoning_effort` and
+returns no thinking. That is why the native mode exists: it speaks Messages
+through the official `@anthropic-ai/sdk`
+(`packages/ai-providers/src/anthropic-messages.ts`) with the same tools,
+facts, retries, idle clock and `[AI request]`/`[AI usage]` records as the
+other routes:
+
+- **Caching.** One `cache_control` breakpoint closes tools + system on every
+  request. A conversation (any request with tools or an earlier assistant
+  turn) also sets top-level automatic caching, so each turn's request is the
+  next turn's cached prefix. A one-shot JSON request caches only tools +
+  system: shared facts inside its single user message are not a separate
+  cache entry on this route.
+- **Thinking.** Always on (adaptive, summarized so long thoughts keep the
+  stream alive). Each assistant turn's content blocks, thinking signatures
+  included, return unchanged on the next turn. A turn the app has since
+  rewritten is rebuilt from the transcript without its thinking, and
+  `prefix_mismatch_behavior: "drop_block"` keeps a folded history working.
+- **Effort** goes in `output_config.effort` from the route or task effort.
+  `none` becomes `low`, the lowest Messages offers.
+- **JSON.** A request with a schema uses `output_config.format`, through the
+  SDK's schema transform. Other JSON tasks ask for JSON in their prompt. The
+  schema is part of the cached prefix, so a schema that changes per request
+  is written to the cache each time.
+- **Refusals.** `fallbacks: "default"` lets the API retry a policy decline on
+  another model inside the request. A refusal after that fails the request
+  with its category, without a retry. 401, 402 and 403 are the usual access
+  failures.
+- **Output.** `max_tokens` is the model's published output limit (128K).
+
+In `[AI usage]`, `inputTokens` includes cache reads and writes, as on the
+other routes. `cachedInputTokens` is Anthropic's `cache_read_input_tokens`,
+and `cacheWriteInputTokens` is `cache_creation_input_tokens`. `cache-report`
+reads the hit rate from the first two. Opus 5.5 bills uncached input at
+$4/MTok, cache writes at $5, cache reads at $0.20 and output at $20.
+
 ## Compatibility fallback
 
 A legacy provider can still be used explicitly:
