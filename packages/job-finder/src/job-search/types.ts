@@ -57,9 +57,15 @@ export interface JobSearchRunnerDeps {
 export interface JobSearchRunner {
   /** Resolves after recording the start, without waiting for sources or fit. */
   start(settings: JobSearchSettingsInput): Promise<JobSearchRecord>;
-  /** Also cancels a standalone scoreUnscored call. Saved jobs stay saved. */
+  /**
+   * Also cancels a standalone scoreUnscored call. Saved jobs stay saved, and
+   * fit requests already sent finish and keep their answers.
+   */
   stop(): void;
-  /** Quit preserves the running record and queue for the next process. */
+  /**
+   * Quit preserves the running record and queue for the next process; it is
+   * the one thing that cancels a fit request already sent.
+   */
   suspend(): void;
   /** Rechecks only this site; joins the running search, or starts a single-site search. */
   retrySource(id: number): Promise<JobSearchRecord>;
