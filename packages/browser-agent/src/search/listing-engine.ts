@@ -499,6 +499,7 @@ async function collectSourceObserved(
       notes: fallback.notes,
       ...(fallback.needsYou ? { needsYou: true } : {}),
       ...(resumed || fallback.resumed ? { resumed: true } : {}),
+      ...(fallback.cutShort ? { cutShort: true } : {}),
     };
   }
   const covered =
@@ -537,7 +538,7 @@ export async function screenCards(
     readPage?: ListingSearchReader["readPage"];
     /** Publish proven matches while other titles and negative verifications finish. */
     onRelated?: (cards: ListingCard[]) => Promise<void>;
-    /** Keep each batch's unrelated verdicts as they are decided. */
+    /** Keep each batch's verdicts, related and unrelated, as they are decided. */
     onSeen?: (cards: SeenListingCard[]) => Promise<void> | void;
   },
 ): Promise<{
@@ -551,11 +552,14 @@ export async function screenCards(
   const key = roleGoalsKey(input.goals);
   const screeningFingerprint = (card: ListingCard) =>
     fingerprint([card.cardFingerprint, professionEvidence(card)]);
-  const seenCard = (card: ListingCard): SeenListingCard => ({
+  const seenCard = (
+    card: ListingCard,
+    verdict: SeenListingCard["verdict"],
+  ): SeenListingCard => ({
     url: card.url,
     cardFingerprint: screeningFingerprint(card),
     roleGoalsKey: key,
-    verdict: "unrelated",
+    verdict,
   });
   const known =
     (await input.lookupSeenCards?.(
@@ -565,17 +569,25 @@ export async function screenCards(
       })),
       key,
     )) ?? [];
-  const seenKeys = new Set(
-    known.map((card) => `${card.url}\n${card.cardFingerprint}`),
+  const seenKeys = new Map(
+    known.map((card) => [`${card.url}\n${card.cardFingerprint}`, card.verdict]),
   );
   const saved = new Set(
     (await input.lookupKnownUrls?.(input.cards.map((card) => card.url))) ?? [],
   );
+  const verdictOf = (card: ListingCard) =>
+    input.refreshUrls?.includes(card.url) || saved.has(card.url)
+      ? undefined
+      : seenKeys.get(`${card.url}\n${screeningFingerprint(card)}`);
   const fresh = input.cards.filter(
     (card) =>
       input.refreshUrls?.includes(card.url) ||
-      (!saved.has(card.url) &&
-        !seenKeys.has(`${card.url}\n${screeningFingerprint(card)}`)),
+      (!saved.has(card.url) && verdictOf(card) === undefined),
+  );
+  // Judged related before (a restart came before its read): read it, without
+  // asking about it again.
+  const remembered = input.cards.filter(
+    (card) => verdictOf(card) === "related",
   );
   // Keep the whole title: stripping rank also erased the distinction between
   // hands-on analytics and a different management or infrastructure profession.
@@ -622,16 +634,32 @@ export async function screenCards(
   /** Titles the model asked to check against their full listings. */
   const readRequests = new Set<string>();
   const published = new Set<ListingCard>();
+  const kept = new Set<ListingCard>();
   const publishRelated = async () => {
-    if (!input.onRelated) return;
     input.signal?.throwIfAborted();
-    const ready = fresh.filter(
+    // A related verdict is final once given; a restart reads the card
+    // without asking about it again. A repair read is not a verdict.
+    const decided = fresh.filter(
       (card) =>
-        !published.has(card) &&
+        !kept.has(card) &&
         !gone.has(card.url) &&
-        positive.has(titleKey(card)) &&
-        !failedTitles.has(titleKey(card)),
+        decisions.get(titleKey(card)) === true &&
+        !failedTitles.has(titleKey(card)) &&
+        !input.refreshUrls?.includes(card.url),
     );
+    for (const card of decided) kept.add(card);
+    if (decided.length)
+      await input.onSeen?.(decided.map((card) => seenCard(card, "related")));
+    if (!input.onRelated) return;
+    const ready = [
+      ...remembered,
+      ...fresh.filter(
+        (card) =>
+          positive.has(titleKey(card)) &&
+          !gone.has(card.url) &&
+          !failedTitles.has(titleKey(card)),
+      ),
+    ].filter((card) => !published.has(card));
     for (const card of ready) published.add(card);
     if (ready.length)
       await input.onRelated(
@@ -757,7 +785,7 @@ export async function screenCards(
       groups
         .get(key)!
         .filter((card) => !gone.has(card.url))
-        .map(seenCard),
+        .map((card) => seenCard(card, "unrelated")),
     );
     if (decided.length) await input.onSeen?.(decided);
     await publishRelated();
@@ -932,16 +960,19 @@ export async function screenCards(
   }
   const seen = fresh
     .filter((card) => !gone.has(card.url) && unrelated.has(titleKey(card)))
-    .map(seenCard);
+    .map((card) => seenCard(card, "unrelated"));
   return {
-    related: fresh
-      .filter(
-        (card) =>
-          !gone.has(card.url) &&
-          !unrelated.has(titleKey(card)) &&
-          !failedTitles.has(titleKey(card)),
-      )
-      .map((card) => enriched.get(card.url) ?? card),
+    related: [
+      ...remembered,
+      ...fresh
+        .filter(
+          (card) =>
+            !gone.has(card.url) &&
+            !unrelated.has(titleKey(card)) &&
+            !failedTitles.has(titleKey(card)),
+        )
+        .map((card) => enriched.get(card.url) ?? card),
+    ],
     gone: fresh.filter((card) => gone.has(card.url)).map((card) => card.url),
     failed: fresh
       .filter((card) => !gone.has(card.url) && failedTitles.has(titleKey(card)))
@@ -950,7 +981,7 @@ export async function screenCards(
         reason: failedTitles.get(titleKey(card))!,
       })),
     seen,
-    skipped: input.cards.length - fresh.length,
+    skipped: input.cards.length - fresh.length - remembered.length,
   };
 }
 

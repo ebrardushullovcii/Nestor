@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS search_source_queue (
   target_json TEXT NOT NULL,
   full INTEGER NOT NULL DEFAULT 0,
   completed INTEGER NOT NULL DEFAULT 0,
+  failure TEXT,
   PRIMARY KEY(search_id, source_id)
 );
 CREATE TABLE IF NOT EXISTS search_listing_queue (
@@ -77,6 +78,18 @@ const COLUMNS = `source_id AS sourceId, label, url, state, lane, phase, cards, r
  failed_reads AS failedReads, found, added, hidden, message`;
 export function createSearchSourcesStore(store: JobStore) {
   const { sql } = store;
+  /** Drops a source's queued cards and where its collection had got to. */
+  const clearProgress = (searchId: string, sourceId: string): void => {
+    for (const table of [
+      "search_listing_queue",
+      "search_source_pages",
+      "search_source_navigation",
+    ])
+      sql(`DELETE FROM ${table} WHERE search_id=? AND source_id=?`).run(
+        searchId,
+        sourceId,
+      );
+  };
   return {
     get(searchId: string, sourceId: string): JobSearchSourceRow | null {
       return (
@@ -95,24 +108,49 @@ export function createSearchSourcesStore(store: JobStore) {
         Number(full),
       );
     },
-    settle(searchId: string, sourceId: string): boolean {
-      for (const table of [
-        "search_listing_queue",
-        "search_source_pages",
-        "search_source_navigation",
-      ])
-        sql(`DELETE FROM ${table} WHERE search_id=? AND source_id=?`).run(
-          searchId,
-          sourceId,
-        );
+    /**
+     * Acknowledges a source's result for this run. A source whose last
+     * attempt failed keeps its queued cards and where it had got to, with
+     * why it failed: a resume tries it again from there.
+     */
+    settle(
+      searchId: string,
+      sourceId: string,
+      failure: string | null = null,
+    ): boolean {
+      if (failure === null) clearProgress(searchId, sourceId);
       return (
         Number(
-          sql(`UPDATE search_source_queue SET completed=1
+          sql(`UPDATE search_source_queue SET completed=1, failure=?
         WHERE search_id=? AND source_id=? AND completed=0`).run(
+            failure,
             searchId,
             sourceId,
           ).changes,
         ) > 0
+      );
+    },
+    clearProgress,
+    /** Why the source's last attempt in this search failed, if it did. */
+    failure(searchId: string, sourceId: string): string | null {
+      return (
+        (
+          sql(
+            "SELECT failure FROM search_source_queue WHERE search_id=? AND source_id=?",
+          ).get(searchId, sourceId) as { failure: string | null } | undefined
+        )?.failure ?? null
+      );
+    },
+    /**
+     * Plans every source whose last attempt failed for another attempt, as
+     * a resume does. Returns how many were settled before.
+     */
+    retryFailed(searchId: string): number {
+      return Number(
+        sql(`UPDATE search_source_queue SET completed=0
+        WHERE search_id=? AND completed=1 AND failure IS NOT NULL`).run(
+          searchId,
+        ).changes,
       );
     },
     planned(searchId: string): boolean {

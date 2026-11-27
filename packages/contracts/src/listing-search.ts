@@ -43,7 +43,8 @@ export interface SeenListingCard {
   url: string;
   cardFingerprint: string;
   roleGoalsKey: string;
-  verdict: "unrelated";
+  /** The model's profession verdict on this card; either is final. */
+  verdict: "unrelated" | "related";
 }
 
 export interface RoleScreenGoals {
@@ -72,6 +73,11 @@ export interface SourceInventory {
    * restart; those cards were accepted then and are not repeated in cards.
    */
   resumed?: boolean;
+  /**
+   * The collection ended on an error or outage before it finished. Its
+   * cards so far are kept; it is our failure, so the source is tried again.
+   */
+  cutShort?: boolean;
 }
 
 /**

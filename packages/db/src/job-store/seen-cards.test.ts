@@ -46,3 +46,33 @@ test("remembers rejected cards without jobs; only changed cards or role goals ne
     store.close();
   }
 });
+
+test("keeps a related verdict too, and the latest verdict on a card replaces the other", () => {
+  const store = openJobStore(":memory:");
+  try {
+    const card = {
+      url: "https://board.example/jobs/42",
+      cardFingerprint: "v1",
+      roleGoalsKey: "engineer",
+    };
+    store.rememberSeenCards([{ ...card, verdict: "related" }]);
+    expect(store.lookupSeenCards([card], "engineer")).toEqual([
+      { ...card, verdict: "related" },
+    ]);
+    // A changed card or other role goals need a decision of their own.
+    expect(
+      store.lookupSeenCards([{ ...card, cardFingerprint: "v2" }], "engineer"),
+    ).toEqual([]);
+    expect(store.lookupSeenCards([card], "analyst")).toEqual([]);
+    store.rememberSeenCards([{ ...card, verdict: "unrelated" }]);
+    expect(store.lookupSeenCards([card], "engineer")).toEqual([
+      { ...card, verdict: "unrelated" },
+    ]);
+    store.rememberSeenCards([{ ...card, verdict: "related" }]);
+    expect(store.lookupSeenCards([card], "engineer")).toEqual([
+      { ...card, verdict: "related" },
+    ]);
+  } finally {
+    store.close();
+  }
+});

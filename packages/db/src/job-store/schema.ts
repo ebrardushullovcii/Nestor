@@ -134,6 +134,8 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     column: "ai_behavior_browser_permissions_create_accounts",
     definition: "INTEGER",
   },
+  // Why the source's last attempt failed; a resume tries it again.
+  { table: "search_source_queue", column: "failure", definition: "TEXT" },
 ];
 
 const JOBS = `
