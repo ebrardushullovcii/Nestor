@@ -385,3 +385,25 @@ test("a stable schema still rejects a verdict for a job outside the batch", asyn
   expect(calls).toBe(2);
   expect(fits.map(({ id }) => id)).toEqual([job.id]);
 });
+
+test("fit batches send the person's facts as the request's stable lead", async () => {
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve({ content: JSON.stringify({ fits: [] }) }),
+  );
+  await fitJobs({
+    client: { chatWithTools },
+    profile,
+    jobs: [job],
+    goals: { targetRoles: [], locations: [] },
+    assessmentDate: "2026-11-27",
+  }).catch(() => undefined); // Only the request matters here.
+  const [messages, , options] = chatWithTools.mock.calls[0];
+  expect(options).toMatchObject({ oneShot: true });
+  const lead = options?.stableLead ?? "";
+  // The lead opens the very text every route reads, and ends before the batch.
+  expect(messages[1].content.startsWith(lead)).toBe(true);
+  expect(lead).toContain('"person":');
+  expect(lead).toContain('"assessmentDate":"2026-11-27"');
+  expect(lead).not.toContain('"listings"');
+  expect(messages[1].content.slice(lead.length)).toMatch(/^,"listings":/u);
+});
