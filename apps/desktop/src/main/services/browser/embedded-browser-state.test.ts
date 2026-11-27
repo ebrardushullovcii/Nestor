@@ -1,5 +1,5 @@
 import { app } from "electron";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { browserUserAgent } from "./browser-navigation";
 import { EmbeddedBrowser } from "./embedded-browser";
 import type { Browser, Page } from "playwright";
@@ -175,6 +175,31 @@ function makeViewHost() {
   };
 }
 
+function makeBrowserWithViews() {
+  const { browser, state } = makeBrowser();
+  const main = {
+    ...makeViewHost(),
+    isFocused: () => true,
+    webContents: { getZoomFactor: () => 1, send: vi.fn() },
+  };
+  const ids = ["failed", "parked", "working"];
+  const views = ids.map(makePageView);
+  for (const id of state.pageMap.keys())
+    if (!ids.includes(id)) state.pageMap.delete(id);
+  for (const [index, id] of ids.entries())
+    Object.assign(state.pageMap.get(id)!, { view: views[index], host: null });
+  Object.assign(browser, { window: main });
+  return { browser, main, views };
+}
+
+function stubPlatform(platform: NodeJS.Platform): void {
+  const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { ...original, value: platform });
+  onTestFinished(() => {
+    Object.defineProperty(process, "platform", original);
+  });
+}
+
 describe("embedded browser tab state", () => {
   test("a native page read can finish beyond its former fixed deadline", async () => {
     vi.useFakeTimers();
@@ -211,11 +236,10 @@ describe("embedded browser tab state", () => {
     Object.assign(browser, {
       backstage: makeViewHost(),
       window: {
-        isDestroyed: () => false,
+        ...makeViewHost(),
         isFocused: () => false,
         focus,
         show,
-        getContentSize: () => [1200, 800],
         webContents: { getZoomFactor: () => 1, send: vi.fn(), focus },
       },
     });
@@ -242,21 +266,11 @@ describe("embedded browser tab state", () => {
     }
   });
 
-  test("only the selected tab reaches the main window and hidden tabs keep their viewport", async () => {
-    const { browser, state } = makeBrowser();
-    const main = {
-      ...makeViewHost(),
-      isFocused: () => true,
-      webContents: { getZoomFactor: () => 1, send: vi.fn() },
-    };
+  test("on macOS only the selected tab reaches the main window", async () => {
+    stubPlatform("darwin");
+    const { browser, main, views } = makeBrowserWithViews();
     const backstage = makeViewHost();
-    Object.assign(browser, { window: main, backstage });
-    const ids = ["failed", "parked", "working"];
-    const views = ids.map(makePageView);
-    for (const id of state.pageMap.keys())
-      if (!ids.includes(id)) state.pageMap.delete(id);
-    for (const [index, id] of ids.entries())
-      Object.assign(state.pageMap.get(id)!, { view: views[index], host: null });
+    Object.assign(browser, { backstage });
 
     const viewport = { x: 100, y: 140, width: 960, height: 580 };
     await browser.command({ type: "open" });
@@ -287,6 +301,47 @@ describe("embedded browser tab state", () => {
     await browser.command({ type: "open" });
     expect(main.children.size).toBe(0);
   });
+
+  test.each(["win32", "linux"] as const)(
+    "on %s inactive tabs stay attached with usable bounds and only the panel tab is visible",
+    async (platform) => {
+      stubPlatform(platform);
+      const { browser, main, views } = makeBrowserWithViews();
+      const viewport = { x: 100, y: 140, width: 960, height: 580 };
+      const shownViews = () =>
+        [...main.children].filter((view) => view.visible);
+
+      await browser.command({ type: "open" });
+      expect([...main.children]).toEqual(views);
+      expect(shownViews()).toEqual([]);
+
+      browser.setViewport({ ...viewport, visible: true });
+      expect(shownViews()).toEqual([views[0]]);
+      expect(views[0]?.bounds).toEqual(viewport);
+
+      const previous = vi.spyOn(views[0]!, "setVisible");
+      const next = vi.spyOn(views[2]!, "setVisible");
+      await browser.command({ type: "select_tab", tabId: "working" });
+      expect(shownViews()).toEqual([views[2]]);
+      expect(views[2]?.bounds).toEqual(viewport);
+      expect(previous).toHaveBeenCalledWith(false);
+      expect(next).toHaveBeenCalledWith(true);
+      expect(previous.mock.invocationCallOrder[0]!).toBeLessThan(
+        next.mock.invocationCallOrder[0]!,
+      );
+
+      browser.setViewport({ ...viewport, width: 0, visible: true });
+      expect(shownViews()).toEqual([]);
+      browser.setViewport({ ...viewport, visible: true });
+      await browser.command({ type: "minimize" });
+      browser.setViewport({ ...viewport, visible: true });
+
+      expect(shownViews()).toEqual([]);
+      expect([...main.children]).toEqual(views);
+      for (const view of views)
+        expect(view.bounds).toEqual({ x: 0, y: 0, width: 960, height: 580 });
+    },
+  );
 
   test("opening outside exports only the displayed address and keeps the waiting tab intact", async () => {
     const { browser, state, pages } = makeBrowser();

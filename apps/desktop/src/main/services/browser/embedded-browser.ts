@@ -472,7 +472,7 @@ export class EmbeddedBrowser {
     if (!this.backstage || this.backstage.isDestroyed()) {
       this.backstage = new BaseWindow({
         show: false,
-        ...(process.platform === "darwin" ? { type: "panel" } : {}),
+        type: "panel",
         focusable: false,
         width,
         height,
@@ -488,19 +488,18 @@ export class EmbeddedBrowser {
     page: BrowserPage,
     host: BaseWindow,
     bounds: ViewRect,
+    visible: boolean,
   ): void {
     const moving = page.host !== host;
-    if (moving) {
-      page.view.setVisible(false);
-      if (page.host && !page.host.isDestroyed())
-        page.host.contentView.removeChildView(page.view);
-    }
+    if (moving || !visible) page.view.setVisible(false);
+    if (moving && page.host && !page.host.isDestroyed())
+      page.host.contentView.removeChildView(page.view);
     page.view.setBounds(bounds);
     if (moving) {
       page.host = host;
       host.contentView.addChildView(page.view);
-      page.view.setVisible(true);
     }
+    if (visible) page.view.setVisible(true);
   }
 
   ownsRenderer(id: number): boolean {
@@ -2035,10 +2034,11 @@ export class EmbeddedBrowser {
         })
       : null;
     if (bounds && isUsableViewRect(bounds)) this.lastUsableViewport = bounds;
+    const useBackstage = process.platform === "darwin";
     // Once a run moves pages away from an unfocused app on macOS, keep its
     // pages there until focus returns. They can keep navigating after it ends.
     this.backstageUntilFocus =
-      process.platform === "darwin" &&
+      useBackstage &&
       !window.isFocused() &&
       (this.backstageUntilFocus || this.operations.size > 0);
     const visibleBounds =
@@ -2058,14 +2058,21 @@ export class EmbeddedBrowser {
     for (const page of this.pageMap.values()) {
       if (page.contents.isDestroyed()) continue;
       if (page !== visiblePage) {
-        backstage ??= this.getBackstage(backgroundBounds);
-        this.placePage(page, backstage, backgroundBounds);
+        // Keep the existing main-window host elsewhere so background pages
+        // retain their capture surface even when their native views are hidden.
+        if (useBackstage) backstage ??= this.getBackstage(backgroundBounds);
+        this.placePage(
+          page,
+          backstage ?? window,
+          backgroundBounds,
+          useBackstage,
+        );
       }
       this.syncTabLifecycle(page);
     }
-    // Demote the previous view before attaching the new one to the main window.
+    // Hide the previous view before showing the selected one.
     if (visiblePage && visibleBounds && !visiblePage.contents.isDestroyed())
-      this.placePage(visiblePage, window, visibleBounds);
+      this.placePage(visiblePage, window, visibleBounds, true);
   }
 
   private disconnectAutomation(): void {
@@ -2767,6 +2774,7 @@ export class EmbeddedBrowser {
       !this.viewport?.visible ||
       this.activeTabId !== page.id ||
       page.contents.isDestroyed() ||
+      !page.view.getVisible() ||
       Date.now() - page.createdAt < 1500
     )
       return false;
