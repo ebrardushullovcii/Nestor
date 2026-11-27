@@ -21,6 +21,9 @@ export function createApplyModelActivity(client: LLMClient) {
     scope.run(context, work);
   return {
     run,
+    throwIfAborted() {
+      scope.getStore()?.signal?.throwIfAborted();
+    },
     runModel<T>(options: ModelOptions | undefined, work: () => T): T {
       return run(
         {
