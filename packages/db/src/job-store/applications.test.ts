@@ -2504,7 +2504,21 @@ it.each([
         },
       ],
       retry: { eligible: false, blockReason },
-      browserAction: { reason: "model_observed_outcome" },
+      browserAction: {
+        reason: "model_observed_outcome",
+        detail:
+          "Historical page text: " + "Example employer website. ".repeat(250),
+        requestsAfterClick: [
+          {
+            method: "POST",
+            host: "employer.example.test",
+            path: "/apply",
+            status: 200,
+            failure: null,
+            finalSubmit: true,
+          },
+        ],
+      },
     });
     expect(applications.recordSubmission(row.id, row.attempt, receipt)).toBe(
       true,
@@ -2513,6 +2527,25 @@ it.each([
     expect(
       applications.getSubmissionReceipt(row.id)?.evidence[0]?.summary,
     ).toBe("The application model's quoted page observation.");
+    expect(applications.getSubmissionReceipt(row.id)?.browserAction).toEqual(
+      receipt.browserAction,
+    );
+    const [history] = applications.history().applications;
+    expect(history).toMatchObject({
+      id: row.id,
+      url: jobs.getJob(row.jobId)?.url,
+      applyUrl: jobs.getJob(row.jobId)?.applyUrl,
+      submissionOutcome: {
+        outcome,
+        attemptedAt: at,
+        verifiedAt: receipt.verifiedAt,
+        evidence: receipt.evidence,
+        retry: receipt.retry,
+      },
+    });
+    expect(history?.submissionOutcome?.browserAction).toEqual({
+      reason: "model_observed_outcome",
+    });
   },
 );
 

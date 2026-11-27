@@ -809,8 +809,8 @@ export interface ChatWithToolsOptions {
    */
   oneShot?: boolean;
   /**
-   * With `oneShot`: text the last message starts with that repeats across
-   * requests of the same work, cached on its own on such a route.
+   * Text that repeats across requests of the same work. It opens the last
+   * message for a one-shot request or is the first user block of a conversation.
    */
   stableLead?: string;
 }

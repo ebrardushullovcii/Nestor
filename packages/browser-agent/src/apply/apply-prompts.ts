@@ -130,8 +130,8 @@ export function createApplyUserPrompt(config: ApplyAgentConfig): string {
     config.sources.approvedLetterText !== undefined
       ? `The person already approved this application's letter (JSON text): ${JSON.stringify(config.sources.approvedLetterText)}. Use these exact words for every letter text field and file field, even when an earlier letter is already present. Replace the earlier letter; do not rewrite it or ask for approval again. This approved letter takes precedence over other letter files and writing preferences. For a file field, upload invokes the approved-text renderer; any available letter document id can identify the upload request.`
       : null,
-    config.application.instructions?.length
-      ? `Current task guidance and answers (JSON data):\n${JSON.stringify(config.application.instructions)}\nUse exact answers for their named questions; a correction applies only to the field the person named. Interpret this guidance together with the saved settings.`
+    (config.application.instructions ?? config.sources.taskInstructions)?.length
+      ? "Use exact answers from taskGuidance for their named questions. A correction applies only to the field the person named. Interpret this guidance together with the saved settings."
       : null,
     "",
     "The first page view is already included. Read it and start filling this step; no observe call is needed unless that view failed or you need new page facts. Move between steps when the form has several, and finish when there is nothing left to fill in.",

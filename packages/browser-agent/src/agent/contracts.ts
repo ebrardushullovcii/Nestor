@@ -37,7 +37,7 @@ export interface LLMClient {
       jsonSchema?: { name: string; schema: Record<string, unknown> }
       /** The answer usually ends this work; see ChatWithToolsOptions.oneShot. */
       oneShot?: boolean
-      /** With oneShot: the last message's repeating opening text. */
+      /** Repeating text in the first user block, or the last message opening for oneShot. */
       stableLead?: string
     }
   ) => Promise<{

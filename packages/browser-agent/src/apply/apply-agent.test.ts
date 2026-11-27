@@ -1,5 +1,6 @@
 import {
   CandidateProfileSchema,
+  CandidateReusableAnswerSchema,
   type RawApplyControl,
   type RawApplyPage,
 } from "@nestor/contracts";
@@ -1777,9 +1778,53 @@ test("on an append-only route each apply request starts with the previous reques
       JSON.stringify(previous),
     );
   }
-  // The saved-answer library was said once, where it was current.
-  const last = JSON.stringify(requests.at(-1));
-  expect(last.split("Complete saved-answer library").length - 1).toBe(1);
+  expect(JSON.stringify(requests.at(-1))).not.toContain("Saved-answer changes");
+});
+
+test("the opening has the refreshed saved answers once and changes append only the changed records", async () => {
+  const input = config(page());
+  const answer = (id: string, value: string) =>
+    CandidateReusableAnswerSchema.parse({
+      id,
+      label: id,
+      question: id,
+      answer: value,
+    });
+  const original = answer("start-date", "Original date");
+  const refreshed = answer(original.id, "Previously saved date");
+  const changed = answer(original.id, "Newly saved date");
+  const unchanged = answer("notice-period", "A unique unchanged answer");
+  input.sources.reusableAnswers = [original, unchanged];
+  input.readReusableAnswers = vi
+    .fn()
+    .mockResolvedValueOnce([refreshed, unchanged])
+    .mockResolvedValueOnce([changed, unchanged])
+    .mockResolvedValue([changed, unchanged]);
+  const scripted = model([
+    { name: "observe", args: {} },
+    { name: "observe", args: {} },
+    done,
+  ]);
+  const turns: string[][] = [];
+  await runApplyAgent(input, {
+    chatWithTools(messages, tools, options) {
+      turns.push(messages.map(({ content }) => String(content)));
+      expect(options?.stableLead).toBe(messages[1]?.content);
+      return scripted.chatWithTools(messages, tools, options);
+    },
+  });
+  expect(turns).toHaveLength(3);
+  expect(turns[0].join("\n")).not.toContain("Original date");
+  expect(turns[0].join("\n").split("Previously saved date")).toHaveLength(2);
+  expect(turns[0].join("\n")).not.toContain("Saved-answer changes");
+  const update = turns[1].at(-1)!;
+  expect(update).toContain("Saved-answer changes");
+  expect(update).toContain("Newly saved date");
+  expect(update).not.toContain("A unique unchanged answer");
+  expect(turns[2].slice(0, turns[1].length)).toEqual(turns[1]);
+  expect(
+    turns[2].filter((text) => text.includes("Saved-answer changes")),
+  ).toHaveLength(1);
 });
 
 test("elsewhere superseded page views still fold to receipts", async () => {

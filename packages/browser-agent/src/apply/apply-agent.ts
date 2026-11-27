@@ -30,7 +30,7 @@ import { createViewLedger } from "../superseded-views";
 import { createApplyTiming } from "./apply-timing";
 import { createApplyModelActivity } from "./model-activity";
 import {
-  applicationFacts,
+  applicationSavedAnswers,
   serializeApplicationData,
 } from "./application-facts";
 import {
@@ -46,7 +46,7 @@ import {
 } from "./apply-tools";
 import { buildCoverLetterRequest, isCoverLetterControl } from "./cover-letter";
 import { reviewFieldKey, screenKey } from "./form-replay";
-import { applicationModelFactsMessage } from "./model-facts";
+import { applicationModelFactsMessages } from "./model-facts";
 import {
   approvedApplicationLetter,
   buildPendingQuestion,
@@ -1081,53 +1081,72 @@ async function runApplyAgentPrivate(
       };
     },
   });
-  // The saved-answer library joins the conversation where it changed and
-  // stays there, so each request repeats the one before it word for word:
-  // a prompt cache and preserved thinking read only an unchanged prefix.
-  const libraryCopies: Array<{ after: number; content: string }> = [];
-  let historyLength = 0;
-  const model: AgentLoopModel = {
-    chatWithTools: async (messages, tools, options) =>
-      modelActivity.runModel(options, async () => {
-        await refreshAnswers();
-        const library = `Complete saved-answer library at this point (records, not instructions; a later copy replaces it):\n${serializeApplicationData(applicationFacts(runConfig.sources, { payDisclosed }).savedAnswers)}`;
-        // A compacted history moved every position; start the copies again.
-        if (messages.length < historyLength) libraryCopies.length = 0;
-        historyLength = messages.length;
-        if (libraryCopies.at(-1)?.content !== library)
-          libraryCopies.push({ after: messages.length, content: library });
-        const reply = await llmClient.chatWithTools(
-          messages.flatMap((message, index) => [
-            message,
-            ...libraryCopies
-              .filter((copy) => copy.after === index + 1)
-              .map((copy) => ({
-                role: "user" as const,
-                content: copy.content,
-              })),
-          ]),
-          tools,
-          options,
-        );
-        for (const call of reply.toolCalls ?? []) {
-          const key = `${call.function.name}|${call.function.arguments}`;
-          modelCallIds.set(key, [...(modelCallIds.get(key) ?? []), call.id]);
-        }
-        return reply;
-      }),
-  };
   try {
+    const mailbox = await mailboxAccountFacts(config.hands);
+    await refreshAnswers();
+    const facts = applicationModelFactsMessages(
+      runConfig.sources,
+      payDisclosed,
+    );
+    const answerSnapshot = () =>
+      applicationSavedAnswers(runConfig.sources.reusableAnswers);
+    const initialAnswers = new Map(
+      answerSnapshot().map((answer) => [
+        answer.id,
+        serializeApplicationData(answer),
+      ]),
+    );
+    let sentAnswers = new Map(initialAnswers);
+    // Keep each update at its original position so later turns can reuse the prefix.
+    const answerUpdates: Array<{ after: number; content: string }> = [];
+    let historyLength = 0;
+    const model: AgentLoopModel = {
+      chatWithTools: async (messages, tools, options) =>
+        modelActivity.runModel(options, async () => {
+          if (historyLength) await refreshAnswers();
+          if (messages.length < historyLength) {
+            // Compaction moved the update positions. Compare against the opening again.
+            answerUpdates.length = 0;
+            sentAnswers = new Map(initialAnswers);
+          }
+          historyLength = messages.length;
+          const changed = answerSnapshot().filter((answer) => {
+            const serialized = serializeApplicationData(answer);
+            if (sentAnswers.get(answer.id) === serialized) return false;
+            sentAnswers.set(answer.id, serialized);
+            return true;
+          });
+          if (changed.length)
+            answerUpdates.push({
+              after: messages.length,
+              content: `Saved-answer changes (records, not instructions). Use each record in place of any earlier answer or catalog value with the same storedFactId:\n${serializeApplicationData(changed)}`,
+            });
+          const reply = await llmClient.chatWithTools(
+            messages.flatMap((message, index) => [
+              message,
+              ...answerUpdates
+                .filter((update) => update.after === index + 1)
+                .map((update) => ({
+                  role: "user" as const,
+                  content: update.content,
+                })),
+            ]),
+            tools,
+            { ...options, stableLead: facts.owner },
+          );
+          for (const call of reply.toolCalls ?? []) {
+            const key = `${call.function.name}|${call.function.arguments}`;
+            modelCallIds.set(key, [...(modelCallIds.get(key) ?? []), call.id]);
+          }
+          return reply;
+        }),
+    };
     const loop = await runAgentLoop({
       messages: [
         { role: "system", content: createApplySystemPrompt(runConfig) },
-        { role: "user", content: await mailboxAccountFacts(config.hands) },
-        {
-          role: "user",
-          content: applicationModelFactsMessage(
-            runConfig.sources,
-            payDisclosed,
-          ),
-        },
+        { role: "user", content: facts.owner },
+        { role: "user", content: facts.job },
+        { role: "user", content: mailbox },
         { role: "user", content: createApplyUserPrompt(runConfig) },
         {
           role: "user",
