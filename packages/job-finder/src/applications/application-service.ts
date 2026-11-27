@@ -184,6 +184,14 @@ export const applicationIdentity = (id: number, attempt: number) => ({
 });
 
 /** Store rows own admission and progress; the existing engine owns the form and send guards. */
+/**
+ * What the run started by the person's Send is told. Their press is the
+ * instruction to send; the model finds the form's own send control on the
+ * page as it is now, restoring what they reviewed if the page lost it.
+ */
+export const PERSON_SEND_INSTRUCTION =
+  "The person reviewed this filled application in Job Finder and pressed Send. Send it now, once, with submit_application on the form's own final send control as it is on the page. If the page was reloaded, closed or lost answers, first restore the answers and files from the earlier application state (they are what the person reviewed), then send. Read the send ledger facts first: a send to this posting that is already confirmed or uncertain is not sent again without checking the site.";
+
 export function createApplicationService(deps: ApplicationServiceDeps) {
   const { jobs, applications, browser } = deps;
   const listingDiscovery = (job: JobDetail) => {
@@ -549,16 +557,26 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     applications.recordOrigin(row.id, new URL(job.applyUrl ?? job.url).origin);
     applications.recordOrigin(row.id, new URL(job.url).origin);
     // Apply captures the default. Only task-local authority can narrow it later.
-    const mode = await modeFor(row);
+    // The person's own Send on the form they reviewed is their instruction
+    // to send it: that run works as Send for me, on the retained page.
+    const personSend = applications.isPersonSend(row.id);
+    const mode = personSend ? "autonomous_submit" : await modeFor(row);
     if (!mode)
       throw new Error("The instruction for this application was withdrawn.");
     const sends = mode === "autonomous_submit";
     let envelope = sends
-      ? await deps.authorizeSending({ application: row, artifact, job, signal })
+      ? await deps.authorizeSending({
+          application: row,
+          artifact,
+          job,
+          signal,
+          ...(personSend ? { personClicked: true } : {}),
+        })
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
     const target = job.applyUrl ?? job.url;
     const instructions = instructionsFor(job, sourceInstructionArtifacts);
+    if (personSend) instructions.push(PERSON_SEND_INSTRUCTION);
     let startingUrl: string | undefined;
     // A continue keeps the page, and with it the files already attached.
     let keptPage = false;
@@ -1828,34 +1846,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
         const row = applications.claimNext();
         if (!row) break;
-        const controller = new AbortController();
-        active.set(row.id, controller);
-        void run(row, controller.signal)
-          .catch(async (error) => {
-            if (stopped) return;
-            if (await deps.isHoldingCurrent()) {
-              applications.continuePreparation(row.id, row.attempt);
-              return;
-            }
-            if (!controller.signal.aborted) onError(error);
-            if (applications.getApplication(row.id)?.state === "submitting")
-              applications.submissionUnknown(row.id, row.attempt);
-            else
-              applications.finishPreparation({
-                id: row.id,
-                attempt: row.attempt,
-                state: "failed",
-                error:
-                  error instanceof Error
-                    ? error.message
-                    : "The application could not finish.",
-              });
-            await closePage(row.id, row.attempt).catch(onError);
-          })
-          .finally(() => {
-            active.delete(row.id);
-            wake();
-          });
+        void runClaimed(row, new AbortController());
       }
     })()
       .catch(onError)
@@ -1865,6 +1856,40 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           pumpAgain = false;
           wake();
         }
+      });
+  }
+
+  /** Runs one claimed attempt, settling it if the run itself fails. */
+  function runClaimed(
+    row: ApplicationRow,
+    controller: AbortController,
+  ): Promise<void> {
+    active.set(row.id, controller);
+    return run(row, controller.signal)
+      .catch(async (error) => {
+        if (stopped) return;
+        if (await deps.isHoldingCurrent()) {
+          applications.continuePreparation(row.id, row.attempt);
+          return;
+        }
+        if (!controller.signal.aborted) onError(error);
+        if (applications.getApplication(row.id)?.state === "submitting")
+          applications.submissionUnknown(row.id, row.attempt);
+        else
+          applications.finishPreparation({
+            id: row.id,
+            attempt: row.attempt,
+            state: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "The application could not finish.",
+          });
+        await closePage(row.id, row.attempt).catch(onError);
+      })
+      .finally(() => {
+        if (active.get(row.id) === controller) active.delete(row.id);
+        wake();
       });
   }
 
@@ -1945,40 +1970,30 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         for (const controller of controllers) controller.abort();
     },
     wake,
+    /**
+     * The person pressed Send on a Ready form, or the sidebar sent one with
+     * its call ID. The in-app model sends it: it reads the page as it is now
+     * (the form they reviewed, or a reloaded or reopened one, which it
+     * restores from the recorded answers first) and presses the form's own
+     * send control through the send ledger. A second press, or the same
+     * call ID again, starts nothing.
+     */
     async sendPrepared(id: number, callId?: string): Promise<boolean> {
       const row = applications.getApplication(id);
-      const work = applications.getWork(id);
-      const job = row && jobs.getJob(row.jobId);
-      if (
-        !row ||
-        !(row.state === "ready" || (callId && row.state === "uncertain")) ||
-        !work ||
-        !job
-      )
+      if (!row || !applications.getWork(id) || !jobs.getJob(row.jobId))
         return false;
+      const claimed = applications.claimPersonSend(
+        id,
+        row.attempt,
+        callId ?? null,
+      );
+      if (!claimed) return false;
       const controller = new AbortController();
       const controllers = personSends.get(id) ?? new Set<AbortController>();
       controllers.add(controller);
       personSends.set(id, controllers);
       try {
-        // Called only by a person's send action or a checked sidebar send instruction.
-        const envelope = await deps.authorizeSending({
-          application: row,
-          artifact: work.resumeArtifact,
-          job,
-          signal: controller.signal,
-          personClicked: true,
-        });
-        await send(
-          row,
-          work.resumeArtifact,
-          envelope,
-          work.profileDigest,
-          controller.signal,
-          true,
-          undefined,
-          callId,
-        );
+        await runClaimed(claimed, controller);
         return applications.getApplication(id)?.state === "submitted";
       } finally {
         controllers.delete(controller);

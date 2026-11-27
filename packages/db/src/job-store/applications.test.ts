@@ -50,6 +50,55 @@ it("stores the model's closed-posting outcome and exposes it in application, tra
   expect(applications.listWorkInState("closed")).toHaveLength(1);
 });
 
+it("the person's Send claims a Ready form once, keeps the send mark across a restart and clears it when the run ends", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  applications.finishPreparation({
+    id: row.id,
+    attempt: row.attempt,
+    state: "ready",
+  });
+  expect(applications.isPersonSend(row.id)).toBe(false);
+  const sending = applications.claimPersonSend(row.id, row.attempt, null)!;
+  expect(sending).toMatchObject({ state: "running", attempt: row.attempt + 1 });
+  expect(applications.isPersonSend(row.id)).toBe(true);
+  // A second press while it runs starts nothing.
+  expect(applications.claimPersonSend(row.id, row.attempt, null)).toBeNull();
+  expect(
+    applications.claimPersonSend(row.id, sending.attempt, null),
+  ).toBeNull();
+  // A restart requeues the run; it is still the person's send.
+  applications.recoverPreparation();
+  expect(applications.isPersonSend(row.id)).toBe(true);
+  const resumed = applications.claimNext()!;
+  expect(applications.isPersonSend(row.id)).toBe(true);
+  applications.finishPreparation({
+    id: row.id,
+    attempt: resumed.attempt,
+    state: "ready",
+  });
+  expect(applications.isPersonSend(row.id)).toBe(false);
+  // A sidebar call ID starts one send; the same call ID never starts another.
+  const sidebar = applications.claimPersonSend(
+    row.id,
+    resumed.attempt,
+    "call-1",
+  )!;
+  expect(sidebar).toMatchObject({ state: "running" });
+  applications.finishPreparation({
+    id: row.id,
+    attempt: sidebar.attempt,
+    state: "ready",
+  });
+  expect(
+    applications.claimPersonSend(row.id, sidebar.attempt, "call-1"),
+  ).toBeNull();
+  expect(
+    applications.claimPersonSend(row.id, sidebar.attempt, "call-2"),
+  ).toMatchObject({ state: "running" });
+});
+
 it("an exact answer key wins before normalized-wording alternatives", () => {
   const { applications } = open();
   const memory = applications.needsYou;

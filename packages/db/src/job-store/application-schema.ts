@@ -17,7 +17,13 @@ CREATE TABLE IF NOT EXISTS applications (
   submission_outcome_id TEXT UNIQUE,
   submission_outcome_json TEXT,
   -- 1 while Open refills a lost page: that run never sends.
-  review_refill INTEGER NOT NULL DEFAULT 0
+  review_refill INTEGER NOT NULL DEFAULT 0,
+  -- 1 while the run the person's Send started is queued or running: that
+  -- run is told to send the form they reviewed.
+  person_send INTEGER NOT NULL DEFAULT 0,
+  -- The call ID of the last send request from the sidebar, kept so the same
+  -- call never starts a second send.
+  send_request TEXT
 );
 CREATE INDEX IF NOT EXISTS applications_by_updated ON applications(updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS applications_by_state ON applications(state, updated_at DESC, id DESC);
@@ -152,6 +158,12 @@ END;
 CREATE TRIGGER IF NOT EXISTS applications_review_refill_done AFTER UPDATE OF state ON applications
 WHEN NEW.review_refill = 1 AND NEW.state NOT IN ('queued', 'running') BEGIN
   UPDATE applications SET review_refill = 0 WHERE id = NEW.id;
+END;
+
+-- The person's Send ends with its run; a restart that requeues it keeps it.
+CREATE TRIGGER IF NOT EXISTS applications_person_send_done AFTER UPDATE OF state ON applications
+WHEN NEW.person_send = 1 AND NEW.state NOT IN ('queued', 'running') BEGIN
+  UPDATE applications SET person_send = 0 WHERE id = NEW.id;
 END;
 
 -- Apply stops when the person takes the job out of Shortlisted (back to Find

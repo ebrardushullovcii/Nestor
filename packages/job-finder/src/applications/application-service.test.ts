@@ -38,6 +38,7 @@ import { seedResumeDraft } from "../internal/resume-workspace-structure";
 import { RESUME_WRITER_VERSION } from "../resumes/write-resume";
 import {
   createApplicationService,
+  PERSON_SEND_INSTRUCTION,
   type ApplicationServiceDeps,
 } from "./application-service";
 import { describeFormQuestion, describeLegacyFormQuestion } from "./questions";
@@ -882,11 +883,114 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
     state: "ready",
     mode: "autonomous_submit",
   });
-  // The person's Send goes out once; a second press sends nothing.
-  expect(await f.service.sendPrepared(row.id)).toBe(true);
+  // The person's Send starts the model on the retained page as Send for me;
+  // its send goes out once and a second press sends nothing.
+  preparation.notReadyToSend = false;
+  const sent = f.service.sendPrepared(row.id);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.execute.mock.calls[1]![1]).toMatchObject({
+    applyAutomationMode: "autonomous_submit",
+  });
+  expect(f.execute.mock.calls[1]![1].instructions).toContain(
+    PERSON_SEND_INSTRUCTION,
+  );
   expect(await f.service.sendPrepared(row.id)).toBe(false);
+  f.releases.shift()!();
+  expect(await sent).toBe(true);
+  expect(await f.service.sendPrepared(row.id)).toBe(false);
+  expect(f.execute).toHaveBeenCalledTimes(2);
   expect(action).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
+it("the person's Send on a Fill in for me form whose page is gone hands the model the reviewed answers, and a repeated sidebar call ID starts nothing", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.answers = [
+    {
+      question: "Full name",
+      answer: "Alex Synthetic",
+      source: "Profile",
+      written: false,
+      groundedIn: [],
+    },
+  ];
+  preparation.notReadyToSend = false;
+  f.applications.applyJobs(
+    { selection: { ids: f.ids } },
+    "confirm_before_submit",
+  );
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute.mock.calls[0]![1]).toMatchObject({
+    applyAutomationMode: "confirm_before_submit",
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  const observation = {
+    identity: { id: "form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "final-control-0", signature: "c".repeat(64) },
+        ordinal: 0,
+        kind: "button" as const,
+        label: "Apply now",
+        formIndex: -1,
+        action: { origin: "https://replica.test", safePath: "/jobs/0" },
+      },
+    ],
+  };
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(() =>
+    Promise.resolve({
+      outcome: "outcome_uncertain",
+      reason: "action_issued",
+      observation,
+      control: observation.controls[0]!,
+      facts: {
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted: true,
+        pageBefore: observation.page,
+        pageAfter: observation.page,
+        urlChanged: false,
+        requestsObservedDuringAction: 1,
+        requestsAfterClick: [],
+      },
+    }),
+  );
+  Object.assign(f.browser, {
+    observeApplicationForm: () => Promise.resolve(observation),
+    executeExactlyOneFinalAction: action,
+  });
+  // The tab was closed: no earlier attempt still holds a page.
+  Object.assign(f.browser, {
+    hasApplicationPageBinding: () => Promise.resolve(false),
+  });
+  const sent = f.service.sendPrepared(row.id, "sidebar-call-1");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.execute.mock.calls[1]![1]).toMatchObject({
+    applyAutomationMode: "autonomous_submit",
+  });
+  expect(preparation.replays.at(-1)).toMatchObject({
+    answers: [expect.objectContaining({ answer: "Alex Synthetic" })],
+  });
+  f.releases.shift()!();
+  expect(await sent).toBe(false);
+  expect(f.applications.getApplication(row.id)?.state).toBe("uncertain");
+  // The same sidebar call again starts no run and presses nothing.
+  expect(await f.service.sendPrepared(row.id, "sidebar-call-1")).toBe(false);
+  expect(f.execute).toHaveBeenCalledTimes(2);
+  expect(action).toHaveBeenCalledOnce();
+  expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
   expect(f.onError).not.toHaveBeenCalled();
 });
 
@@ -3472,11 +3576,19 @@ it("Send binds the seven earlier-step answers of a numbered form through its sto
     observeApplicationForm: () => Promise.resolve(observation),
     executeExactlyOneFinalAction: action,
   });
-  expect(await f.service.sendPrepared(row.id)).toBe(true);
+  // The person's Send runs the model on the retained page with every
+  // earlier-step answer as the reviewed state, and it sends once.
+  preparation.notReadyToSend = false;
+  const sent = f.service.sendPrepared(row.id);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(
+    (preparation.replays.at(-1) as { answers: unknown[] }).answers,
+  ).toHaveLength(7);
+  f.releases.shift()!();
+  expect(await sent).toBe(true);
   expect(action).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
   expect(f.applications.needsYou.list().total).toBe(0);
-  // The Send-time read covered the stored earlier-step questions.
   expect(reads).toEqual([]);
   expect(f.onError).not.toHaveBeenCalled();
 });
