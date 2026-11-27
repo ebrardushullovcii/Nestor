@@ -47,14 +47,14 @@ export function withoutRepeatedBlocks(text: string): string {
   const starts = new Map<string, number[]>();
   const removed = new Set<number>();
   for (let at = 0; at < content.length; ) {
-    const key = content[at].key;
+    const key = content.at(at)?.key ?? "";
     let best = 0;
     for (const earlier of starts.get(key) ?? []) {
       let length = 0;
       while (
         at + length < content.length &&
         earlier + length < at &&
-        content[at + length].key === content[earlier + length].key
+        content.at(at + length)?.key === content.at(earlier + length)?.key
       )
         length++;
       best = Math.max(best, length);
@@ -63,8 +63,8 @@ export function withoutRepeatedBlocks(text: string): string {
       .slice(at, at + best)
       .reduce((total, line) => total + line.key.length, 0);
     if (best >= BLOCK_MIN_LINES && chars >= BLOCK_MIN_CHARS) {
-      const first = content[at].index;
-      const last = content[at + best - 1].index;
+      const first = content.at(at)?.index ?? 0;
+      const last = content.at(at + best - 1)?.index ?? first;
       for (let index = first; index <= last; index++) removed.add(index);
       at += best;
       continue;
@@ -95,9 +95,9 @@ export function splitLinksOnEveryPage<
       const present = new Set(page.map(key));
       return new Set([...common].filter((link) => present.has(link)));
     },
-    new Set(pages[0].map(key)),
+    new Set((pages.at(0) ?? []).map(key)),
   );
-  const shared = pages[0].filter((link) => onEvery.has(key(link)));
+  const shared = (pages.at(0) ?? []).filter((link) => onEvery.has(key(link)));
   return {
     shared,
     own: pages.map((page) => page.filter((link) => !onEvery.has(key(link)))),

@@ -1016,6 +1016,17 @@ export async function readListings(
    * the listings, so consecutive requests for one site share it as a cached
    * prefix; a body the page text already holds is not sent a second time.
    */
+  /** One listing's page text, links and (when it adds text) body. */
+  const pageMaterial = (
+    page: { pageText: string; description?: string } | undefined,
+    links: readonly { label: string; url: string }[] | undefined,
+  ) => ({
+    pageText: page?.pageText ?? "",
+    links: links ?? [],
+    ...(page?.description !== undefined
+      ? { description: page.description }
+      : {}),
+  });
   const pageReadInput = (batch: readonly Read[]) => {
     const pages = batch.map((read) => {
       const pageText = withoutRepeatedBlocks(
@@ -1037,11 +1048,7 @@ export async function readListings(
         url: read.card.url,
         finalUrl: read.page.finalUrl,
         card: read.card.text,
-        pageText: pages[id].pageText,
-        links: links.own[id],
-        ...("description" in pages[id]
-          ? { description: pages[id].description }
-          : {}),
+        ...pageMaterial(pages.at(id), links.own.at(id)),
         published: read.structured
           ? {
               title: read.structured.title,
