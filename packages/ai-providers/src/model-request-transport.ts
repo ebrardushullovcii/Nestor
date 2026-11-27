@@ -38,6 +38,10 @@ import {
 import type { ModelRequestUsage } from "@nestor/contracts";
 import { createModelRequestUsage } from "./model-request-usage";
 import {
+  describeMessagesError,
+  streamMessagesAttempt,
+} from "./anthropic-messages";
+import {
   recordModelRequestEvent,
   finishModelRequestProgress,
 } from "./model-request-events";
@@ -132,8 +136,9 @@ export class ModelRequestHttpError extends Error {
     status: number,
     retryAfterMs: number | null,
     keyOwner: AiKeyOwner = "person",
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "ModelRequestHttpError";
     this.status = status;
     this.retryAfterMs = retryAfterMs;
@@ -967,8 +972,9 @@ async function performModelRequestAttempts(
     input.totalTimeoutMs === undefined
       ? Infinity
       : startedAt + input.totalTimeoutMs;
+  // The Anthropic SDK sets its own stream flag; the body stays as built.
   const requestBody = JSON.stringify(
-    streaming
+    streaming && input.apiMode !== "messages"
       ? {
           ...input.body,
           stream: true,
@@ -1107,6 +1113,52 @@ async function performModelRequestAttempts(
 
     try {
       armIdle();
+      if (input.apiMode === "messages") {
+        const { payload, message } = await streamMessagesAttempt({
+          url: input.url,
+          headers: input.headers,
+          body: input.body,
+          fetchImpl,
+          signal: attemptController.signal,
+          onActivity: armIdle,
+          progressOnly: input.idleOnModelProgressOnly === true,
+          emit: input.onStreamEvent,
+          observeUsage: (observed) => usage.observe(observed),
+        }).catch((error: unknown) => {
+          const described = describeMessagesError(error);
+          if (described?.kind === "http") {
+            httpStatus = described.status;
+            throw new ModelRequestHttpError(
+              described.message,
+              described.status,
+              parseRetryAfterMs(described.retryAfter),
+              "person",
+              { cause: error },
+            );
+          }
+          if (described?.kind === "network") {
+            const network = new Error(described.message, { cause: error });
+            network.name = "FetchError";
+            throw network;
+          }
+          throw error;
+        });
+        httpStatus = 200;
+        if (traceId) {
+          traceEvent("provider_reported", {
+            id: traceId,
+            model: message.model,
+            effort: input.body.output_config ?? null,
+          });
+          traceEvent("provider_response", {
+            id: traceId,
+            response: message,
+            durationMs: Date.now() - traceStarted,
+          });
+        }
+        outcome = "completed";
+        return { ...payload, usage: usage.finish(outcome).payload };
+      }
       const response = await fetchImpl(input.url, {
         method: "POST",
         headers,

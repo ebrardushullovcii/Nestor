@@ -207,6 +207,59 @@ Before using it with candidate data:
 
   npx --yes openai-oauth@2.0.0 stop
 
+## Claude through Anthropic's Messages API
+
+`NESTOR_AI_API_MODE=messages` (and the same value on each role's `_API_MODE`)
+sends that route to Anthropic's native Messages API through the official
+`@anthropic-ai/sdk` (`packages/ai-providers/src/anthropic-messages.ts`).
+Anthropic's OpenAI-compatible endpoint is not a substitute: it has no prompt
+caching, rejects JSON mode, ignores effort and returns no thinking.
+
+```dotenv
+NESTOR_AI_API_KEY=your-anthropic-api-key
+NESTOR_AI_BASE_URL=https://api.anthropic.com/v1
+NESTOR_AI_MODEL=claude-opus-5-5
+NESTOR_AI_API_MODE=messages
+NESTOR_AI_REASONING_EFFORT=medium
+NESTOR_AI_AGENT_REASONING_EFFORT=medium
+NESTOR_AI_AGGRESSIVE_MODEL=claude-opus-5-5
+NESTOR_AI_AGGRESSIVE_API_MODE=messages
+NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=medium
+NESTOR_AI_VISION_BASE_URL=https://api.anthropic.com/v1
+NESTOR_AI_VISION_MODEL=claude-opus-5-5
+NESTOR_AI_VISION_API_MODE=messages
+NESTOR_AI_VISION_REASONING_EFFORT=medium
+NESTOR_AI_ASSISTANT_MODEL=claude-opus-5-5
+NESTOR_AI_ASSISTANT_API_MODE=messages
+```
+
+The tools, facts, retries, idle clock and `[AI request]`/`[AI usage]` records
+are the same as on the other routes. What the route does for the API:
+
+- **Caching.** One `cache_control` breakpoint closes tools + system on every
+  request. A conversation (any request with tools or an earlier assistant
+  turn) also sets top-level automatic caching, so each turn's end is the next
+  turn's cached prefix; a one-shot JSON request writes only the system entry.
+- **Thinking.** Always on (adaptive, summarized so long thoughts keep the
+  stream alive). Each assistant turn's content blocks, thinking signatures
+  included, return unchanged on the next turn as its continuation; a turn the
+  app has since rewritten is rebuilt from the transcript without its thinking.
+  `prefix_mismatch_behavior: "drop_block"` keeps a folded history working.
+- **Effort** goes in `output_config.effort` from the route or task effort
+  (`none` becomes `low`, the lowest Messages offers).
+- **JSON.** A request with a schema uses `output_config.format` (the SDK's
+  schema transform); other JSON tasks are asked for JSON in their prompt.
+- **Refusals.** `fallbacks: "default"` lets the API retry a policy decline on
+  another model inside the request. A refusal after that fails the request with
+  its category; it is not retried. 401, 402 and 403 are the usual access
+  failures.
+- **Output.** `max_tokens` is the model's published output limit (128K).
+
+In `[AI usage]`, `inputTokens` includes cache reads and writes, as on the other
+routes; `cachedInputTokens` is `cache_read_input_tokens` and
+`cacheWriteInputTokens` is `cache_creation_input_tokens`. `cache-report` reads
+the hit rate from the first two.
+
 ## Compatibility fallback
 
 A legacy provider can still be used explicitly:

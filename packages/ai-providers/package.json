@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.11.0",
     "@nestor/agent-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
     "@nestor/core": "workspace:*",

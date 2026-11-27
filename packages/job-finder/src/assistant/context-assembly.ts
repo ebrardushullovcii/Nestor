@@ -52,7 +52,7 @@ const StoredMessageSchema = z.union([
       .optional(),
     continuation: z
       .object({
-        kind: z.literal("reasoning_content"),
+        kind: z.enum(["reasoning_content", "message_content"]),
         route: z.string(),
         text: z.string(),
       })

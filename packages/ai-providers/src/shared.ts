@@ -787,7 +787,10 @@ export interface ChatWithToolsOptions {
   onRequestAttempt?: (event: ModelRequestAttempt) => void;
   /** Ask the provider to constrain the answer to valid JSON. */
   jsonOutput?: boolean;
-  /** Used on routes with verified strict-schema support; other routes keep JSON mode. */
+  /**
+   * Used on routes with verified strict-schema support (Muse on Responses,
+   * every Messages route); other routes keep JSON mode.
+   */
   jsonSchema?: { name: string; schema: Record<string, unknown> };
   includeUsage?: boolean;
   signal?: AbortSignal;

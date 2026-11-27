@@ -38,7 +38,7 @@ export interface AssistantModelCapabilities {
   reservedOutputTokens: number;
   images: boolean;
   /** Private state that must return to the route on later tool turns. */
-  continuation: "reasoning_content" | "none";
+  continuation: "reasoning_content" | "message_content" | "none";
   /** True when the table knew the model; unknown models get the conservative row. */
   known: boolean;
 }
@@ -67,6 +67,16 @@ const CAPABILITY_TABLE: Record<
     reservedOutputTokens: 12_000,
     images: true,
     continuation: "none",
+  },
+  // Anthropic's native Messages API (anthropic-messages.ts).
+  "claude-opus-5-5": {
+    apiMode: "messages",
+    tools: true,
+    streaming: true,
+    contextWindowTokens: 1_000_000,
+    reservedOutputTokens: 16_000,
+    images: true,
+    continuation: "message_content",
   },
 };
 

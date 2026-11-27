@@ -34,6 +34,7 @@ export function createModelRequestUsage(
   const inputBytes = Buffer.byteLength(
     JSON.stringify({
       messages: input.body.messages ?? input.body.input,
+      system: input.body.system,
       instructions: input.body.instructions,
       tools: input.body.tools,
       response_format: input.body.response_format ?? input.body.text,
@@ -104,6 +105,9 @@ export function createModelRequestUsage(
           : {}),
         prompt_cache_hit_tokens:
           count(next.prompt_cache_hit_tokens) ?? usage.prompt_cache_hit_tokens,
+        cache_creation_input_tokens:
+          count(next.cache_creation_input_tokens) ??
+          usage.cache_creation_input_tokens,
         ...(next.completion_tokens_details ||
         next.output_tokens_details ||
         usage.completion_tokens_details
@@ -202,6 +206,9 @@ export function createModelRequestUsage(
           ...normalizeModelUsage(payload),
           ...(usage.total_tokens !== undefined
             ? { providerTotalTokens: usage.total_tokens }
+            : {}),
+          ...(usage.cache_creation_input_tokens !== undefined
+            ? { cacheWriteInputTokens: usage.cache_creation_input_tokens }
             : {}),
           ...metadata,
           finishedAt: new Date().toISOString(),
