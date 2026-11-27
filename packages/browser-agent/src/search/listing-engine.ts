@@ -19,6 +19,7 @@ import {
 } from "@nestor/contracts";
 import type {
   FoundJob,
+  IndexPageLog,
   JobFitUpdate,
   JobDetail,
   ListingCard,
@@ -274,6 +275,11 @@ async function collectSourceObserved(
     indexPages?: Set<string>;
     /** Pages in indexPages are not read again: their cards are already collected. */
     skipReadIndexPages?: boolean;
+    /**
+     * Pages this search finished on the site, kept across restarts. A logged
+     * page is not read again; the pages it led to are read instead.
+     */
+    pageLog?: IndexPageLog;
   },
 ): Promise<SourceInventory> {
   try {
@@ -294,17 +300,39 @@ async function collectSourceObserved(
     alreadyRead = 0;
   const readEarlier = (url: string) =>
     input.skipReadIndexPages === true && input.indexPages?.has(url) === true;
+  const follow = (links: readonly string[]) => {
+    for (const link of links)
+      if (!visited.has(link) && !queue.includes(link)) queue.push(link);
+  };
+  /** A page finished earlier in this search: its cards are accepted. */
+  let resumed = false;
+  const logged = (url: string): boolean => {
+    const links = input.pageLog?.links(url);
+    if (!links) return false;
+    recognized = true;
+    resumed = true;
+    alreadyRead++;
+    follow(links);
+    return true;
+  };
   while (queue.length) {
     input.signal?.throwIfAborted();
     const urls = queue.splice(0, 4).filter((url) => !visited.has(url));
     urls.forEach((url) => visited.add(url));
     await mapConcurrent(urls, 2, async (url) => {
+      // Recorded only when this page left nothing for another lane to read.
+      let finished = true;
+      const unfinished = () => {
+        complete = false;
+        finished = false;
+      };
       try {
         if (readEarlier(url)) {
           recognized = true;
           alreadyRead++;
           return;
         }
+        if (logged(url)) return;
         if (url !== input.source.url && input.lane !== "browser") {
           const feed = await collectPublicFeed({
             ...input,
@@ -313,14 +341,16 @@ async function collectSourceObserved(
           if (feed) {
             recognized = true;
             for (const card of feed.cards) cards.set(card.url, card);
-            if (!feed.complete) complete = false;
+            if (!feed.complete) unfinished();
             notes.push(...feed.notes);
+            await input.onPage?.(feed.cards);
+            if (finished) input.pageLog?.record(url, url, []);
             return;
           }
         }
         const page = await input.readPage(url, { signal: input.signal });
         if (blockedByCheck(page.html) || listingSignInRequired(page.html)) {
-          complete = false;
+          unfinished();
           needsAccess = true;
           notes.push("Sign-in or verification is required.");
           return;
@@ -332,6 +362,7 @@ async function collectSourceObserved(
           alreadyRead++;
           return;
         }
+        if (logged(page.finalUrl)) return;
         input.indexPages?.add(url);
         input.indexPages?.add(page.finalUrl);
         const parsed = readInventoryHtml(
@@ -339,19 +370,26 @@ async function collectSourceObserved(
           page.finalUrl,
           input.source,
         );
+        const done = (links: readonly string[]) => {
+          follow(links);
+          if (finished)
+            input.pageLog?.record(url, page.finalUrl, [
+              ...parsed.directories,
+              ...links,
+            ]);
+        };
         if (parsed.unlinked) {
-          complete = false;
+          unfinished();
           notes.push(
             `${parsed.unlinked} published vacancies at ${page.finalUrl} have no address of their own; browser navigation can read them from the page.`,
           );
         }
         // Category and directory sections are indexes: their postings are
         // collected from their own pages, never read as one vacancy.
-        for (const directory of parsed.directories)
-          if (!visited.has(directory) && !queue.includes(directory))
-            queue.push(directory);
+        follow(parsed.directories);
         if (!parsed.cards.length && parsed.directories.length) {
           recognized = true;
+          done([]);
           return;
         }
         if (
@@ -363,24 +401,21 @@ async function collectSourceObserved(
           recognized = true;
           emptyConfirmed = true;
           notes.push("The site explicitly reports no open positions.");
-          for (const next of parsed.next)
-            if (!visited.has(next) && !queue.includes(next)) queue.push(next);
+          done(parsed.next);
           return;
         }
         if (
           !parsed.cards.length &&
           (parsed.portals.length > 1 || parsed.next.length > 0)
         ) {
-          complete = false;
+          unfinished();
           notes.push(
             `No listing cards were readable at ${page.finalUrl}. A directory is a choice of searches; browser navigation must choose among the observed job directories or pagination using the person's goals.`,
           );
           return;
         }
         if (!parsed.cards.length && parsed.portals.length) {
-          for (const portal of parsed.portals)
-            if (!visited.has(portal) && !queue.includes(portal))
-              queue.push(portal);
+          done(parsed.portals);
           return;
         }
         if (!parsed.cards.length) {
@@ -393,8 +428,9 @@ async function collectSourceObserved(
           ) {
             recognized = true;
             notes.push(`No listings found at ${page.finalUrl}.`);
+            done([]);
           } else {
-            complete = false;
+            unfinished();
             notes.push(
               `No listings found at ${page.finalUrl}; browser navigation may be needed.`,
             );
@@ -403,15 +439,16 @@ async function collectSourceObserved(
         }
         recognized = true;
         if (parsed.needsInteraction) {
-          complete = false;
+          unfinished();
           notes.push(
             `More listings at ${page.finalUrl} need browser interaction.`,
           );
         }
         for (const card of parsed.cards) cards.set(card.url, card);
-        for (const next of parsed.next)
-          if (!visited.has(next) && !queue.includes(next)) queue.push(next);
+        follow(parsed.next);
         await input.onPage?.(parsed.cards);
+        // Its cards are accepted: a restart continues after this page.
+        done(parsed.next);
       } catch (error) {
         input.signal?.throwIfAborted();
         complete = false;
@@ -461,6 +498,7 @@ async function collectSourceObserved(
         : {}),
       notes: fallback.notes,
       ...(fallback.needsYou ? { needsYou: true } : {}),
+      ...(resumed || fallback.resumed ? { resumed: true } : {}),
     };
   }
   const covered =
@@ -477,6 +515,7 @@ async function collectSourceObserved(
     pagesRead: visited.size,
     complete: covered,
     ...(!cards.size && emptyConfirmed ? { emptyConfirmed: true } : {}),
+    ...(resumed ? { resumed: true } : {}),
     notes,
   };
 }
@@ -498,6 +537,8 @@ export async function screenCards(
     readPage?: ListingSearchReader["readPage"];
     /** Publish proven matches while other titles and negative verifications finish. */
     onRelated?: (cards: ListingCard[]) => Promise<void>;
+    /** Keep each batch's unrelated verdicts as they are decided. */
+    onSeen?: (cards: SeenListingCard[]) => Promise<void> | void;
   },
 ): Promise<{
   related: ListingCard[];
@@ -510,6 +551,12 @@ export async function screenCards(
   const key = roleGoalsKey(input.goals);
   const screeningFingerprint = (card: ListingCard) =>
     fingerprint([card.cardFingerprint, professionEvidence(card)]);
+  const seenCard = (card: ListingCard): SeenListingCard => ({
+    url: card.url,
+    cardFingerprint: screeningFingerprint(card),
+    roleGoalsKey: key,
+    verdict: "unrelated",
+  });
   const known =
     (await input.lookupSeenCards?.(
       input.cards.map((card) => ({
@@ -597,6 +644,7 @@ export async function screenCards(
     repair = true,
   ): Promise<void> => {
     let remaining = titles;
+    const rejected: string[] = [];
     const choices = stage === "card" ? [0, 1, 2] : [0, 1];
     try {
       const raw = await ask(
@@ -690,6 +738,7 @@ export async function screenCards(
         if (keep === 0) {
           unrelated.add(key);
           positive.delete(key);
+          rejected.push(key);
         } else {
           unrelated.delete(key);
           positive.add(key);
@@ -703,6 +752,14 @@ export async function screenCards(
         return;
       }
     }
+    // A verdict is final once given; a restart must not ask for it again.
+    const decided = rejected.flatMap((key) =>
+      groups
+        .get(key)!
+        .filter((card) => !gone.has(card.url))
+        .map(seenCard),
+    );
+    if (decided.length) await input.onSeen?.(decided);
     await publishRelated();
     if (repair && remaining.length) {
       await mapConcurrent(batches(remaining, 20), 2, (batch) =>
@@ -875,12 +932,7 @@ export async function screenCards(
   }
   const seen = fresh
     .filter((card) => !gone.has(card.url) && unrelated.has(titleKey(card)))
-    .map((card) => ({
-      url: card.url,
-      cardFingerprint: screeningFingerprint(card),
-      roleGoalsKey: key,
-      verdict: "unrelated" as const,
-    }));
+    .map(seenCard);
   return {
     related: fresh
       .filter(
@@ -925,6 +977,14 @@ export async function readListings(
     ListingSearchReader & {
       cards: readonly ListingCard[];
       lane?: "http" | "browser";
+      /**
+       * Each finished group of cards with its complete result, as soon as it
+       * is read, so the caller can keep it before the other groups end.
+       */
+      onRead?: (
+        cards: readonly ListingCard[],
+        result: ReadListingResult,
+      ) => Promise<void> | void;
     },
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
@@ -1064,7 +1124,11 @@ export async function readListings(
       })),
     };
   };
-  const append = (read: Read, fields: Omit<Fields, "id">): void => {
+  const append = (
+    read: Read,
+    fields: Omit<Fields, "id">,
+    into: FoundJob[] = jobs,
+  ): void => {
     const { closed, isListing, index, canonicalUrl, applyUrl, ...facts } =
       fields;
     // An index of vacancies is never saved as one.
@@ -1072,7 +1136,7 @@ export async function readListings(
     const hiddenReason = closed
       ? "Closed: this vacancy is no longer accepting applications."
       : null;
-    jobs.push({
+    into.push({
       ...facts,
       ...(read.card.evidenceFingerprint
         ? {
@@ -1125,7 +1189,22 @@ export async function readListings(
     // complete. Those facts cannot establish that the posting is still open.
     uncertain.push(read);
   }
-  const readMetadata = async (batch: Read[]): Promise<void> => {
+  // Fetch failures, removed postings and provider-complete reads are final.
+  const cardKey = (card: ListingCard) => `${card.sourceId}\n${card.url}`;
+  const waiting = new Set(uncertain.map((read) => cardKey(read.card)));
+  await input.onRead?.(
+    input.cards.filter((card) => !waiting.has(cardKey(card))),
+    {
+      jobs: [...jobs],
+      failures: [...failures],
+      ...(closed.length ? { closed: [...closed] } : {}),
+    },
+  );
+  const readMetadata = async (
+    batch: Read[],
+    part: ReadListingResult & { indexes: string[] },
+  ): Promise<void> => {
+    const { failures, indexes } = part;
     const answer = await ask(
       input,
       'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
@@ -1161,41 +1240,63 @@ export async function readListings(
         });
         continue;
       }
-      append(read, {
-        title: fields.title || read.card.title || "Title not stated",
-        company: fields.company || "Company not stated",
-        location: fields.location,
-        workModes: fields.workModes,
-        sourceJobId: fields.sourceJobId,
-        employmentType: fields.employmentType,
-        seniority: fields.seniority,
-        salaryText: fields.salaryText,
-        ...(fields.canonicalUrl ? { canonicalUrl: fields.canonicalUrl } : {}),
-        ...(fields.applyUrl !== undefined ? { applyUrl: fields.applyUrl } : {}),
-        closed: fields.closed,
-      });
+      append(
+        read,
+        {
+          title: fields.title || read.card.title || "Title not stated",
+          company: fields.company || "Company not stated",
+          location: fields.location,
+          workModes: fields.workModes,
+          sourceJobId: fields.sourceJobId,
+          employmentType: fields.employmentType,
+          seniority: fields.seniority,
+          salaryText: fields.salaryText,
+          ...(fields.canonicalUrl ? { canonicalUrl: fields.canonicalUrl } : {}),
+          ...(fields.applyUrl !== undefined
+            ? { applyUrl: fields.applyUrl }
+            : {}),
+          closed: fields.closed,
+        },
+        part.jobs,
+      );
     }
   };
   await mapConcurrent(
     batches(uncertain, 32, (read) => read.body.text.length, 40000),
     3,
     async (batch) => {
+      const part = {
+        jobs: [] as FoundJob[],
+        failures: [] as ReadListingResult["failures"],
+        indexes: [] as string[],
+      };
       try {
-        await readMetadata(batch);
+        await readMetadata(batch, part);
       } catch (error) {
         input.signal?.throwIfAborted();
         // Other batches and their completed jobs survive this response failure.
         const completed = new Set(
-          jobs.map((job) => `${job.sourceId}\n${job.url}`),
+          part.jobs.map((job) => `${job.sourceId}\n${job.url}`),
         );
         for (const read of batch)
           if (!completed.has(`${read.card.sourceId}\n${read.card.url}`))
-            failures.push({
+            part.failures.push({
               url: read.card.url,
               reason: error instanceof Error ? error.message : String(error),
               ...(input.lane !== "browser" ? { requiresBrowser: true } : {}),
             });
       }
+      jobs.push(...part.jobs);
+      failures.push(...part.failures);
+      indexes.push(...part.indexes);
+      await input.onRead?.(
+        batch.map((read) => read.card),
+        {
+          jobs: part.jobs,
+          failures: part.failures,
+          ...(part.indexes.length ? { indexes: part.indexes } : {}),
+        },
+      );
     },
   );
   return {

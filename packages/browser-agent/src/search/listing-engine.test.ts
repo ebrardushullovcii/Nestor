@@ -2048,3 +2048,152 @@ test("a page read lists navigation on every page once, ahead of the listings, an
     expect(listing).not.toHaveProperty("description");
   }
 });
+
+test("a restarted collection reads no page it had finished and continues from the pages they led to", async () => {
+  const page = (n: number) =>
+    `<article><p>Employer ${n}</p><h2><a href="/posting?id=${n}">Data Analyst ${n}</a></h2><p>Berlin</p></article>${n < 4 ? `<nav><a href="/?page=${n + 1}" rel="next">Next</a></nav>` : ""}`;
+  const number = (url: string) =>
+    Number(new URL(url).searchParams.get("page") ?? 1);
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({ finalUrl: url, html: page(number(url)) }),
+  );
+  // A durable log shared by both runs, as the store keeps it.
+  const logged = new Map<string, readonly string[]>();
+  const pageLog = {
+    links: (url: string) => logged.get(url) ?? null,
+    record: vi.fn((url: string, finalUrl: string, links: readonly string[]) => {
+      logged.set(url, links);
+      logged.set(finalUrl, links);
+    }),
+  };
+  const accepted: string[] = [];
+  const interrupt = new AbortController();
+  await expect(
+    collectSource({
+      source,
+      readPage,
+      pageLog,
+      signal: interrupt.signal,
+      onPage: (cards) => {
+        accepted.push(...cards.map((card) => card.url));
+        // The app quits while page 3's cards are being accepted.
+        if (accepted.length === 3) {
+          interrupt.abort();
+          throw interrupt.signal.reason;
+        }
+      },
+    }),
+  ).rejects.toBeDefined();
+  // Page 3 is not logged: its acceptance did not finish.
+  expect([...logged.keys()]).toEqual([
+    "https://board.example/",
+    "https://board.example/?page=2",
+  ]);
+  readPage.mockClear();
+  const resumed = await collectSource({
+    source,
+    readPage,
+    pageLog,
+    onPage: (cards) => {
+      accepted.push(...cards.map((card) => card.url));
+    },
+  });
+  expect(readPage.mock.calls.map(([url]) => url)).toEqual([
+    "https://board.example/?page=3",
+    "https://board.example/?page=4",
+  ]);
+  expect(resumed).toMatchObject({ complete: true, resumed: true });
+  expect(resumed.cards.map((card) => card.url)).toEqual([
+    "https://board.example/posting?id=3",
+    "https://board.example/posting?id=4",
+  ]);
+  expect([...new Set(accepted)]).toHaveLength(4);
+});
+
+test("a page another lane must finish is not logged as read", async () => {
+  const record = vi.fn();
+  const inventory = await collectSource({
+    source,
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: '<main>Loading</main><script src="app.js"></script>',
+      }),
+    pageLog: { links: () => null, record },
+  });
+  expect(inventory).toMatchObject({ complete: false, requiresBrowser: true });
+  expect(record).not.toHaveBeenCalled();
+});
+
+test("listing reads hand each finished group over before the other groups end", async () => {
+  const cards = [
+    { ...card("Data Analyst", "a"), providerFacts: undefined },
+    card("Missing", "gone"),
+    card("Senior Data Analyst", "b"),
+  ];
+  const readPage = vi.fn((url: string) =>
+    url.endsWith("/gone")
+      ? Promise.reject(new DiscoveryPageReadError(404))
+      : Promise.resolve({
+          finalUrl: url,
+          html: `<main><h1>${url.endsWith("/a") ? "Data Analyst" : "Senior Data Analyst"}</h1><p>${"Build reporting. ".repeat(40)}</p></main>`,
+        }),
+  );
+  const groups: { urls: string[]; jobs: number; closed: string[] }[] = [];
+  const result = await readListings({
+    client: metadataClient(),
+    readPage,
+    cards,
+    onRead: (read, part) => {
+      groups.push({
+        urls: read.map((card) => card.url),
+        jobs: part.jobs.length,
+        closed: part.closed ?? [],
+      });
+    },
+  });
+  // The removed listing is final after its fetch; the model's batch follows.
+  expect(groups[0]).toEqual({
+    urls: ["https://board.example/gone"],
+    jobs: 0,
+    closed: ["https://board.example/gone"],
+  });
+  expect(
+    groups
+      .slice(1)
+      .flatMap((group) => group.urls)
+      .sort(),
+  ).toEqual(["https://board.example/a", "https://board.example/b"]);
+  expect(groups.reduce((n, group) => n + group.jobs, 0)).toBe(
+    result.jobs.length,
+  );
+  expect(result.jobs).toHaveLength(2);
+});
+
+test("screening hands each batch's unrelated verdicts over as they are decided", async () => {
+  const cards = [card("Data Analyst"), card("Nurse"), card("Chef")];
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"keep":{"0":1,"1":0,"2":0}}' }),
+    ),
+  };
+  const kept: string[][] = [];
+  const result = await screenCards({
+    client,
+    cards,
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "related_roles",
+    },
+    onSeen: (seen) => {
+      // Handed over before screening returns.
+      expect(client.chatWithTools).toHaveBeenCalledOnce();
+      kept.push(seen.map((card) => card.url));
+    },
+  });
+  expect(kept).toEqual([
+    ["https://board.example/Nurse", "https://board.example/Chef"],
+  ]);
+  expect(result.seen.map((card) => card.url)).toEqual(kept[0]);
+});

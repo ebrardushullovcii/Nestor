@@ -429,6 +429,8 @@ export function createJobSearchRunner(
           settings: sourceSettings(settings, source),
           signal: readSignal,
           indexPages: source.indexPages,
+          ...(source.pageLog ? { pageLog: source.pageLog } : {}),
+          ...(source.navigation ? { navigation: source.navigation } : {}),
           knownUrls: (urls) => deps.store.findKnownUrls(urls),
           onCards: async (cards) => {
             await pipeline.accept(source, cards);
@@ -450,7 +452,9 @@ export function createJobSearchRunner(
       );
       readSignal.throwIfAborted();
       await pipeline.accept(source, inventory.cards);
-      if (inventory.complete)
+      // A resumed inventory omits the cards collected before the restart;
+      // it cannot show which queued cards the site no longer lists.
+      if (inventory.complete && !inventory.resumed)
         pipeline.refresh(
           source,
           new Set(inventory.cards.map((card) => card.url)),

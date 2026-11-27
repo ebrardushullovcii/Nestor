@@ -366,6 +366,195 @@ test("quit/reopen resumes only the durable unfinished source once, without re-ad
   }
 });
 
+test("a restart keeps every browser listing read that finished before it and reads only the rest", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-search-browser-reads-"));
+  const file = path.join(dir, "jobs.sqlite");
+  const { store, runner, engine, context } = setup(undefined, file);
+  let reopened: JobStore | undefined;
+  const cards = [1, 2, 3].map((n) => ({
+    ...card("one"),
+    url: `https://one.example/jobs/${n}`,
+    title: `Backend Engineer ${n}`,
+    cardFingerprint: `one:${n}`,
+  }));
+  try {
+    context.sources = context.sources.slice(0, 1);
+    engine.collectSource.mockResolvedValue({
+      cards,
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    });
+    const browserReads: string[] = [];
+    let hold = true;
+    engine.readListings.mockImplementation(
+      async ({ cards: group, lane, onRead, signal }) => {
+        // Every listing on this board needs the browser.
+        if (lane !== "browser")
+          return {
+            jobs: [],
+            failures: group.map((row) => ({
+              url: row.url,
+              reason: "This listing needs a browser read.",
+              requiresBrowser: true,
+            })),
+          };
+        const result = { jobs: [] as FoundJob[], failures: [] };
+        for (const row of group) {
+          browserReads.push(row.url);
+          // The app quits while the third listing is being read.
+          if (hold && row.url === cards[2]!.url)
+            await new Promise<never>((_resolve, reject) =>
+              signal.addEventListener(
+                "abort",
+                () => reject(new Error("Search interrupted")),
+                { once: true },
+              ),
+            );
+          const read = {
+            jobs: [{ ...found(row), sourceJobId: row.url }],
+            failures: [],
+          };
+          result.jobs.push(...read.jobs);
+          await onRead?.([row], read);
+        }
+        return result;
+      },
+    );
+    const started = await runner.start({
+      depth: "thorough",
+      postedWithin: "any",
+    });
+    await vi.waitFor(() => {
+      expect(store.stageCounts().found).toBe(2);
+      expect(browserReads).toContain(cards[2]!.url);
+    });
+    runner.suspend();
+    await yieldTurn();
+    store.close();
+    stores.splice(stores.indexOf(store), 1);
+    reopened = openJobStore(file);
+    hold = false;
+    browserReads.length = 0;
+    engine.readListings.mockClear();
+    const restarted = createJobSearchRunner({
+      store: reopened,
+      engine,
+      readContext: () => Promise.resolve(context),
+    });
+    runners.push(restarted);
+    await vi.waitFor(() =>
+      expect(reopened!.searches.get(started.id)?.state).toBe("done"),
+    );
+    // Only the listing whose read had not finished is read again.
+    expect(browserReads).toEqual([cards[2]!.url]);
+    expect(
+      engine.readListings.mock.calls.flatMap(([input]) =>
+        input.cards.map((row) => row.url),
+      ),
+    ).not.toContain(cards[0]!.url);
+    expect(reopened.stageCounts().found).toBe(3);
+    expect(reopened.searches.get(started.id)).toMatchObject({ added: 3 });
+  } finally {
+    runner.suspend();
+    reopened?.close();
+    if (stores.includes(store)) {
+      store.close();
+      stores.splice(stores.indexOf(store), 1);
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("collection pages and browser progress survive a restart and reach the engine again", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-search-pages-"));
+  const file = path.join(dir, "jobs.sqlite");
+  const { store, runner, engine, context } = setup(undefined, file);
+  let reopened: JobStore | undefined;
+  try {
+    context.sources = context.sources.slice(0, 1);
+    engine.collectSource.mockImplementation(
+      async ({ pageLog, navigation, onCards, signal }) => {
+        await onCards?.([card("one")]);
+        pageLog?.record(
+          "https://one.example/?page=1",
+          "https://one.example/?page=1",
+          ["https://one.example/?page=2"],
+        );
+        navigation?.save("https://one.example/", {
+          currentUrl: "https://one.example/?page=2",
+          visitedUrls: ["https://one.example/", "https://one.example/?page=2"],
+          collected: 1,
+          stepCount: 4,
+          savedAt: now,
+        });
+        return new Promise((_resolve, reject) =>
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("Search interrupted")),
+            { once: true },
+          ),
+        );
+      },
+    );
+    const started = await runner.start({ postedWithin: "any" });
+    await vi.waitFor(() => expect(store.stageCounts().found).toBe(1));
+    runner.suspend();
+    await yieldTurn();
+    store.close();
+    stores.splice(stores.indexOf(store), 1);
+    reopened = openJobStore(file);
+    const seen = deferred<{
+      links: readonly string[] | null;
+      progress: unknown;
+    }>();
+    engine.collectSource.mockImplementation(({ pageLog, navigation }) => {
+      seen.resolve({
+        links: pageLog?.links("https://one.example/?page=1") ?? null,
+        progress: navigation?.read("https://one.example/") ?? null,
+      });
+      return Promise.resolve({
+        cards: [],
+        pagesRead: 1,
+        complete: true,
+        resumed: true,
+        notes: [],
+      });
+    });
+    const restarted = createJobSearchRunner({
+      store: reopened,
+      engine,
+      readContext: () => Promise.resolve(context),
+    });
+    runners.push(restarted);
+    const restored = await seen.promise;
+    expect(restored.links).toEqual(["https://one.example/?page=2"]);
+    expect(restored.progress).toMatchObject({
+      currentUrl: "https://one.example/?page=2",
+      collected: 1,
+    });
+    await vi.waitFor(() =>
+      expect(reopened!.searches.get(started.id)?.state).toBe("done"),
+    );
+    // A resumed inventory without the earlier cards does not drop them.
+    expect(reopened.stageCounts().found).toBe(1);
+    // A settled source keeps no resume state.
+    const rows = createSearchSourcesStore(reopened);
+    expect(rows.pageLog(started.id, "one").restored).toBe(0);
+    expect(
+      rows.navigation(started.id, "one", "https://one.example/"),
+    ).toBeNull();
+  } finally {
+    runner.suspend();
+    reopened?.close();
+    if (stores.includes(store)) {
+      store.close();
+      stores.splice(stores.indexOf(store), 1);
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a pre-queue crash resumes waiting/searching rows and leaves settled sources alone", async () => {
   const { store, runner, engine, context } = setup();
   const search = store.searches.start(

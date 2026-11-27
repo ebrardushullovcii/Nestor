@@ -161,29 +161,59 @@ export function createSearchPipeline(input: {
       const emitted = new Set<string>();
       let reading = Promise.resolve();
       const readRelated = async (relatedCards: readonly ListingCard[]) => {
-        const result = await Promise.resolve()
-          .then(() =>
-            deps.engine.readListings({
-              cards: relatedCards,
-              context,
-              signal,
-              lane: "http",
-            }),
-          )
-          .catch((error: unknown): ReadListingResult => {
-            signal.throwIfAborted();
-            const reason =
-              error instanceof Error ? error.message : String(error);
-            return {
-              jobs: [],
-              failures: relatedCards.map((card) => ({
-                url: card.url,
-                reason,
-                requiresBrowser: true,
-              })),
-            };
+        // Each finished group is kept as soon as it is read; a restart reads
+        // only what had not finished.
+        const handled = new Set<ListingCard>();
+        let streamed = Promise.resolve();
+        const keep = (
+          cards: readonly ListingCard[],
+          result: ReadListingResult,
+        ) => {
+          const own = relatedCards.filter(
+            (card) =>
+              !handled.has(card) &&
+              cards.some(
+                (read) =>
+                  read.url === card.url && read.sourceId === card.sourceId,
+              ),
+          );
+          for (const card of own) handled.add(card);
+          streamed = streamed.then(() => readDone(own, result));
+          return streamed;
+        };
+        let result: ReadListingResult;
+        try {
+          result = await deps.engine.readListings({
+            cards: relatedCards,
+            context,
+            signal,
+            lane: "http",
+            onRead: keep,
           });
+        } catch (error) {
+          signal.throwIfAborted();
+          const reason = error instanceof Error ? error.message : String(error);
+          const rest = relatedCards.filter((card) => !handled.has(card));
+          result = {
+            jobs: [],
+            failures: rest.map((card) => ({
+              url: card.url,
+              reason,
+              requiresBrowser: true,
+            })),
+          };
+          await keep(rest, result);
+        }
+        await streamed;
+        // A reader that does not hand groups over returns them all at once.
+        if (handled.size === 0) await keep(relatedCards, result);
+      };
+      const readDone = async (
+        relatedCards: readonly ListingCard[],
+        result: ReadListingResult,
+      ) => {
         signal.throwIfAborted();
+        if (!relatedCards.length) return;
         const deferredUrls = new Set(
           result.failures
             .filter((failure) => failure.requiresBrowser)
@@ -220,6 +250,26 @@ export function createSearchPipeline(input: {
         for (const [id, group] of deferred) {
           const source = sources.get(id)!;
           input.browser(source, async (browserSignal) => {
+            // Each listing is kept as soon as its browser read ends, so a
+            // restart does not lose the reads a long group had finished.
+            const handled = new Set<ListingCard>();
+            const keep = (
+              cards: readonly ListingCard[],
+              result: ReadListingResult,
+            ) => {
+              signal.throwIfAborted();
+              browserSignal.throwIfAborted();
+              const own = group.filter(
+                (card) =>
+                  !handled.has(card) &&
+                  cards.some(
+                    (read) =>
+                      read.url === card.url && read.sourceId === card.sourceId,
+                  ),
+              );
+              for (const card of own) handled.add(card);
+              finishRead(own, result);
+            };
             let result: ReadListingResult;
             try {
               result = await deps.engine.readListings({
@@ -227,21 +277,26 @@ export function createSearchPipeline(input: {
                 context,
                 signal: browserSignal,
                 lane: "browser",
+                onRead: (cards, read) => {
+                  keep(cards, read);
+                  return Promise.resolve();
+                },
               });
             } catch (error) {
               signal.throwIfAborted();
+              const rest = group.filter((card) => !handled.has(card));
               result = {
                 jobs: [],
-                failures: group.map((card) => ({
+                failures: rest.map((card) => ({
                   url: card.url,
                   reason:
                     error instanceof Error ? error.message : String(error),
                 })),
               };
+              keep(rest, result);
             }
-            signal.throwIfAborted();
-            browserSignal.throwIfAborted();
-            finishRead(group, result);
+            // A reader that does not hand listings over returns them all.
+            if (handled.size === 0) keep(group, result);
           });
         }
       };
@@ -275,6 +330,8 @@ export function createSearchPipeline(input: {
         knownUrls: (urls) => deps.store.findKnownUrls(urls),
         refreshUrls,
         seenCards: (cards, key) => deps.store.lookupSeenCards(cards, key),
+        // Kept as each batch decides, so a restart does not screen them again.
+        onSeen: (seen) => deps.store.rememberSeenCards(seen),
       });
       signal.throwIfAborted();
       deps.store.rememberSeenCards(screened.seen);
@@ -345,6 +402,8 @@ export function createSearchPipeline(input: {
         signal: laneSignal,
         indexPages: source.indexPages,
         skipReadIndexPages: true,
+        ...(source.pageLog ? { pageLog: source.pageLog } : {}),
+        ...(source.navigation ? { navigation: source.navigation } : {}),
         knownUrls: (urls) => deps.store.findKnownUrls(urls),
         onCards: (cards) => accept(source, cards),
         message: () => {},
@@ -406,6 +465,14 @@ export function createSearchPipeline(input: {
   return {
     start: () => waves.push([]),
     restore(source: SourceWork) {
+      const id = source.target.id;
+      // What this search had finished on the site before a restart.
+      source.pageLog = durable.pageLog(input.searchId, id);
+      source.navigation = {
+        read: (startUrl) => durable.navigation(input.searchId, id, startUrl),
+        save: (startUrl, progress) =>
+          durable.saveNavigation(input.searchId, id, startUrl, progress),
+      };
       const urls = durable.cardUrls(input.searchId, source.target.id);
       for (const url of urls) source.urls.add(url);
       if (urls.length) restored.set(source.target.id, urls);
