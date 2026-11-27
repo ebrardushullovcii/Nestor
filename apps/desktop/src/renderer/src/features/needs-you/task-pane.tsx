@@ -609,7 +609,9 @@ export function TaskPane(props: {
                       ? "Complete the CAPTCHA"
                       : "Complete verification"}
               </h2>
-              <p className="text-sm text-foreground-soft">{task.prompt}</p>
+              <p className="whitespace-pre-wrap text-sm text-foreground-soft">
+                {task.prompt}
+              </p>
               <p className="text-sm text-foreground-muted">
                 {task.blockedUrl
                   ? "Open the job in your own browser to apply by hand. These applications stay blocked; Job Finder will not retry this site."
