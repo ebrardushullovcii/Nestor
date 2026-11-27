@@ -95,6 +95,13 @@ export interface AgentLoopModel {
     content?: string;
     toolCalls?: AgentLoopToolCall[];
     continuation?: AgentLoopContinuation;
+    /**
+     * The route reads this conversation from a prompt cache that an edit to
+     * an earlier message invalidates, and an edit also discards its preserved
+     * thinking. The loop then keeps the history append-only: superseded
+     * content is not folded.
+     */
+    appendOnlyHistory?: boolean;
   }>;
 }
 
@@ -202,9 +209,7 @@ export interface AgentLoopOptions extends RuntimeObservers {
   afterToolBatch?: () => Promise<string | null>;
   /** Finish from the host's verified state before spending another model call. */
   beforeModelTurn?: () =>
-    | AgentLoopFinish
-    | null
-    | Promise<AgentLoopFinish | null>;
+    AgentLoopFinish | null | Promise<AgentLoopFinish | null>;
   /**
    * A reply with words and no tool call. The host may take it as a step of
    * its own (most often the model reporting that it is done) instead of the
@@ -434,6 +439,8 @@ export async function runAgentLoop(
   // Messages the last model request sent; a fold that rewrites inside them
   // makes the provider read them again.
   let sentMessages = 0;
+  // Set once the route asks for an unedited history (see AgentLoopModel).
+  let appendOnlyHistory = false;
   let progressSteps = 0;
   let modelMs = 0;
   let toolMs = 0;
@@ -584,6 +591,7 @@ export async function runAgentLoop(
       }
     }
 
+    if (response.appendOnlyHistory) appendOnlyHistory = true;
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
       messages.push({
@@ -886,7 +894,7 @@ export async function runAgentLoop(
       }
     }
     if (observation) messages.push({ role: "user", content: observation });
-    if (options.supersededContent && contextHistory) {
+    if (options.supersededContent && contextHistory && !appendOnlyHistory) {
       const folded = foldSupersededContent(
         messages,
         options.supersededContent(messages),

@@ -822,6 +822,8 @@ export interface ChatWithToolsResult {
   usage?: ModelTurnUsage;
   finishReason?: string;
   continuation?: ModelContinuation;
+  /** Keep this conversation's earlier messages unedited (see AgentLoopModel). */
+  appendOnlyHistory?: boolean;
 }
 
 export interface AgentCapableJobFinderAiClient extends JobFinderAiClient {
