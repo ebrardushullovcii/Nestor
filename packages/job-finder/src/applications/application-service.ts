@@ -51,6 +51,7 @@ import {
   type JobStore,
   type SendGuards,
 } from "@nestor/db/job-store";
+import { traceEvent } from "@nestor/core/run-trace";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
@@ -184,6 +185,57 @@ export const applicationIdentity = (id: number, attempt: number) => ({
   runId: `application_run_${id}`,
   resultId: `application_${id}_attempt_${attempt}`,
 });
+
+type SendLedger = Pick<SendGuards, "getSubmissionIdempotencyRecord"> & {
+  listSubmissionOutcomeRecords(options?: {
+    jobId?: string;
+  }): Promise<readonly { id?: string; idempotencyKey?: string }[]>;
+};
+
+/**
+ * This attempt's send as the send ledger holds it now: a confirmed send, or
+ * else the latest uncertain one. Null when the ledger recorded no send.
+ */
+export async function recordedSend(
+  ledger: SendLedger,
+  row: Pick<ApplicationRow, "id" | "jobId" | "attempt">,
+): Promise<SubmissionOutcomeRecord | null> {
+  const identity = applicationIdentity(row.id, row.attempt);
+  const sends = (
+    await currentSendOutcomes(
+      ledger,
+      await ledger.listSubmissionOutcomeRecords({ jobId: String(row.jobId) }),
+    )
+  )
+    .map((outcome) => SubmissionOutcomeRecordSchema.parse(outcome))
+    .filter(
+      (outcome) =>
+        outcome.runId === identity.runId &&
+        outcome.resultId === identity.resultId &&
+        ["submitted", "outcome_uncertain"].includes(outcome.outcome),
+    )
+    .sort((a, b) => b.attemptedAt.localeCompare(a.attemptedAt));
+  return sends.find((s) => s.outcome === "submitted") ?? sends[0] ?? null;
+}
+
+/**
+ * Applications a run left Failed after the ledger recorded their send (a
+ * result it could not save) follow the ledger: Applied or Uncertain. Runs
+ * at start, so a row stored that way heals without anyone pressing anything.
+ */
+export async function followRecordedSends(
+  applications: Pick<ApplicationStore, "listWorkInState" | "followSendLedger">,
+  ledger: SendLedger,
+): Promise<number[]> {
+  const healed: number[] = [];
+  // Every failed row: -1 is SQLite's "no limit".
+  for (const row of applications.listWorkInState("failed", -1)) {
+    const sent = await recordedSend(ledger, row);
+    if (sent && applications.followSendLedger(row.id, row.attempt, sent))
+      healed.push(row.id);
+  }
+  return healed;
+}
 
 /** Store rows own admission and progress; the existing engine owns the form and send guards. */
 /**
@@ -1527,9 +1579,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         prepared.readyToSend,
       );
     } else {
+      // Fill in for me leaves the send to the person: its finish is the
+      // run's summary, already saved with its execution, never an error. A
+      // Send for me run that finished without sending keeps why it waits.
       await leaveForPerson(
         row,
-        `The model finished without sending: ${result.detail}`,
+        sends
+          ? `The model finished without sending: ${result.detail}`
+          : undefined,
       );
     }
   }
@@ -1925,6 +1982,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           return;
         }
         if (!controller.signal.aborted) onError(error);
+        // The run failed after the ledger recorded its send: the row says
+        // what the ledger says, never Failed with Apply again on offer.
+        const sent = await recordedSend(deps.authorityRepository, row).catch(
+          (ledgerError: unknown) => (onError(ledgerError), null),
+        );
+        if (sent && applications.followSendLedger(row.id, row.attempt, sent)) {
+          if (sent.outcome === "submitted")
+            await closePage(row.id, row.attempt).catch(onError);
+          else waiting.delete(row.id);
+          return;
+        }
         if (applications.getApplication(row.id)?.state === "submitting")
           applications.submissionUnknown(row.id, row.attempt);
         else
@@ -1973,6 +2041,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           );
         else applications.submissionUnknown(row.id, row.attempt);
       }
+      await followRecordedSends(applications, deps.authorityRepository);
       stopped = false;
       unsubscribePersonSend =
         browser.onApplicationSendPressed?.((press) => {
@@ -2039,6 +2108,23 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         row.attempt,
         callId ?? null,
       );
+      // The press is the person's own action, recorded in the run trace
+      // under both attempts: the form they reviewed and the run that sends it.
+      traceEvent("operator_action", {
+        source: callId ? "person (sidebar)" : "person",
+        action: "send_application",
+        applicationKeys: [
+          applicationIdentity(id, row.attempt).resultId,
+          ...(claimed
+            ? [applicationIdentity(id, claimed.attempt).resultId]
+            : []),
+        ],
+        detail: claimed
+          ? `Send pressed on the ${row.state} application (attempt ${row.attempt}); attempt ${claimed.attempt} sends it`
+          : `Send pressed on the ${row.state} application (attempt ${row.attempt}); it started no new send`,
+        outcome: claimed ? "ok" : "no new send",
+        ...(callId ? { callId } : {}),
+      });
       if (!claimed) return false;
       const controller = new AbortController();
       const controllers = personSends.get(id) ?? new Set<AbortController>();

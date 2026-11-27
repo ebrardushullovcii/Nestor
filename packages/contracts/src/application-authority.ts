@@ -1194,7 +1194,8 @@ export type SubmissionActionRequest = z.infer<
 export const SubmissionBrowserActionDiagnosticsSchema = z
   .object({
     reason: NonEmptyStringSchema.max(80),
-    detail: NonEmptyStringSchema.max(500).optional(),
+    // The site's message or validation errors, kept whole.
+    detail: NonEmptyStringSchema.optional(),
     actionAttempted: z.boolean().optional(),
     actionIssued: z.boolean().optional(),
     actionCompleted: z.boolean().optional(),

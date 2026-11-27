@@ -27,6 +27,8 @@ import {
   createSendGuards,
   openJobStore,
 } from "@nestor/db/job-store";
+import { traceEvent } from "@nestor/core/run-trace";
+import type * as RunTrace from "@nestor/core/run-trace";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,6 +71,11 @@ const preparation = vi.hoisted(() => ({
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["recordSendOutcome"],
 }));
 
+// The run trace is evidence only; tests read what it was told to record.
+vi.mock("@nestor/core/run-trace", async (importOriginal) => {
+  const actual = await importOriginal<typeof RunTrace>();
+  return { ...actual, traceEvent: vi.fn(actual.traceEvent) };
+});
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
   const actual = await importOriginal<typeof ApplicationPreparation>();
   return {
@@ -886,6 +893,7 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   // The person's Send starts the model on the retained page as Send for me;
   // its send goes out once and a second press sends nothing.
   preparation.notReadyToSend = false;
+  vi.mocked(traceEvent).mockClear();
   const sent = f.service.sendPrepared(row.id);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(f.execute.mock.calls[1]![1]).toMatchObject({
@@ -902,6 +910,31 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   expect(action).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
   expect(f.onError).not.toHaveBeenCalled();
+  // Each press on the live item is the person's own action in the run
+  // trace, under the form they reviewed and the attempt that sends it; a
+  // press while it sends starts nothing.
+  const presses = vi
+    .mocked(traceEvent)
+    .mock.calls.filter(
+      ([event, detail]) =>
+        event === "operator_action" && detail.action === "send_application",
+    )
+    .map(([, detail]) => detail);
+  expect(presses).toEqual([
+    expect.objectContaining({
+      source: "person",
+      applicationKeys: [
+        `application_${row.id}_attempt_${row.attempt}`,
+        `application_${row.id}_attempt_${row.attempt + 1}`,
+      ],
+      outcome: "ok",
+    }),
+    expect.objectContaining({
+      source: "person",
+      applicationKeys: [`application_${row.id}_attempt_${row.attempt + 1}`],
+      outcome: "no new send",
+    }),
+  ]);
 });
 
 it("the person's Send on a Fill in for me form whose page is gone hands the model the reviewed answers, and a repeated sidebar call ID starts nothing", async () => {
@@ -2190,10 +2223,10 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
   await vi.waitFor(() =>
     expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
   );
-  // Fill always leaves the send to the person: nothing more to say.
-  expect(f.applications.getApplication(row.id)?.error).toBe(
-    "The model finished without sending: Filled form",
-  );
+  // Fill always leaves the send to the person: a clean finish is Ready with
+  // the run's summary, never an error.
+  expect(f.applications.getApplication(row.id)?.error).toBeNull();
+  expect(f.applications.getWork(row.id)?.execution.summary).toBeTruthy();
   preparation.answers = [];
 });
 
@@ -2497,6 +2530,87 @@ it("a press older than the application's own state is not the person's send", as
   });
   await vi.advanceTimersByTimeAsync(2_000);
   expect(f.applications.listApplications().rows[0]?.state).toBe("ready");
+});
+
+it("a run that fails after the ledger recorded its send shows the send, and a row stored Failed that way heals at start", async () => {
+  const f = await setup(2);
+  const at = new Date().toISOString();
+  const receipt = (row: { id: number; jobId: number; attempt: number }) =>
+    SubmissionOutcomeRecordSchema.parse({
+      id: `receipt_${row.id}`,
+      preflightId: `preflight_${row.id}`,
+      idempotencyKey: `send_${row.id}`,
+      authorityEnvelopeId: "permission",
+      authorityRevision: 1,
+      jobId: String(row.jobId),
+      applicationRecordId: `application_${row.id}`,
+      runId: `application_run_${row.id}`,
+      resultId: `application_${row.id}_attempt_${row.attempt}`,
+      outcome: "submitted",
+      attemptedAt: at,
+      verifiedAt: at,
+      evidence: [
+        {
+          id: "employer",
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: { origin: "https://replica.test", safePath: "/thanks" },
+          artifactRefId: null,
+          summary: "Thank you for your interest.",
+        },
+      ],
+      retry: { eligible: false, blockReason: "submission_confirmed" },
+    });
+  const ledger = new Map<string, ReturnType<typeof receipt>>();
+  vi.mocked(
+    f.deps.authorityRepository.listSubmissionOutcomeRecords,
+  ).mockImplementation(({ jobId } = {}) =>
+    Promise.resolve([...ledger.values()].filter((r) => r.jobId === jobId)),
+  );
+  Object.assign(f.deps.authorityRepository, {
+    getSubmissionIdempotencyRecord: (key: string) =>
+      Promise.resolve({ outcomeId: key.replace("send_", "receipt_") }),
+  });
+  // R8 application 51: the site took the send, then the run's result could
+  // not be saved and the row was stored Failed with that error.
+  f.applications.applyJobs({ selection: { ids: [f.ids[0]!] } });
+  const stored = f.applications.claimNext()!;
+  ledger.set(String(stored.id), receipt(stored));
+  f.applications.finishPreparation({
+    id: stored.id,
+    attempt: stored.attempt,
+    state: "failed",
+    error: '[{"code":"too_big","path":["questionContexts",1,"prompt"]}]',
+  });
+  await f.service.start();
+  expect(f.applications.getApplication(stored.id)).toMatchObject({
+    state: "submitted",
+    error: null,
+  });
+  expect(f.jobs.getJob(stored.jobId)?.stage).toBe("applied");
+  // A live run: the send is in the ledger, then saving its result fails.
+  vi.spyOn(f.applications, "saveWork").mockImplementationOnce(() => {
+    const live = f.applications
+      .listApplications()
+      .rows.find((row) => row.jobId === f.ids[1])!;
+    ledger.set(String(live.id), receipt(live));
+    throw new Error("The run's result could not be saved.");
+  });
+  f.applications.applyJobs({ selection: { ids: [f.ids[1]!] } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(
+      f.applications
+        .listApplications()
+        .rows.find((row) => row.jobId === f.ids[1])?.state,
+    ).toBe("submitted"),
+  );
+  expect(f.onError).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: "The run's result could not be saved.",
+    }),
+  );
 });
 
 it("recovers interrupted preparation, settles an interrupted send from its saved outcome or holds it for confirmation, and a restart from disk resends nothing", async () => {

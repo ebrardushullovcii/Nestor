@@ -172,6 +172,55 @@ test("URL credentials are masked without consuming neighbouring JSON fields", ()
     "https://[secret omitted]@example.test/path",
   );
 });
+test("one-time link tokens are masked; ordinary job and page addresses stay readable", () => {
+  const token =
+    "Xk9fQ2mLp7Rt4Vw8Zb3Nc6Hd1Js5Ga0Ye2Uo4Ii7Lk9Mn3Bv6Cx8Tq1Wr5Ep0Za2Sd4Fg6Hj8Kl0Pq3Rs5Tu7Vw9Xy1Za3Bc5De";
+  const masked = {
+    // R8 05: the Workday activation link from the account email.
+    workday: [
+      `https://jdpa.wd501.myworkdayjobs.com/JDPower/activate/${token}/?redirect=%2Fen-US%2FJDPower%2Fjob`,
+      "https://jdpa.wd501.myworkdayjobs.com/JDPower/activate/[secret omitted]/?redirect=%2Fen-US%2FJDPower%2Fjob",
+    ],
+    reset: [
+      "https://app.example.test/users/password/reset/MQ/5xk-1f2e3d4c5b6a79881a2b3c4d5e6f7a8b",
+      "https://app.example.test/users/password/reset/MQ/[secret omitted]",
+    ],
+    verify: [
+      "https://careers.example.test/verify-email?verification_code=482913&email=a%40b.test",
+      "https://careers.example.test/verify-email?verification_code=[secret omitted]&email=a%40b.test",
+    ],
+    magic: [
+      "https://jobs.example.test/login?magic_token=abc123def456",
+      "https://jobs.example.test/login?magic_token=[secret omitted]",
+    ],
+    fragment: [
+      "https://auth.example.test/callback#access_token=eyJhbGci.eyJzdWIi.sig",
+      "https://auth.example.test/callback#access_token=[secret omitted]",
+    ],
+    opaque: [
+      `https://mail.example.test/l/${token}`,
+      "https://mail.example.test/l/[secret omitted]",
+    ],
+  };
+  for (const [input, output] of Object.values(masked))
+    expect(traceSafe(input)).toBe(output);
+  expect(
+    traceSafe(JSON.stringify({ text: `Open ${masked.workday[0]}.` })),
+  ).toBe(JSON.stringify({ text: `Open ${masked.workday[1]}.` }));
+  for (const kept of [
+    "https://jdpa.wd501.myworkdayjobs.com/en-US/JDPower/job/UK---Remote-AV/Software-Engineer_R-100576/apply/applyManually",
+    "https://circle.wd1.myworkdayjobs.com/en-US/Circle/job/San-Francisco---remote-first-in-US/Distinguished-Software-Engineer_JR100849",
+    "https://job-boards.greenhouse.io/monumentsoftwareinc/jobs/4959710007/confirmation",
+    "https://jobs.lever.co/acme/8f3e2d1c-4b5a-4c6d-9e8f-0a1b2c3d4e5f/apply",
+    "https://candidateportal.ceipal.com/job-details/cVbpJOo00RXqqaubHy2xKhYqVIRFkfn1PmqGmlQs58M",
+    "https://himalayas.app/companies/xperteez-technology/jobs/sr-full-stack-software-engineer-remote-6677362412",
+    "https://kombo-api.notion.site/Join-Kombo-05435d42f09a4b85b2083ae2266543af?pvs=4",
+    "https://www.arbeitnow.com/jobs/companies/mozilla/staff-software-engineer-firefox-enterprise-365209/apply",
+    "https://job-boards.greenhouse.io/mozilla/jobs/8142616?utm_source=arbeitnow.com&ref=arbeitnow.com",
+    "https://www.indeed.com/viewjob?jk=4f8c2a9e1b3d5f70&from=serp",
+  ])
+    expect(traceSafe(kept)).toBe(kept);
+});
 test("trace omits credentials, MFA answers and private reasoning but retains the person's facts", () => {
   vi.stubEnv("NESTOR_TEST_API_KEY", "test-api-secret");
   const text = JSON.stringify(

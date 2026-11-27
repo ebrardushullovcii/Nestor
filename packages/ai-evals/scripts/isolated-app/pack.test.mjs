@@ -562,3 +562,254 @@ test("an interrupted run's pack holds both attempts and every operator action wi
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a pack beside a concurrent search keeps its own run, masks one-time links and shows the person's Send", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "nestor-pack-own-run-"));
+  try {
+    const at = (s) => `2026-11-27T02:40:${s}Z`;
+    const data = path.join(root, "profile");
+    mkdirSync(data);
+    writeFileSync(
+      path.join(data, "nestor-profile-provenance.json"),
+      JSON.stringify({ kind: "synthetic" }),
+    );
+    const db = new DatabaseSync(path.join(data, "job-finder.sqlite"));
+    db.exec(`CREATE TABLE applications(id INTEGER,job_id INTEGER,attempt INTEGER,mode TEXT,state TEXT,error TEXT,submission_outcome_json TEXT,queued_at INTEGER,updated_at INTEGER);
+      INSERT INTO applications VALUES(50,9,2,'confirm_before_submit','submitted',NULL,NULL,${Date.parse(at("00.000"))},${Date.parse(at("59.000"))});
+      CREATE TABLE searches(id TEXT,state TEXT,settings_json TEXT,started_at INTEGER,finished_at INTEGER,sources_total INTEGER,sources_done INTEGER,found INTEGER,added INTEGER,merged INTEGER,already_saved INTEGER,scored INTEGER,error TEXT);
+      INSERT INTO searches VALUES('search_side','done','{}',${Date.parse(at("00.000"))},${Date.parse(at("59.000"))},1,1,1,1,0,0,1,NULL);
+      CREATE TABLE search_sources(search_id TEXT,source_id TEXT,label TEXT,state TEXT,lane TEXT,phase TEXT,url TEXT,cards INTEGER,related INTEGER,unrelated INTEGER,seen INTEGER,found INTEGER,hidden INTEGER,added INTEGER,failed_reads INTEGER,message TEXT);
+      INSERT INTO search_sources VALUES('search_side','14','ycombinator.com','done','browser',NULL,'https://www.ycombinator.com/jobs',1,1,0,0,1,0,1,0,NULL);`);
+    db.close();
+    const trace = path.join(root, "trace");
+    mkdirSync(path.join(trace, "shots"), { recursive: true });
+    const shot = createCanvas(40, 20).toBuffer("image/png");
+    writeFileSync(path.join(trace, "shots/app.png"), shot);
+    writeFileSync(path.join(trace, "shots/search.png"), shot);
+    // A one-time Workday activation link, as the model read it from email.
+    const token =
+      "Xk9fQ2mLp7Rt4Vw8Zb3Nc6Hd1Js5Ga0Ye2Uo4Ii7Lk9Mn3Bv6Cx8Tq1Wr5Ep0Za2Sd4Fg6Hj8Kl0";
+    const activation = `https://jdpa.wd501.myworkdayjobs.com/JDPower/activate/${token}/?redirect=%2Fen-US%2FJDPower%2Fjob%2FUK---Remote-AV%2FSoftware-Engineer_R-100576%2Fapply`;
+    const jobUrl =
+      "https://jdpa.wd501.myworkdayjobs.com/en-US/JDPower/job/UK---Remote-AV/Software-Engineer_R-100576";
+    const events = [
+      {
+        event: "run_header",
+        at: "2026-11-27T02:39:59.000Z",
+        network: "live",
+        ai: "live",
+      },
+      {
+        event: "tool_call",
+        at: at("10.000"),
+        applicationKey: "application_50_attempt_1",
+        id: "apply-call",
+        name: "navigate",
+        arguments: JSON.stringify({ url: activation }),
+        result: `Opened ${activation}; the posting is ${jobUrl}`,
+      },
+      {
+        event: "tool_call",
+        at: at("11.000"),
+        sourceId: "14",
+        sourceUrl: "https://www.ycombinator.com/jobs",
+        id: "search-call",
+        name: "extract_jobs",
+        result: "Saved 27 new postings",
+      },
+      {
+        event: "provider_request",
+        at: at("12.000"),
+        sourceIds: ["14"],
+        jobIds: [9],
+        id: "fit",
+        purpose: "fit_batch:read_context_part",
+        request: { model: "deepseek-v4.1-flash", messages: [] },
+      },
+      {
+        event: "ours",
+        at: at("12.500"),
+        sourceIds: ["14"],
+        by: "job-finder/fitQueue/takeBatch",
+        kind: "rewritten",
+        reason: "fit_batch_tokens (input=50000)",
+      },
+      {
+        event: "page_snapshot",
+        at: at("13.000"),
+        applicationKey: "application_50_attempt_1",
+        action: "navigate",
+        shot: "shots/app.png",
+        url: activation,
+      },
+      {
+        event: "page_snapshot",
+        at: at("14.000"),
+        sourceId: "14",
+        action: "scroll",
+        shot: "shots/search.png",
+        url: "https://www.workatastartup.com/jobs",
+      },
+      {
+        event: "operator_action",
+        at: at("30.000"),
+        source: "person",
+        action: "send_application",
+        applicationKeys: [
+          "application_50_attempt_1",
+          "application_50_attempt_2",
+        ],
+        detail:
+          "Send pressed on the ready application (attempt 1); attempt 2 sends it",
+        outcome: "ok",
+      },
+      {
+        event: "tool_call",
+        at: at("40.000"),
+        applicationKey: "application_50_attempt_2",
+        id: "send-call",
+        name: "submit_application",
+        result: "Submitted",
+      },
+    ];
+    writeFileSync(
+      path.join(trace, "events-1.jsonl"),
+      events.map((e) => JSON.stringify(e)).join("\n"),
+    );
+    const out = path.join(root, "application-pack");
+    const manifest = await generatePack({
+      out,
+      trace,
+      data,
+      application: "50",
+      state: {},
+    });
+    // Only the application's own calls and screenshots.
+    assert.equal(manifest.tools.length, 2);
+    const tools = manifest.tools.map((f) =>
+      JSON.parse(readFileSync(path.join(out, f), "utf8")),
+    );
+    assert.deepEqual(
+      tools.map((t) => t.name),
+      ["navigate", "submit_application"],
+    );
+    assert.equal(manifest.shots.length, 1);
+    assert.equal(manifest.models.length, 0);
+    assert.equal(manifest.oursCount, 0);
+    const packed = readdirSync(out, { recursive: true })
+      .filter((f) => /\.(json|jsonl|md)$/.test(f))
+      .map((f) => readFileSync(path.join(out, f), "utf8"))
+      .join("\n");
+    assert.doesNotMatch(packed, /extract_jobs|workatastartup|fit_batch/);
+    // The one-time token is gone everywhere; the job's own address stays.
+    assert.ok(!packed.includes(token));
+    assert.match(packed, /JDPower\/activate\/\[secret omitted\]\/\?redirect=/);
+    assert.ok(packed.includes(jobUrl));
+    // The person's Send is theirs, in the Operator and timeline section.
+    assert.deepEqual(
+      manifest.header.operatorActions.map((a) => [a.at, a.by, a.action]),
+      [[at("30.000"), "person", "send_application"]],
+    );
+    const pack = readFileSync(path.join(out, "pack.md"), "utf8");
+    assert.match(
+      pack,
+      /\| 2026-11-27T02:40:30\.000Z \| person: send_application \| person \| Send pressed on the ready application \(attempt 1\); attempt 2 sends it \|/,
+    );
+    // The search's pack, from the same trace, holds none of the application.
+    const searchOut = path.join(root, "search-pack");
+    const search = await generatePack({
+      out: searchOut,
+      trace,
+      data,
+      kind: "search",
+      search: "search_side",
+      state: {},
+    });
+    assert.deepEqual(
+      search.tools.map(
+        (f) => JSON.parse(readFileSync(path.join(searchOut, f), "utf8")).name,
+      ),
+      ["extract_jobs"],
+    );
+    assert.equal(search.shots.length, 1);
+    assert.equal(search.header.operatorActions.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a stored validation error reads as the stop reason, and a pack that stopped partway can run again into its folder", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "nestor-pack-rerun-"));
+  try {
+    const data = path.join(root, "profile");
+    mkdirSync(data);
+    writeFileSync(
+      path.join(data, "nestor-profile-provenance.json"),
+      JSON.stringify({ kind: "synthetic" }),
+    );
+    // R8 application 51: a schema error stored as the row's error, a JSON
+    // issue list the row reader parses into an array.
+    const issues = JSON.stringify([
+      {
+        code: "too_big",
+        maximum: 2000,
+        path: ["questionContexts", 1, "prompt"],
+        message: "String must contain at most 2000 character(s)",
+      },
+    ]);
+    const db = new DatabaseSync(path.join(data, "job-finder.sqlite"));
+    db.exec(
+      `CREATE TABLE applications(id INTEGER,job_id INTEGER,attempt INTEGER,mode TEXT,state TEXT,error TEXT,submission_outcome_json TEXT,queued_at INTEGER,updated_at INTEGER);`,
+    );
+    db.prepare(
+      "INSERT INTO applications VALUES(51,4378,1,'autonomous_submit','failed',?,NULL,1000,2000)",
+    ).run(issues);
+    db.close();
+    const trace = path.join(root, "trace");
+    mkdirSync(trace);
+    const line = (shot) =>
+      JSON.stringify({
+        event: "page_snapshot",
+        at: new Date(1500).toISOString(),
+        applicationKey: "application_51_attempt_1",
+        action: "final_outcome",
+        shot,
+        url: "https://jobs.ashbyhq.com/workos/application",
+      });
+    // A screenshot path outside the trace stops the pack partway.
+    writeFileSync(path.join(trace, "events-1.jsonl"), line("../outside.png"));
+    const out = path.join(root, "pack");
+    await assert.rejects(
+      generatePack({ out, trace, data, application: "51", state: {} }),
+      /escapes trace directory/,
+    );
+    assert.deepEqual(
+      readdirSync(root).filter((f) => f.startsWith("pack")),
+      [],
+    );
+    writeFileSync(path.join(trace, "events-1.jsonl"), line(undefined));
+    const manifest = await generatePack({
+      out,
+      trace,
+      data,
+      application: "51",
+      state: {},
+    });
+    assert.equal(manifest.firstStopReason, issues);
+    assert.match(
+      readFileSync(path.join(out, "pack.md"), "utf8"),
+      /# Run evidence/,
+    );
+    // A folder holding other files is named, not overwritten.
+    const busy = path.join(root, "busy");
+    mkdirSync(busy);
+    writeFileSync(path.join(busy, "note.txt"), "keep");
+    await assert.rejects(
+      generatePack({ out: busy, trace, data, application: "51", state: {} }),
+      /already holds files but no finished pack/,
+    );
+    assert.equal(readFileSync(path.join(busy, "note.txt"), "utf8"), "keep");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

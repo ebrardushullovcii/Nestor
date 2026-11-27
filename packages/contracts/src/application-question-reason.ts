@@ -7,7 +7,8 @@ export const ApplicationQuestionAskReasonSchema = z.object({
   // Application answers are now the model's decision, without a code verdict.
   kind: z.enum(["no_source", "source_rejected", "page_refused"]),
   check: z.string().min(1).optional(),
-  detail: z.string().min(1).max(4000),
+  // The model's reason, often quoting the site's question: kept whole.
+  detail: z.string().min(1),
   /** Context actually confirmed now; never a reconstructed historical fact. */
   eligibilityContext: z
     .object({
@@ -25,7 +26,7 @@ export const ApplicationQuestionAskReasonSchema = z.object({
   selectedDocument: z
     .object({
       kind: CandidateAssetKindSchema,
-      label: z.string().max(300),
+      label: z.string(),
       fileName: z.string().max(255),
     })
     .optional(),
