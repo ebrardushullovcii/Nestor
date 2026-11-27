@@ -68,6 +68,8 @@ export interface RawApplyControl {
   /** Help text beside the field, besides its label. */
   hint?: string;
   groupLabel: string;
+  /** Identity of a radio or checkbox group's owning container in this read. */
+  choiceGroupKey?: string;
   /** Named enclosing sections, outermost first, without interpreting their meaning. */
   sectionPath?: string[];
   placeholder: string;

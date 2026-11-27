@@ -76,3 +76,28 @@ test("cleared page errors, loading and removed buttons do not linger as current 
   expect(update).toContain("The page is still loading. (no longer shown).");
   expect(update).toContain("Buttons: (no longer shown).");
 });
+
+test("an updated option replaces its whole group and removed option handles are explicit", () => {
+  const before = observation();
+  const after = structuredClone(before);
+  const group = after.controls
+    .filter((control) => control.kind === "radio")
+    .slice(0, 2);
+  const [yes, no] = group;
+  no.checked = true;
+  for (const control of group) control.answered = true;
+
+  const update = describeObservationUpdate(after, before);
+  expect(update.match(/\[radio group\]/gu)).toHaveLength(1);
+  expect(update).toContain(`  - ${yes.ref} [radio]`);
+  expect(update).toContain(`  - ${no.ref} [radio]`);
+  expect(update).toContain('answered: "chosen"');
+
+  const withoutNo = {
+    ...after,
+    controls: after.controls.filter((control) => control !== no),
+  };
+  expect(describeObservationUpdate(withoutNo, after)).toContain(
+    `Removed fields (do not use these handles): ${no.ref}`,
+  );
+});

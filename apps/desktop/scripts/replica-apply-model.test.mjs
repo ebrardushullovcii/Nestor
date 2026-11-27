@@ -31,7 +31,7 @@ test("uses the stored No answer on its matching radio rather than unchecking Yes
   assert.deepEqual(
     decideReplicaAction([
       page(
-        "Fields:\n- c1 [radio] · Will you require sponsorship? — Yes · required · empty\n- c2 [radio] · Will you require sponsorship? — No · required · empty",
+        "Fields:\n- [radio group] · Are you authorized to work here?\n  - c3 [radio] · Yes · required · empty\n  - c4 [radio] · No · required · empty\n- [radio group] · Will you require sponsorship?\n  - c1 [radio] · Yes · required · empty\n  - c2 [radio] · No · required · empty",
       ),
       {
         role: "assistant",

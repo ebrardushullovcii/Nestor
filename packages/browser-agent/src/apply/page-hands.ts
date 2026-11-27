@@ -361,14 +361,17 @@ export function buildApplyFormObservation(
           .split(" — ")
           .map((part) => part.trim())
           .filter(Boolean),
-      ...(kind === "radio" || (kind === "checkbox" && !rawControl.required)
+      ...(kind === "radio" ||
+      (kind === "checkbox" &&
+        (rawControl.choiceGroupKey || !rawControl.required))
         ? {
             choiceGroupKey:
-              kind === "radio"
+              rawControl.choiceGroupKey ??
+              (kind === "radio"
                 ? radioGroupKey(rawControl, raw)
                 : rawControl.name.trim()
                   ? `${rawControl.scopeKey ?? "root"}:name:${rawControl.name.trim()}`
-                  : `ref:${rawControl.ref ?? `c${rawControl.index}`}`,
+                  : `ref:${rawControl.ref ?? `c${rawControl.index}`}`),
           }
         : {}),
       placeholder: rawControl.placeholder.trim(),
@@ -426,7 +429,8 @@ export function buildApplyFormObservation(
         candidate.choiceGroupKey === groupKey,
     );
     if (control.kind === "checkbox" && group.length < 2) continue;
-    control.answered = group.some((candidate) => candidate.checked);
+    if (control.kind === "radio" || !control.required)
+      control.answered = group.some((candidate) => candidate.checked);
     // Radio choices must pass through the same saved-answer matching as a
     // select. Otherwise a saved prose answer appears usable until every
     // individual radio is refused, without a question for the person.

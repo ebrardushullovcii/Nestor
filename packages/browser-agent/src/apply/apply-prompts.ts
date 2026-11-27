@@ -181,8 +181,9 @@ function describeAnswered(
 
 function describeControl(
   control: ApplyFormObservation["controls"][number],
+  asChoice = false,
 ): string {
-  const question = [control.groupLabel, control.label]
+  const question = [asChoice ? "" : control.groupLabel, control.label]
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
     .join(" — ");
@@ -195,13 +196,13 @@ function describeControl(
   if (control.visibility)
     parts.push(`visibility: ${JSON.stringify(control.visibility)}`);
   if (control.frame) parts.push(`frame: ${control.frame.origin}`);
-  if (control.sectionPath?.length)
+  if (!asChoice && control.sectionPath?.length)
     parts.push(`sections: ${control.sectionPath.join(" > ")}`);
   if (control.acceptedTypes?.length)
     parts.push(`accepted files: ${control.acceptedTypes.join(", ")}`);
   if (control.inputConstraints)
     parts.push(`format: ${JSON.stringify(control.inputConstraints)}`);
-  if (control.options.length > 0) {
+  if (!asChoice && control.options.length > 0) {
     parts.push(`choices: ${control.options.join(" | ")}`);
   }
 
@@ -224,6 +225,41 @@ function describeControl(
     parts.push("cannot be edited");
   }
   return `- ${parts.join(" · ")}`;
+}
+
+/** One question per group, with the page's separate handles for its options. */
+function describeFields(controls: ApplyFormObservation["controls"]) {
+  const groups = new Map<string, ApplyFormObservation["controls"]>();
+  for (const control of controls) {
+    if (!control.choiceGroupKey) continue;
+    const key = `${control.kind}:${control.choiceGroupKey}`;
+    const group = groups.get(key);
+    if (group) group.push(control);
+    else groups.set(key, [control]);
+  }
+  const fields = new Map<string, string>();
+  for (const control of controls) {
+    const group = groups.get(`${control.kind}:${control.choiceGroupKey}`);
+    if (!group || group.length < 2) {
+      fields.set(control.ref, describeControl(control));
+    } else if (group[0] === control) {
+      const question = group.find((option) => option.groupLabel)?.groupLabel;
+      const sections = control.sectionPath?.filter(
+        (part) => !` — ${question ?? ""} — `.includes(` — ${part} — `),
+      );
+      const header = `- [${control.kind} group] · ${question || "(no label)"}`;
+      fields.set(
+        control.ref,
+        [
+          sections?.length
+            ? `${header} · sections: ${sections.join(" > ")}`
+            : header,
+          ...group.map((option) => `  ${describeControl(option, true)}`),
+        ].join("\n"),
+      );
+    }
+  }
+  return fields;
 }
 
 /**
@@ -309,7 +345,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
           .join("\n")}`
       : null,
     controls.length > 0
-      ? `Fields:\n${controls.map(describeControl).join("\n")}`
+      ? `Fields:\n${[...describeFields(controls).values()].join("\n")}`
       : "There are no fields on this page.",
     actions.length > 0
       ? `Buttons:\n${actions
@@ -370,16 +406,16 @@ export function describeObservationUpdate(
   ) {
     return describeObservation(observation);
   }
-  const previousControls = new Map(
-    previous.controls.map((control) => [control.ref, describeControl(control)]),
-  );
+  const previousFields = describeFields(previous.controls);
   const controls = observation.controls;
-  const changed = controls.filter(
-    (control) => previousControls.get(control.ref) !== describeControl(control),
+  const fields = describeFields(controls);
+  const changed = [...fields].flatMap(([ref, description]) =>
+    previousFields.get(ref) === description ? [] : [description],
   );
   const refs = new Set(controls.map((control) => control.ref));
-  const removed = [...previousControls.keys()].filter((ref) => !refs.has(ref));
-  const fields = `Fields:\n${controls.map(describeControl).join("\n")}`;
+  const removed = previous.controls
+    .map((control) => control.ref)
+    .filter((ref) => !refs.has(ref));
   const nonFieldSections = (page: ApplyFormObservation) =>
     describeObservation(page)
       .split("\n\n")
@@ -391,7 +427,7 @@ export function describeObservationUpdate(
   const previousSections = nonFieldSections(previous);
   const currentSections = nonFieldSections(observation);
   const sections = currentSections.filter(
-    (section) => section !== fields && !previousSections.includes(section),
+    (section) => !previousSections.includes(section),
   );
   const header = (section: string) => section.split("\n")[0] ?? section;
   const currentHeaders = new Set(currentSections.map(header));
@@ -402,7 +438,7 @@ export function describeObservationUpdate(
     `Page update: ${observation.url ?? "open page"}. ${controls.length} visible fields; ${controls.filter((control) => !control.answered && !control.disabled).length} still empty. Unchanged fields and page text remain as last shown; use their earlier handles.`,
     "Each new or changed entry replaces its previous description in full.",
     changed.length
-      ? `New or changed fields:\n${changed.map(describeControl).join("\n")}`
+      ? `New or changed fields:\n${changed.join("\n")}`
       : "No field changes.",
     removed.length
       ? `Removed fields (do not use these handles): ${removed.join(", ")}.`

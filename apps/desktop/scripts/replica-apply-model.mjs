@@ -21,9 +21,21 @@ export function decideReplicaAction(messages) {
   if (!seen) return { name: "observe", args: {} };
   const page = seen.match(/Page: (\S+)/u)?.[1];
   assert.equal(new URL(page).hostname, "127.0.0.1");
-  const fields = [...seen.matchAll(/^- (c\S+) \[([^\]]+)\] · (.+)$/gmu)].map(
-    ([, ref, kind, detail]) => ({ ref, kind, detail }),
-  );
+  let group;
+  const fields = seen.split("\n").flatMap((line, index) => {
+    if (/^- \[(?:radio|checkbox) group\] · /u.test(line)) group = index;
+    const match = /^(  - [ac]|- c)(\S*) \[([^\]]+)\] · (.+)$/u.exec(line);
+    if (!match) return [];
+    const [, prefix, number, kind, detail] = match;
+    return [
+      {
+        ref: prefix.at(-1) + number,
+        kind,
+        detail,
+        group: prefix.startsWith(" ") ? group : undefined,
+      },
+    ];
+  });
   const buttons = [...seen.matchAll(/^- (a\S+): (.+)$/gmu)].map(
     ([, ref, label]) => ({ ref, label }),
   );
@@ -52,16 +64,13 @@ export function decideReplicaAction(messages) {
     const answer = last.content.match(/^"[\s\S]+?": ([\s\S]+) — from /u)?.[1];
     if (field && answer) {
       if (field.kind === "radio") {
-        const question = field.detail
-          .split(" · ")[0]
-          .split(" — ")
-          .slice(0, -1)
-          .join(" — ");
         const choice = fields.find(
           (entry) =>
             entry.kind === "radio" &&
-            entry.detail.split(" · ")[0].toLowerCase() ===
-              `${question} — ${answer}`.toLowerCase(),
+            (field.group === undefined
+              ? entry === field
+              : entry.group === field.group) &&
+            entry.detail.split(" · ")[0].toLowerCase() === answer.toLowerCase(),
         );
         assert.ok(choice, `No radio choice matching ${answer}`);
         return {

@@ -67,3 +67,21 @@ test("a complete form ends with its own send button", () => {
     args: { ref: "a0" },
   });
 });
+
+test("a required choice group stays visible to the scripted model", () => {
+  const input = {
+    role: "user",
+    content: [
+      "Page: http://127.0.0.1:5000/lever-questions/apply/1",
+      "Fields:",
+      "- [radio group] · Do you agree to this schedule?",
+      "  - c0 [radio] · Yes · required · empty",
+      "  - c1 [radio] · No · required · empty",
+      "Buttons:",
+      "- a0: Submit",
+    ].join("\n"),
+  };
+  const action = decideApplyAction([facts, input]);
+  assert.equal(action.name, "finish");
+  assert.equal(action.args.needsPerson, true);
+});

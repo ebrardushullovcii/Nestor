@@ -149,6 +149,36 @@ function checkbox(name, label, required = true) {
 function yesNo(name, label) {
   return `<fieldset><legend>${label} *</legend>${["Yes", "No"].map((value) => `<label class="check"><input type="radio" name="${name}" value="${value}" required> ${value}</label>`).join("")}</fieldset>`;
 }
+function leverChoiceQuestion(label, options, type, name) {
+  return `<div class="application-question">
+    <div class="application-label">${escape(label)}</div>
+    <ul>${options
+      .map((option, index) => {
+        const id = `${name}-${index}`;
+        return `<li><input id="${id}" type="${type}" name="${type === "checkbox" ? id : name}" value="${escape(option)}" ${type === "radio" ? "required" : ""}>
+        <label for="${id}">${escape(option)}</label></li>`;
+      })
+      .join("")}</ul>
+  </div>`;
+}
+function leverChoiceQuestions() {
+  return page(
+    "lever",
+    "Application questions",
+    `<h1>Application questions</h1>
+    <form method="post">
+      <section aria-label="UK Right to Work Questionnaire">
+        <h2>UK Right to Work Questionnaire</h2>
+        ${leverChoiceQuestion("Do you have the right to work in the UK?", ["Yes", "No"], "radio", "authorization")}
+        ${leverChoiceQuestion("Do you now or will you in the future require sponsorship to work legally in the UK? Please note: proof of eligibility may be required at the time of hire.", ["Yes", "No"], "radio", "sponsorship")}
+      </section>
+      ${leverChoiceQuestion("Gender", ["Female", "Male"], "radio", "gender")}
+      ${leverChoiceQuestion("Which tools have you used?", ["Git", "Linux", "Excel"], "checkbox", "tools")}
+      ${checkbox("updates", "Email me future roles", false)}
+      <button>Submit application</button>
+    </form>`,
+  );
+}
 function upload(name, label, style = "button", required = true) {
   const documentLabel =
     {
@@ -458,6 +488,8 @@ const server = http.createServer(async (req, res) => {
     req.headers.cookie || "",
   );
   try {
+    if (req.method === "GET" && path === "/lever-questions/apply/1")
+      return send(200, leverChoiceQuestions());
     if (
       await handleVerificationReplica(req, res, url, {
         send,
