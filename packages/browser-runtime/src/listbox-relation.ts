@@ -31,10 +31,15 @@ export interface ListboxFacts {
   items: string[];
 }
 
+import { APPLY_LISTBOX_TRIGGER_SELECTOR } from "@nestor/contracts";
+
+type ListboxReader = (control: Element, mark: string) => ListboxFacts[];
+
 /** Self-contained: serialized into the page. */
-export function readListboxFacts(
+function readListboxFacts(
   control: Element,
   mark: string,
+  listboxTriggerSelector: string,
 ): ListboxFacts[] {
   const parentOf = (node: Element): Element | null => {
     if (node.parentElement) return node.parentElement;
@@ -67,14 +72,14 @@ export function readListboxFacts(
     ].filter(Boolean),
   );
   const activeId = control.getAttribute("aria-activedescendant");
+  const opensList = control.matches(listboxTriggerSelector);
   const active = activeId
     ? ((own as Document | ShadowRoot).getElementById?.(activeId) ??
       document.getElementById(activeId))
     : null;
   // Fields a person types into or picks from; a list's own rows may hold
-  // checkboxes, and buttons are not fields.
-  const field =
-    "input:not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']):not([type='image']):not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea, [role='combobox'], [role='textbox'], [role='spinbutton'], [contenteditable='true']";
+  // checkboxes, and only listbox buttons are fields.
+  const field = `input:not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']):not([type='image']):not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea, [role='combobox'], [role='textbox'], [role='spinbutton'], [contenteditable='true'], ${listboxTriggerSelector}`;
   const box = control.getBoundingClientRect();
   return lists.map((list) => {
     if (!list.getAttribute(mark))
@@ -105,13 +110,20 @@ export function readListboxFacts(
     let relation: ListboxRelation = floating ? "popup" : "other";
     if (
       (list.id && named.has(list.id)) ||
+      (opensList &&
+        control.id &&
+        (list.getAttribute("aria-labelledby") ?? "")
+          .split(/\s+/u)
+          .includes(control.id)) ||
       (active !== null && list.contains(active))
     )
       relation = "owned";
     else if (!floating)
       for (let up = parentOf(list); up; up = parentOf(up)) {
         if (chain.has(up)) {
-          relation = "own";
+          // A listbox button exposes choices, whereas an input may sit
+          // beside a separate, always-visible list of its selected items.
+          relation = opensList ? "popup" : "own";
           break;
         }
         if (
@@ -136,6 +148,10 @@ export function readListboxFacts(
 
 /** Each list's signature before an action, by its mark. */
 export type ListsBefore = Readonly<Record<string, string>>;
+
+const listboxReader = `(element,mark)=>(
+  ${readListboxFacts.toString()}
+)(element,mark,${JSON.stringify(APPLY_LISTBOX_TRIGGER_SELECTOR)})`;
 
 /**
  * The list a field's lookup answers in. A list the field names comes first.
@@ -176,26 +192,22 @@ export function heldItems(lists: readonly ListboxFacts[]): string[] | null {
 
 /** Serialize only this fixed reader, never page or model JavaScript. */
 export function withListboxReader<Arg, Result>(
-  read: (element: Element, arg: Arg, facts: typeof readListboxFacts) => Result,
+  read: (element: Element, arg: Arg, facts: ListboxReader) => Result,
 ): (element: Element, arg: Arg) => Result {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const compile = new Function(
-    `return (element,arg)=>(${read.toString()})(element,arg,${readListboxFacts.toString()})`,
+    `return (element,arg)=>(${read.toString()})(element,arg,${listboxReader})`,
   ) as () => (element: Element, arg: Arg) => Result;
   return compile();
 }
 
 /** The same reader for every field of a page read at once. */
 export function withListboxesReader<Arg, Result>(
-  read: (
-    elements: Element[],
-    arg: Arg,
-    facts: typeof readListboxFacts,
-  ) => Result,
+  read: (elements: Element[], arg: Arg, facts: ListboxReader) => Result,
 ): (elements: Element[], arg: Arg) => Result {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const compile = new Function(
-    `return (elements,arg)=>(${read.toString()})(elements,arg,${readListboxFacts.toString()})`,
+    `return (elements,arg)=>(${read.toString()})(elements,arg,${listboxReader})`,
   ) as () => (elements: Element[], arg: Arg) => Result;
   return compile();
 }

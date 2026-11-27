@@ -7,7 +7,10 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import {
   createApplyPageHands,
   describeObservation,
+  runApplyAgent,
+  type LLMClient,
 } from "@nestor/browser-agent";
+import { CandidateProfileSchema } from "@nestor/contracts";
 import { createPlaywrightApplyPageMechanics } from "./apply-page-mechanics";
 
 /**
@@ -74,6 +77,171 @@ const field = async (
   label: string,
 ) => (await hands.observe()).controls.find((c) => c.label.startsWith(label))!;
 
+test("a Workday listbox button can be selected and a separate question hands off its choices", async () => {
+  const { page, hands } = await open();
+  try {
+    // Workday can render a zero-size backing input, a button with the
+    // current choice in its name, and a list drawn only when it opens.
+    await page.setContent(`
+      <main><form aria-label="Application Questions">
+        <div>
+          <label for="device-mirror">Phone Device Type *</label>
+          <input id="device-mirror" aria-hidden="true" style="display:none">
+          <button id="device" type="button" aria-haspopup="listbox" aria-expanded="false"
+            aria-label="Phone Device Type Select One Required">Select One</button>
+          <div role="listbox" hidden><div role="option">Landline</div><div role="option">Mobile</div></div>
+        </div>
+        <div>
+          <label for="certificate-mirror"><span>Question Body</span><span>Do you hold a safety certificate?</span> *</label>
+          <input id="certificate-mirror" aria-hidden="true" style="display:none">
+          <button id="certificate" type="button" aria-haspopup="listbox" aria-expanded="false"
+            aria-label="Select One Required">Select One</button>
+          <div role="listbox" hidden><div role="option">Yes</div><div role="option">No</div></div>
+        </div>
+      </form></main>
+      <script>
+        for (const button of document.querySelectorAll('button')) {
+          const list = button.nextElementSibling;
+          const close = () => { list.hidden = true; button.setAttribute('aria-expanded', 'false'); };
+          button.onclick = () => { list.hidden = false; button.setAttribute('aria-expanded', 'true'); };
+          button.onblur = close;
+          list.onclick = event => {
+            const row = event.target.closest('[role=option]');
+            if (!row) return;
+            const previous = button.textContent;
+            button.textContent = row.textContent;
+            button.setAttribute('aria-label', button.getAttribute('aria-label').replace(previous, row.textContent));
+            button.previousElementSibling.value = row.textContent;
+            close();
+          };
+        }
+      </script>`);
+
+    const first = await hands.observe();
+    const pickers = first.controls.filter((control) => control.visible);
+    expect(pickers).toMatchObject([
+      {
+        kind: "select",
+        label: "Phone Device Type",
+        answered: false,
+        required: true,
+      },
+      {
+        kind: "select",
+        label: "Do you hold a safety certificate? *",
+        answered: false,
+        required: true,
+      },
+    ]);
+    const [device, certificate] = pickers;
+    expect(first.actions).toEqual([]);
+    expect(
+      first.clickables.some((control) => control.tagName === "button"),
+    ).toBe(false);
+
+    const calls = [
+      {
+        name: "select",
+        args: { ref: device!.ref, option: "Mobile" },
+      },
+      {
+        name: "finish",
+        args: {
+          reason: "The certification is missing.",
+          needsPerson: true,
+          forPerson: [certificate!.ref],
+        },
+      },
+    ];
+    const model: LLMClient = {
+      chatWithTools: () => {
+        const call = calls.shift();
+        if (!call) throw new Error("Unexpected model turn");
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: call.name,
+              type: "function",
+              function: {
+                name: call.name,
+                arguments: JSON.stringify(call.args),
+              },
+            },
+          ],
+        });
+      },
+    };
+    const result = await runApplyAgent(
+      {
+        sources: {
+          profile: CandidateProfileSchema.parse({
+            id: "replica",
+            fullName: "Test Applicant",
+            yearsExperience: 2,
+            baseResume: {
+              id: "replica",
+              fileName: "resume.txt",
+              uploadedAt: "2026-11-01T00:00:00Z",
+            },
+          }),
+          documents: [],
+          reusableAnswers: [],
+          resumeText: null,
+          posting: {
+            title: "Engineer",
+            company: "Velvet Prompt",
+            location: "Remote",
+            description: "Build software.",
+          },
+        },
+        application: {
+          jobId: "replica",
+          applicationId: "replica",
+          startingUrl: page.url(),
+        },
+        authority: {
+          mode: "prepare_only",
+          submitAuthorized: false,
+          preApprovedAttestationKinds: [],
+          salaryDisclosure: "pause_for_user",
+          allowedOrigins: [base],
+        },
+        hands,
+        siteLabel: "Velvet Prompt Careers",
+      },
+      model,
+    );
+
+    expect(calls).toEqual([]);
+    expect(
+      (await hands.observe()).controls.find(
+        (control) => control.ref === device!.ref,
+      ),
+    ).toMatchObject({
+      selectedOptionLabel: "Mobile",
+      answered: true,
+    });
+    const questions = result.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    );
+    expect(questions).toMatchObject([
+      {
+        prompt: "Application Questions — Do you hold a safety certificate? *",
+        answerControlType: "single_choice",
+        answerOptions: ["Yes", "No"],
+      },
+    ]);
+    expect(await page.locator("#certificate").textContent()).toBe("Select One");
+    expect(
+      await page.locator("#certificate").getAttribute("aria-expanded"),
+    ).toBe("false");
+    await page.locator("#certificate").click();
+    expect(await hands.readOptions!(certificate!.ref)).toEqual(["Yes", "No"]);
+  } finally {
+    await page.close();
+  }
+}, 60_000);
+
 test("a prompt's lookup is the list Enter opens, never a field's pills", async () => {
   const { page, raw, hands } = await open();
   try {
@@ -121,9 +289,9 @@ test("a prompt's lookup is the list Enter opens, never a field's pills", async (
       "Albania (+355)",
     );
     expect(offered).toMatchObject({ ok: false });
-    expect(
-      (offered as { offeredOptions?: string[] }).offeredOptions,
-    ).toContain("Albania (+355) not checked");
+    expect((offered as { offeredOptions?: string[] }).offeredOptions).toContain(
+      "Albania (+355) not checked",
+    );
     expect(JSON.stringify(offered)).not.toContain("press delete");
   } finally {
     await page.close();

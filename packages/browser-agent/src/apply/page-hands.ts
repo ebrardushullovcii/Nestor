@@ -37,7 +37,7 @@ import type {
 
 function toControlKind(raw: RawApplyControl): ApplyControlKind {
   const type = raw.inputType.toLowerCase();
-  if (raw.tagName === "select") {
+  if (raw.tagName === "select" || type === "select") {
     return "select";
   }
   if (raw.tagName === "textarea") {

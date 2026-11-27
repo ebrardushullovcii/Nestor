@@ -1,5 +1,6 @@
 import {
   APPLY_CONTROL_SELECTOR,
+  APPLY_LISTBOX_TRIGGER_SELECTOR,
   isVerificationCodeControl,
 } from "@nestor/contracts";
 import { rememberVerificationSecret } from "@nestor/core/run-trace";
@@ -115,12 +116,11 @@ import {
  */
 
 export { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
-export const APPLY_ACTION_SELECTOR =
-  "button, input[type='submit'], input[type='button'], [role='button'], [role='tab']";
+export const APPLY_ACTION_SELECTOR = `:is(button, input[type='submit'], input[type='button'], [role='button'], [role='tab']):not(${APPLY_LISTBOX_TRIGGER_SELECTOR})`;
 
 // A tab implemented as an anchor keeps its panel-navigation semantics and
 // has one action handle, rather than a second ordinary-link handle.
-export const APPLY_LINK_SELECTOR = "a[href]:not([role='tab'])";
+export const APPLY_LINK_SELECTOR = `a[href]:not([role='tab'], ${APPLY_LISTBOX_TRIGGER_SELECTOR})`;
 
 /**
  * Everything else a person could press.
@@ -497,7 +497,10 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             ];
           });
         },
-        [`f${frameIndex}`, APPLY_ACTION_SELECTOR] as const,
+        [
+          `f${frameIndex}`,
+          `${APPLY_ACTION_SELECTOR}, ${APPLY_LISTBOX_TRIGGER_SELECTOR}`,
+        ] as const,
       ),
       frame
         .locator("h1, h2, h3, [role='heading']")
@@ -656,6 +659,7 @@ export function readApplySummaryRows(
 
 export const APPLY_PAGE_SELECTORS = {
   controls: APPLY_CONTROL_SELECTOR,
+  listboxTriggers: APPLY_LISTBOX_TRIGGER_SELECTOR,
   actions: APPLY_ACTION_SELECTOR,
   links: APPLY_LINK_SELECTOR,
   validationErrors: "[role='alert'], [aria-live='assertive']",
@@ -1145,15 +1149,40 @@ export function collectApplyDocumentSnapshot(
     };
   };
   const controls = ((elements: Element[]): RawApplyControl[] => {
+    const isListboxPlaceholder = (text: string) =>
+      /^(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an? (?:option|answer|value|item)))?)?[\s.…]*$/iu.test(
+        text,
+      );
+    const cleanLabel = (text: string) =>
+      text
+        .trim()
+        .replace(/^Question Body(?:[ \t]*\r?\n\s*|(?=[A-Z]))/u, "")
+        .replace(/\s+/gu, " ")
+        .trim();
+    const readLabelClone = (clone: Element): string => {
+      // A template heading can be a separate node inside the actual label.
+      // Remove it only when it stands on its own before the question.
+      const raw = clone.textContent ?? "";
+      if (!raw.trimStart().startsWith("Question Body")) return cleanLabel(raw);
+      const text = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+      let first = text.nextNode();
+      while (first && !first.textContent?.trim()) first = text.nextNode();
+      if (
+        first?.textContent?.trim() === "Question Body" &&
+        raw.trim() !== "Question Body"
+      )
+        first.textContent = "";
+      return cleanLabel(clone.textContent ?? "");
+    };
     const labelText = (element: Element | null): string => {
       if (!element) return "";
       const clone = element.cloneNode(true) as Element;
       clone
         .querySelectorAll(
-          "input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox']",
+          `input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox'], ${selectors.listboxTriggers}`,
         )
         .forEach((control) => control.remove());
-      return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+      return readLabelClone(clone);
     };
     const hintFor = (element: Element, label: string): string => {
       // Help text beside the field, such as "Please provide your GitHub
@@ -1165,17 +1194,23 @@ export function collectApplyDocumentSnapshot(
         .join(" ")
         .trim();
       let block: Element | null = null;
+      const opensList = element.matches(selectors.listboxTriggers);
       for (
         let ancestor = element.parentElement, depth = 0;
         ancestor && depth < 4;
         ancestor = ancestor.parentElement, depth += 1
       ) {
-        if (
-          ancestor.querySelectorAll(
-            "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']",
-          ).length > 1
-        )
-          break;
+        const controls = ancestor.querySelectorAll(
+          opensList
+            ? selectors.controls
+            : "input:not([type='hidden']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']",
+        );
+        const sharesBlock = opensList
+          ? [...controls].some(
+              (field) => field !== element && isVisible(field as HTMLElement),
+            )
+          : controls.length > 1;
+        if (sharesBlock) break;
         block = ancestor;
       }
       const staticBlock = block?.cloneNode(true) as Element | undefined;
@@ -1210,13 +1245,18 @@ export function collectApplyDocumentSnapshot(
       return (element.getAttribute("aria-labelledby") ?? "")
         .split(/\s+/u)
         .filter(Boolean)
-        .map((id) => labelText(root.getElementById(id)))
+        .map((id) => root.getElementById(id))
+        .filter(
+          (label) =>
+            label !== element || !element.matches(selectors.listboxTriggers),
+        )
+        .map(labelText)
         .join(" ")
         .trim();
     };
-    const directLabel = (element: Element): string => {
-      const aria = element.getAttribute("aria-label")?.trim();
-      if (aria) return aria;
+    const directLabel = (element: Element, triggerText?: string): string => {
+      const aria = cleanLabel(element.getAttribute("aria-label") ?? "");
+      if (triggerText === undefined && aria) return aria;
       const referenced = referencedText(element);
       if (referenced) return referenced;
       const labelled = element as HTMLInputElement;
@@ -1231,6 +1271,14 @@ export function collectApplyDocumentSnapshot(
       if (text) return text;
       const enclosing = labelText(element.closest("label"));
       if (enclosing) return enclosing;
+      // Some buttons name what they currently show ("Select One Required").
+      // The question is next to the button, like the label of a native select.
+      const ariaChoice = aria.replace(/\s+required$/iu, "").trim();
+      const currentSuffix = triggerText ? ` ${triggerText}` : "";
+      if (ariaChoice !== triggerText && !isListboxPlaceholder(ariaChoice))
+        return currentSuffix && ariaChoice.endsWith(currentSuffix)
+          ? ariaChoice.slice(0, -currentSuffix.length)
+          : aria;
       if (element.matches("[role='radio'], [role='checkbox']")) {
         const ownText = labelText(element);
         if (ownText) return ownText;
@@ -1240,10 +1288,10 @@ export function collectApplyDocumentSnapshot(
         const clone = ancestor.cloneNode(true) as HTMLElement;
         clone
           .querySelectorAll(
-            "input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
+            `input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i], ${selectors.listboxTriggers}`,
           )
           .forEach((candidate) => candidate.remove());
-        const nearby = (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+        const nearby = readLabelClone(clone);
         if (nearby.length > 0 && nearby.length <= 500) return nearby;
         ancestor = ancestor.parentElement;
       }
@@ -1595,6 +1643,7 @@ export function collectApplyDocumentSnapshot(
     // (Ashby marks the title with a "required" class and leaves its pickers
     // bare): the nearest box with a title and no other field.
     const titledRequired = (element: Element): boolean => {
+      const opensList = element.matches(selectors.listboxTriggers);
       for (
         let box = element.parentElement, depth = 0;
         box && box !== document.body && depth < 4;
@@ -1605,8 +1654,16 @@ export function collectApplyDocumentSnapshot(
         );
         if (!title) continue;
         const alone = Array.from(
-          box.querySelectorAll("input:not([type='hidden']), select, textarea"),
-        ).every((field) => field === element);
+          box.querySelectorAll(
+            opensList
+              ? selectors.controls
+              : "input:not([type='hidden']), select, textarea",
+          ),
+        ).every(
+          (field) =>
+            field === element ||
+            (opensList && !isVisible(field as HTMLElement)),
+        );
         return (
           alone &&
           (/\*\s*$/u.test(title.textContent ?? "") ||
@@ -1679,18 +1736,34 @@ export function collectApplyDocumentSnapshot(
       const rowScopeKey = rowScopeKeyFor(element);
       const textarea = element instanceof HTMLTextAreaElement ? element : null;
       const select = element instanceof HTMLSelectElement ? element : null;
+      const listboxTrigger = element.matches(selectors.listboxTriggers);
+      const button = element instanceof HTMLButtonElement ? element : null;
+      const owner =
+        input?.form ?? textarea?.form ?? select?.form ?? button?.form;
+      const triggerText = listboxTrigger
+        ? (input?.value ?? shownText(html))
+        : undefined;
+      const triggerValue =
+        element.getAttribute("aria-valuetext")?.trim() || triggerText || "";
+      const selectedTriggerValue = listboxTrigger
+        ? isListboxPlaceholder(triggerValue)
+          ? ""
+          : triggerValue
+        : undefined;
       const role = element.getAttribute("role")?.toLowerCase() ?? "";
       const choice = ownedChoiceGroup(element);
       const ancestors = sectionPath(element);
       const enclosingLabel = groupLabel(element);
-      const label = directLabel(element);
+      const label = directLabel(element, triggerText);
       const tagName = select
         ? "select"
         : textarea
           ? "textarea"
           : input
             ? "input"
-            : "contenteditable";
+            : listboxTrigger
+              ? element.tagName.toLowerCase()
+              : "contenteditable";
       return {
         index,
         ...(selectors.controlRefPrefix
@@ -1698,9 +1771,11 @@ export function collectApplyDocumentSnapshot(
           : {}),
         visibility: fieldVisibility(element),
         tagName,
-        inputType: datePicker(element)
-          ? "date"
-          : (input?.type.toLowerCase() ?? (role || tagName)),
+        inputType: listboxTrigger
+          ? "select"
+          : datePicker(element)
+            ? "date"
+            : (input?.type.toLowerCase() ?? (role || tagName)),
         accept: input?.accept ?? "",
         min: input?.min ?? "",
         max: input?.max ?? "",
@@ -1708,14 +1783,11 @@ export function collectApplyDocumentSnapshot(
         maxLength: input?.maxLength ?? textarea?.maxLength ?? -1,
         role,
         id: html.id ?? "",
-        name: input?.name ?? textarea?.name ?? select?.name ?? "",
+        name:
+          input?.name ?? textarea?.name ?? select?.name ?? button?.name ?? "",
         scopeKey: scopeKeyFor(element),
-        ...((input?.form ?? textarea?.form ?? select?.form)
-          ? {
-              formIndex: Array.from(document.forms).indexOf(
-                (input?.form ?? textarea?.form ?? select?.form)!,
-              ),
-            }
+        ...(owner
+          ? { formIndex: Array.from(document.forms).indexOf(owner) }
           : {}),
         ...(phoneCallingCode ? { phoneCallingCode } : {}),
         label,
@@ -1736,6 +1808,7 @@ export function collectApplyDocumentSnapshot(
         required:
           Boolean(input?.required ?? textarea?.required ?? select?.required) ||
           element.getAttribute("aria-required") === "true" ||
+          (listboxTrigger && /\*\s*$/u.test(label)) ||
           titledRequired(element),
         invalid:
           element.getAttribute("aria-invalid") === "true" ||
@@ -1762,6 +1835,7 @@ export function collectApplyDocumentSnapshot(
           (input?.type === "file" && !input.matches(":disabled")) ||
           isVisible(html),
         value:
+          selectedTriggerValue ??
           (redactCredentials &&
           (input?.type === "password" ||
             input?.autocomplete === "one-time-code" ||
@@ -1798,6 +1872,7 @@ export function collectApplyDocumentSnapshot(
               .filter(Boolean)
           : customOptions(html),
         selectedOptionLabel:
+          selectedTriggerValue ??
           select?.selectedOptions.item(0)?.label.trim() ??
           element.getAttribute("aria-valuetext")?.trim() ??
           "",
@@ -1932,7 +2007,10 @@ export function collectApplyDocumentSnapshot(
                 ? (node.getRootNode() as ShadowRoot).host
                 : null)
           )
-            if (node.matches(selectors.actions)) return [];
+            if (
+              node.matches(`${selectors.actions}, ${selectors.listboxTriggers}`)
+            )
+              return [];
           const html = element as HTMLElement;
           const style = window.getComputedStyle(html);
           const rect = html.getBoundingClientRect();

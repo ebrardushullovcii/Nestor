@@ -671,6 +671,8 @@ export interface ApplyPageSession extends ApplyRawPageHands {
   checkServiceWorker: () => Promise<ApplyServiceWorkerFinding | null>;
 }
 
-/** The same native-control ordering is used for public refs and private vault fills. */
-export const APPLY_CONTROL_SELECTOR =
-  "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']";
+export const APPLY_LISTBOX_TRIGGER_SELECTOR =
+  ":is(button, input[type='button'], [role='button'])[aria-haspopup='listbox' i]";
+
+/** The same control ordering is used for public refs and private vault fills. */
+export const APPLY_CONTROL_SELECTOR = `input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true'], ${APPLY_LISTBOX_TRIGGER_SELECTOR}`;
