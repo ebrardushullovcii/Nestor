@@ -87,6 +87,10 @@ export interface ResumeStore {
   /** Keeps a finished write, unless the job left Shortlisted meanwhile. */
   finishWriting(jobId: number, draft: ResumeDraft | null): boolean;
   failWriting(jobId: number, error: string): void;
+  /** Shortlisted jobs whose resume failed, oldest failure first, with why. */
+  listFailed(): { jobId: number; error: string | null }[];
+  /** Puts a failed write back in the queue at its own level. True when it was failed. */
+  requeueFailed(jobId: number): boolean;
   setProviderWaiting(jobId: number, waiting: boolean): void;
   /**
    * Puts a stopped write back in the queue: one job's, or with no id every
@@ -360,6 +364,28 @@ export function createResumeStore(store: JobStore): ResumeStore {
            WHERE job_id = ? AND state = 'writing'`,
         ).run(error, Date.now(), jobId);
         if (Number(result.changes) > 0) changed(jobId);
+      });
+    },
+
+    listFailed() {
+      return (
+        sql(
+          `SELECT r.job_id, r.error FROM resumes r JOIN jobs j ON j.id = r.job_id
+           WHERE r.state = 'failed' AND j.stage = 'shortlisted'
+           ORDER BY r.updated_at, r.job_id`,
+        ).all() as { job_id: number; error: string | null }[]
+      ).map((row) => ({ jobId: row.job_id, error: row.error }));
+    },
+
+    requeueFailed(jobId) {
+      return store.transaction(() => {
+        const result = sql(
+          `UPDATE resumes SET state = 'queued', error = NULL, updated_at = ?
+           WHERE job_id = ? AND state = 'failed'`,
+        ).run(Date.now(), jobId);
+        if (Number(result.changes) === 0) return false;
+        changed(jobId);
+        return true;
       });
     },
 

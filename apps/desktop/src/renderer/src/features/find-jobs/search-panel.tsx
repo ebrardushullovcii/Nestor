@@ -77,6 +77,20 @@ function runningLine(status: JobSearchStatus): {
   percent: number | null;
 } {
   const search = status.search!;
+  // The AI account refused its calls: the search keeps its queue and goes
+  // on by itself once the account lets calls through again. Nestor's own
+  // bundled key asks nothing of the person.
+  if (status.parked)
+    return {
+      text:
+        status.parked.owner === "nestor"
+          ? "Paused · Nestor's AI service is paused; this search continues when it is back"
+          : "Paused · your AI account needs you (see Needs you)",
+      detail: status.parked.providerMessage
+        ? `${status.parked.message} The AI service says: “${status.parked.providerMessage}”`
+        : status.parked.message,
+      percent: null,
+    };
   if (status.progress?.providerWaiting)
     return {
       text: "Waiting for the AI provider",

@@ -189,7 +189,43 @@ export type NeedsYouCommandInput<K extends NeedsYouCommandName> = z.input<
 >;
 export type NeedsYouCommandOutput<K extends NeedsYouCommandName> =
   NeedsYouCommandOutputs[K];
-export { NEEDS_YOU_RUN_CHANNEL } from "./ipc-channels";
+export {
+  NEEDS_YOU_AI_ACCOUNT_CHANNEL,
+  NEEDS_YOU_RUN_CHANNEL,
+} from "./ipc-channels";
+
+/**
+ * The AI account behind Nestor's model calls refuses them: out of credit
+ * (`funding`), key not accepted (`authentication`) or no access to the model
+ * (`permission`). Only the account holder can fix it, so it is a Needs you
+ * step, carrying the service's own words and link when it gave them. It
+ * resolves by itself when a later call goes through.
+ */
+export const AiAccountNeedSchema = z.object({
+  /** Stable for one endpoint and key; never the key itself. */
+  id: z.string().min(1).max(64),
+  /** The AI service's origin. */
+  provider: z.string(),
+  reason: z.enum(["funding", "authentication", "permission"]),
+  /**
+   * `person`: their own key, a Needs you step. `nestor`: Nestor's bundled
+   * key; nothing for the person to do, the app says its AI is paused.
+   */
+  owner: z.enum(["person", "nestor"]),
+  providerMessage: z.string().nullable(),
+  actionUrl: z.string().url().nullable(),
+  since: z.string(),
+});
+export type AiAccountNeed = z.infer<typeof AiAccountNeedSchema>;
+
+export const AiAccountNeedRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("list") }).strict(),
+  /** Opens the service's own page for the step in the person's browser. */
+  z.object({ action: z.literal("open"), id: z.string().min(1) }).strict(),
+  /** The person says it is done: check again now instead of waiting. */
+  z.object({ action: z.literal("check") }).strict(),
+]);
+export type AiAccountNeedRequest = z.infer<typeof AiAccountNeedRequestSchema>;
 export type NeedsYouCommandOutputs = {
   [K in NeedsYouCommandName]: z.output<
     (typeof NEEDS_YOU_COMMANDS)[K]["output"]

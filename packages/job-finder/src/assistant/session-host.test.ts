@@ -1,3 +1,4 @@
+import { AI_ACCESS_STEPS, ModelRequestHttpError } from "@nestor/ai-providers";
 import { assistantTestReads } from "./store-reads.test-support";
 import {
   ApplicationDetailsSchema,
@@ -1415,6 +1416,34 @@ describe("assistant session host", () => {
     expect(view.messages.at(-1)?.parts[0]).toMatchObject({
       type: "notice",
       kind: "interrupted",
+    });
+  });
+
+  it("says the AI account ran out of credit when the provider refuses the turn, and keeps the message", async () => {
+    const { host } = setup({
+      modelHandle: {
+        ...createScriptedAssistantModelHandle(),
+        createModel: () => ({
+          chatWithTools: () =>
+            Promise.reject(
+              new Error("Provider request failed", {
+                cause: new ModelRequestHttpError(
+                  "Insufficient balance. Top up at https://model.example.test/billing.",
+                  402,
+                  null,
+                ),
+              }),
+            ),
+        }),
+      },
+    });
+    const { conversationId } = await sendAndWait(host, "Hello");
+    const view = await host.readConversation({ conversationId });
+    const notice = reply(view.messages).parts[0];
+    expect(notice).toMatchObject({
+      type: "notice",
+      kind: "outage",
+      text: `${AI_ACCESS_STEPS.funding} Your message is kept; send it again once that is done.`,
     });
   });
 

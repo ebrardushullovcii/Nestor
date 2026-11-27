@@ -16,6 +16,7 @@ export const RESUMES_PREVIEW_CHANNEL = "resumes:preview";
 export const RESUMES_EXPORT_PDF_CHANNEL = "resumes:export-pdf";
 
 export const NEEDS_YOU_RUN_CHANNEL = "needs-you:run";
+export const NEEDS_YOU_AI_ACCOUNT_CHANNEL = "needs-you:ai-account";
 
 export const TRACKER_RUN_CHANNEL = "tracker:run";
 export const TRACKER_EXPORT_CHANNEL = "tracker:export";

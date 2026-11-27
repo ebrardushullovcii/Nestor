@@ -477,6 +477,20 @@ export const JobSearchStatusSchema = z.object({
   fitChecking: z.number().int().nonnegative().optional(),
   fitRechecking: z.number().int().nonnegative().optional(),
   search: JobSearchRecordSchema.nullable(),
+  /**
+   * The AI account refused the search's calls, so it stopped taking new
+   * work with its queue kept. It continues by itself once calls go through,
+   * at the next start, or when the person searches again.
+   */
+  parked: z
+    .object({
+      /** `nestor`: Nestor's bundled AI key; the person has nothing to do. */
+      owner: z.enum(["person", "nestor"]).default("person"),
+      message: z.string(),
+      providerMessage: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
   sources: z.array(JobSearchSourceStateSchema).max(3),
   progress: JobSearchProgressSchema.nullable(),
   sourceRevision: z.number().int().nonnegative(),
