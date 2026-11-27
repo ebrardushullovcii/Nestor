@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { expect, test } from "vitest";
 import { createHostQueue } from "./host-queue";
 function gate() {
@@ -96,4 +97,38 @@ test("a limit read from a setting applies to the next start", async () => {
   expect([...started].sort()).toEqual(["a", "b", "c"]);
   b.release();
   await Promise.all(tasks);
+});
+
+test("queued work runs in the context of the caller that queued it, not the run that released its slot", async () => {
+  const queue = createHostQueue({ limit: 4, perHost: 1 });
+  const scope = new AsyncLocalStorage<string>();
+  const signal = new AbortController().signal;
+  const first = gate();
+  const seen: (string | undefined)[] = [];
+  const read = (listing: string, wait?: Promise<void>) =>
+    scope.run(listing, () =>
+      queue.run("jobs.example", signal, async () => {
+        seen.push(scope.getStore());
+        await wait;
+        seen.push(scope.getStore());
+      }),
+    );
+  const tasks = [
+    read("listing-1", first.promise),
+    read("listing-2"),
+    read("listing-3"),
+  ];
+  await Promise.resolve();
+  first.release();
+  await Promise.all(tasks);
+  // Each listing's fetch is recorded under that listing, also when another
+  // listing's finished fetch is what let it start.
+  expect(seen).toEqual([
+    "listing-1",
+    "listing-1",
+    "listing-2",
+    "listing-2",
+    "listing-3",
+    "listing-3",
+  ]);
 });

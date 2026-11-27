@@ -86,6 +86,8 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   Accepted listing cards also persist before a browser checkpoint returns.
   Only active screening waves load into memory; leased cards survive a crash
   and stay stored until the source's complete result is acknowledged.
+  Related cards' detail reads drain in one ordered queue per source; the next
+  wave screens without waiting for them.
 - Resume-affecting profile and settings writes invalidate affected approvals
   in the same transaction (`packages/db/src/job-store/profile-effects.ts`).
 
