@@ -1,6 +1,9 @@
 import { reportSelfLimitHit } from "@nestor/core";
 import type { ApplyWriteResult } from "@nestor/contracts";
-import { describeBrowserError } from "@nestor/contracts";
+import {
+  APPLY_LISTBOX_TRIGGER_SELECTOR,
+  describeBrowserError,
+} from "@nestor/contracts";
 import type { Frame, Locator, Page, Request, Response } from "playwright";
 import { pressableLabel } from "./pressable-label";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
@@ -874,7 +877,7 @@ async function shownChoices(
   )[0]?.[1];
   const own = await evaluatePresent(
     locator,
-    (element) => {
+    (element, triggerSelector) => {
       const root = element.closest(
         "[class*='__control'], [class*='-control'], .select-shell, [class*='select-shell']",
       );
@@ -890,9 +893,12 @@ async function shownChoices(
         element instanceof HTMLTextAreaElement
           ? element.value
           : ((element as HTMLElement).innerText ?? element.textContent ?? "");
-      return [...chips, value];
+      return {
+        values: [...chips, element.getAttribute("aria-valuetext") ?? "", value],
+        listboxTrigger: element.matches(triggerSelector),
+      };
     },
-    undefined,
+    APPLY_LISTBOX_TRIGGER_SELECTOR,
   );
   // A list that stays open marks what it holds.
   const marked = await list
@@ -900,12 +906,14 @@ async function shownChoices(
     .count()
     .catch(() => 0);
   // A prompt that keeps its choices as items beside the search box.
-  const held = heldItems(await listFacts(locator)) ?? [];
+  const held = own.listboxTrigger
+    ? []
+    : (heldItems(await listFacts(locator)) ?? []);
   return [
     ...new Set(
       [
         composite?.selectedOptionLabel ?? "",
-        ...own,
+        ...own.values,
         ...held,
         marked ? text : "",
       ]

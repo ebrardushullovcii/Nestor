@@ -1,5 +1,8 @@
 import type { ApplyWriteResult } from "@nestor/contracts";
-import { isVerificationCodeControl } from "@nestor/contracts";
+import {
+  APPLY_LISTBOX_TRIGGER_SELECTOR,
+  isVerificationCodeControl,
+} from "@nestor/contracts";
 import type { Locator } from "playwright";
 import { evaluatePresent } from "./present-control";
 
@@ -8,7 +11,7 @@ export async function controlResultState(
 ): Promise<NonNullable<ApplyWriteResult["controlState"]>> {
   return evaluatePresent(
     locator,
-    (target) => {
+    (target, listboxTriggerSelector) => {
       // What a rich-text editor holds, one line per paragraph or line break,
       // so the model reads the paragraphs it wrote.
       const editorText = (root: Element): string => {
@@ -71,6 +74,7 @@ export async function controlResultState(
           select ||
           element instanceof HTMLTextAreaElement ||
           (element as HTMLElement).isContentEditable ||
+          element.matches(listboxTriggerSelector) ||
           element.getAttribute("role") === "combobox")
           ? {
               value:
@@ -78,7 +82,8 @@ export async function controlResultState(
                   ? (element as HTMLInputElement).value
                   : (element as HTMLElement).isContentEditable
                     ? editorText(element)
-                    : (element.textContent ?? "").trim(),
+                    : element.getAttribute("aria-valuetext")?.trim() ||
+                      (element as HTMLElement).innerText.trim(),
             }
           : {}),
         ...(checked === undefined ? {} : { checked }),
@@ -94,7 +99,7 @@ export async function controlResultState(
           : {}),
       };
     },
-    undefined,
+    APPLY_LISTBOX_TRIGGER_SELECTOR,
   )
     .then(({ metadata, ...state }) => {
       if (isVerificationCodeControl(metadata)) delete state.value;

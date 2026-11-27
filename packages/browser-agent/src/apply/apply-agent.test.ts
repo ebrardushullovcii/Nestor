@@ -274,18 +274,28 @@ test.each([
   "confirm_before_submit",
   "autonomous_submit",
 ] as const)(
-  "%s is told a source answer is this posting's and an unknown personal fact stays empty",
+  "%s receives the source, written-answer and work-eligibility instructions",
   (mode) => {
     const input = config(page());
     input.authority.mode = mode;
     const prompt = createApplySystemPrompt(input);
     expect(prompt).toContain(
-      "A saved answer belongs to the question and employer it was saved for",
+      "Reuse it with a different employer only if it states a fact about the person that still applies.",
     );
     expect(prompt).toContain(
-      "answer from listingDiscovery, the job board or site where Nestor found it",
+      "Read listingDiscovery and the path you took to this form.",
     );
-    expect(prompt).toContain("never a source saved for another employer");
+    expect(prompt).toContain("Report the route and the option you chose.");
+    expect(prompt).toContain(
+      "For a question asking for a story, use a relevant recorded project",
+    );
+    expect(prompt).toContain(
+      "answer the parts the record supports without inventing an incident",
+    );
+    expect(prompt).toContain(
+      "is a country-specific permit condition for that country",
+    );
+    expect(prompt).toContain("use each fact's saved date where provided");
     expect(prompt).toContain(
       "Leave an optional field you have no fact for empty",
     );
