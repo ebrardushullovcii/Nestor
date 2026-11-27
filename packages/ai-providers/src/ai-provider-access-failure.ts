@@ -1,5 +1,5 @@
 import {
-  isRejectedModelRequestStatus,
+  isRejectedModelRequest,
   ModelRequestHttpError,
   ModelRequestTimeoutError,
   resetModelCredentialRejections,
@@ -103,7 +103,7 @@ export function getRejectedModelRequest(
   hasCause(error, (cause) => {
     if (
       !(cause instanceof ModelRequestHttpError) ||
-      !isRejectedModelRequestStatus(cause.status)
+      !isRejectedModelRequest(cause)
     )
       return false;
     rejected = cause;
