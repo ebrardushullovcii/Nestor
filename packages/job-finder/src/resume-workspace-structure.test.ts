@@ -1312,7 +1312,7 @@ describe("buildResumeRenderDocument", () => {
         "Workflow OS — Design lead · https://alex.example.com/workflow-os-case-study",
       // Description, status and skills each keep their own line.
       summary:
-        "Scaled a workflow design system.\nReduced release churn.\nSkills used: Figma, React.",
+        "Scaled a workflow design system.\nOutcome: Reduced release churn.\nSkills used: Figma, React.",
       bullets: [],
     });
   });
@@ -1867,7 +1867,7 @@ test("page budget follows available real material rather than career years", () 
   }
 });
 
-test("non-technical project skills use a neutral label included in language translation", async () => {
+test("a tailored project's status and skills render as labeled lines that can be translated", async () => {
   const { applyResumeLanguage, collectResumeLanguageFields } =
     await import("./internal/resume-workspace-language");
   const seed = createSeed();
@@ -1879,28 +1879,38 @@ test("non-technical project skills use a neutral label included in language tran
         id: "community",
         name: "Community event",
         summary: "Organized a community event.",
-        outcome: "Welcomed local residents.",
+        outcome: "Open to the public",
         skills: ["Event planning", "Communication"],
       },
     ],
   };
-  const draft = seedResumeDraft({
+  const job = seed.savedJobs[0]!;
+  const draft = buildResumeDraftFromTailoredDraft({
     profile,
-    job: seed.savedJobs[0]!,
+    job,
     templateId: seed.settings.resumeTemplateId,
+    createdAt: "2026-03-20T10:04:00.000Z",
+    generationMethod: "ai",
+    draft: completeTailoredResumeDraft(
+      {},
+      { ...seed, profile, job, resumeText: profile.baseResume.textContent },
+    ),
   });
   const field = collectResumeLanguageFields(draft).find(
     (field) => field.id === "project_community:summary",
   )!;
-  expect(field.text).toContain("Skills used: Event planning, Communication.");
-  expect(field.text).not.toContain("Technologies:");
+  expect(field.text).toBe(
+    "Organized a community event.\nOutcome: Open to the public\nSkills used: Event planning, Communication.",
+  );
+  const translatedSummary =
+    "Organisierte eine Veranstaltung.\nErgebnis: Für die Öffentlichkeit zugänglich\nEingesetzte Kenntnisse: Veranstaltungsplanung, Kommunikation.";
   const translated = applyResumeLanguage(draft, {
     language: "German",
     listingLanguage: "German",
     translations: [
       {
         id: field.id,
-        text: "Organisierte eine Veranstaltung. Eingesetzte Kenntnisse: Veranstaltungsplanung, Kommunikation.",
+        text: translatedSummary,
       },
     ],
   });
@@ -1908,7 +1918,7 @@ test("non-technical project skills use a neutral label included in language tran
   expect(
     rendered.sections.find((section) => section.kind === "projects")!
       .entries[0]!.summary,
-  ).toContain("Eingesetzte Kenntnisse:");
+  ).toBe(translatedSummary);
 });
 
 test("skill sections are the writer's own lists, without the profile's other spellings appended", () => {

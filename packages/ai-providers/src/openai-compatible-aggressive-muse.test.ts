@@ -159,6 +159,12 @@ test.each(["conservative", "balanced", "aggressive"] as const)(
     expect(prompt).toContain(
       "Keep the person's most relevant projects visible",
     );
+    expect(prompt).toContain(
+      "Keep each distinct measured result as its own claim, with its own verb, number and qualifiers.",
+    );
+    expect(prompt).toContain(
+      "Put a project's launch or availability status in its outcome field",
+    );
     expect(prompt).not.toContain("what you would do for this team");
     if (mode === "aggressive")
       expect(prompt).toContain("you may name an adjacent technology");

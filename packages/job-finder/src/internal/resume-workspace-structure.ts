@@ -171,19 +171,19 @@ function pickProjectLink(
 }
 
 /**
- * A project's description, its status ("Shipped · v1.8.0", "Live on the web")
- * and its skills each take their own line. Joined with spaces, a status with
- * no full stop ran into "Skills used:" as one sentence on every resume.
+ * A project's description, outcome and skills each take their own line.
+ * The outcome field can hold prose or a short status, so give it a label.
  */
 function formatProjectSummary(input: {
   summary: string | null | undefined;
   outcome: string | null | undefined;
   skills: readonly string[] | undefined;
 }): string | null {
+  const outcome = input.outcome?.trim();
   return joinCompact(
     [
       input.summary?.trim(),
-      input.outcome?.trim(),
+      outcome ? `Outcome: ${outcome}` : null,
       input.skills && input.skills.length > 0
         ? `Skills used: ${uniqueStrings(input.skills).join(", ")}.`
         : null,
