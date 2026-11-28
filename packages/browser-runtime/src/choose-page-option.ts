@@ -181,12 +181,8 @@ export async function readPageOptions(
   try {
     await requests.bound;
     const scope = (await controlFrame(locator)) ?? page;
-    const expanded = await attribute(locator, "aria-expanded");
     const before = await openListsBefore(locator);
-    const list = await boundList(scope, locator, before);
-    const open = list ? await readList(list) : null;
-    if (expanded !== "true" && (expanded === "false" || !open?.visible))
-      await clickPresent(locator);
+    await openCustomList(scope, locator, before);
     // No row can match this, so the list is read to its end.
     const nothing = "\u0000";
     const shown = await settle(
@@ -800,6 +796,34 @@ async function boundList(
   return mark ? scope.locator(`[${LIST_MARK}="${mark}"]`) : null;
 }
 
+async function openCustomList(
+  scope: Frame | Page,
+  locator: Locator,
+  before: ListsBefore,
+): Promise<void> {
+  const isOpen = async () => {
+    const expanded = await attribute(locator, "aria-expanded");
+    if (expanded === "true" || expanded === "false") return expanded === "true";
+    const list = await boundList(scope, locator, before);
+    return list !== null && (await readList(list))?.visible === true;
+  };
+
+  // A click could close an already-open picker. On some comboboxes it only
+  // focuses the input, so use the keyboard to open the popup if still closed.
+  if (await isOpen()) return;
+  await clickPresent(locator);
+  if (await isOpen()) return;
+  const element = await presentControl(locator);
+  try {
+    const combobox = await element.evaluate(
+      (node) => node instanceof Element && node.matches("[role='combobox']"),
+    );
+    if (combobox) await element.press("ArrowDown", { timeout: 0 });
+  } finally {
+    await element.dispose();
+  }
+}
+
 /** Matches an accessible name as the label spells it, give or take spacing and case. */
 function exactName(text: string): RegExp {
   const escaped = text
@@ -1118,12 +1142,7 @@ async function chooseFromList(
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
   const scope = (await controlFrame(locator)) ?? page;
-  const expanded = await attribute(locator, "aria-expanded");
-  const list = await boundList(scope, locator, before);
-  const open = list ? await readList(list) : null;
-  // Selecting an already-open picker must not toggle it closed.
-  if (expanded !== "true" && (expanded === "false" || !open?.visible))
-    await clickPresent(locator);
+  await openCustomList(scope, locator, before);
   if (searchable) {
     // Replacing identical search text otherwise produces no React change.
     // Clear this element first, without dismissing its list or parent modal.
