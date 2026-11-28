@@ -376,7 +376,54 @@ async function runApplyAgentPrivate(
     forPerson: ApplyPersonRequest[] = [],
   ): AgentLoopToolOutcome => {
     const questions: ApplicationAttemptQuestion[] = [];
+    const pendingPagePauses: typeof pauses = [];
     for (const [index, item] of forPerson.entries()) {
+      if (typeof item !== "string" && "refs" in item) {
+        const observation = page;
+        const controls = item.refs.map((ref) =>
+          observation?.controls.find((control) => control.ref === ref),
+        );
+        const members = controls.filter((control) => control !== undefined);
+        if (!observation || members.length !== item.refs.length)
+          return {
+            kind: "ok",
+            status: "failed",
+            content:
+              "A grouped question has a stale or missing control. Observe the form again.",
+          };
+        if (
+          members.some(
+            (control) =>
+              control.credentialRole === "password" ||
+              control.credentialRole === "one_time_code",
+          )
+        )
+          return {
+            kind: "ok",
+            status: "failed",
+            content:
+              "A password or verification code belongs in an on-page handoff.",
+          };
+        const key = JSON.stringify([
+          input.application.applicationId,
+          observation.url,
+          members.map((control) => reviewFieldKey(observation, control)).sort(),
+        ]);
+        questions.push({
+          id: `group_${createHash("sha256").update(key).digest("hex").slice(0, 24)}`,
+          prompt: item.question,
+          description: members.map(questionPrompt).join("\n"),
+          kind: "other",
+          answerControlType: "text",
+          isRequired: members.some((control) => control.required),
+          detectedAt: now().toISOString(),
+          answerOptions: [],
+          suggestedAnswers: [],
+          submittedAnswer: null,
+          status: "detected",
+        });
+        continue;
+      }
       const found = handedControl(item);
       const options = found && handedOptions.get(found.ref);
       const control = found && options ? { ...found, options } : found;
@@ -395,7 +442,7 @@ async function runApplyAgentPrivate(
           typeof item !== "string"
             ? item.instructions
             : "Enter the missing secret on the open website, then continue.";
-        pauses.push({
+        pendingPagePauses.push({
           code: "page_blocked",
           summary: detail,
           question: null,
@@ -448,6 +495,7 @@ async function runApplyAgentPrivate(
         status: "detected",
       });
     }
+    pauses.push(...pendingPagePauses);
     if (questions.length) {
       const pause = {
         code: "question_needs_you" as const,
@@ -526,10 +574,13 @@ async function runApplyAgentPrivate(
       seenObservation: before,
     });
     if (outcome.kind === "finished") {
-      applicationClosed = outcome.applicationClosed === true;
-      duplicateOfApplication = outcome.duplicateOfApplication;
       await readHandedOptions(outcome.forPerson);
-      return finish(outcome.reason, outcome.stuck, outcome.forPerson);
+      const result = finish(outcome.reason, outcome.stuck, outcome.forPerson);
+      if (result.kind === "finish") {
+        applicationClosed = outcome.applicationClosed === true;
+        duplicateOfApplication = outcome.duplicateOfApplication;
+      }
+      return result;
     }
     observe(outcome.observation);
     let content: string;

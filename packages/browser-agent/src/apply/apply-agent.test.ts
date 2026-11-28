@@ -633,6 +633,93 @@ test("an ordinary click leaves the model's named Needs you items intact", async 
     source.url,
   );
 });
+test("the model can ask one question for three controls of a single fact", async () => {
+  const groupLabel = "Fecha de nacimiento (DD/MM/AAAA)";
+  const source = page({
+    controls: ["Día", "Mes", "Año"].map((label, index) => ({
+      ...nameControl(),
+      id: `date_${index}`,
+      name: `date_${index}`,
+      index,
+      value: "",
+      label,
+      groupLabel,
+    })),
+  });
+  const input = config(source);
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "finish",
+        args: {
+          reason: "The form needs a date of birth.",
+          needsPerson: true,
+          forPerson: [
+            {
+              refs: ["c0", "c1", "c2"],
+              question: "¿Cuál es tu fecha de nacimiento? (DD/MM/AAAA)",
+            },
+          ],
+        },
+      },
+      done,
+    ]),
+  );
+  expect(result.outcome).toBe("paused");
+  expect(result.pauses[0]?.questions).toEqual([
+    expect.objectContaining({
+      prompt: "¿Cuál es tu fecha de nacimiento? (DD/MM/AAAA)",
+      answerControlType: "text",
+      answerOptions: [],
+      description: expect.stringContaining("Día"),
+    }),
+  ]);
+  expect(result.pauses[0]?.question?.description).toContain("Mes");
+  expect(result.pauses[0]?.question?.description).toContain("Año");
+
+  const question = result.pauses[0]!.question!;
+  const continuation = config(source);
+  continuation.application.continuation = { sourceUrls: [] };
+  continuation.sources.reusableAnswers = [
+    CandidateReusableAnswerSchema.parse({
+      id: "application_group_test",
+      label: question.prompt,
+      question: question.prompt,
+      answer: "07/10/2000",
+      context: { formContext: question.description },
+    }),
+  ];
+  // A redraw may have moved the controls to new handles.
+  for (const control of source.controls) control.ref = `c${control.index + 10}`;
+  const retry = model([
+    {
+      name: "fill_fields",
+      args: {
+        fields: ["07", "10", "2000"].map((text, index) => ({
+          tool: "type",
+          ref: `c${index + 10}`,
+          text,
+          storedFactId: "answerLibrary.application_group_test",
+        })),
+      },
+    },
+    done,
+  ]);
+  await runApplyAgent(continuation, retry);
+  const messages = vi.mocked(retry.chatWithTools).mock.calls[0]![0];
+  const facts = messages.find((message) =>
+    String(message.content).startsWith("Facts for this application."),
+  );
+  expect(facts?.content).toContain('"answer":"07/10/2000"');
+  expect(facts?.content).toContain('"formContext":"Fecha de nacimiento');
+  expect(source.controls.map((control) => control.value)).toEqual([
+    "07",
+    "10",
+    "2000",
+  ]);
+});
+
 test("needsPerson without forPerson does not invent a question", async () => {
   const result = await runApplyAgent(
     config(page()),

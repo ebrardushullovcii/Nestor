@@ -382,8 +382,78 @@ describe("reading the choices of lists the page draws itself", () => {
           (control: { role: string }) => control.role === "checkbox",
         )!;
         expect(box).toMatchObject({ checked: true, value: "" });
+        expect(read.find((control) => control.name === "gdpr")?.visible).toBe(
+          false,
+        );
         expect(JSON.stringify(read)).not.toContain("SVGs not supported");
       }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("controls keep their own labels and expose a native checkbox drawn by its label", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form>
+        <div><input id="email" type="email" placeholder="Email"></div>
+        <div><input id="password" type="password" placeholder="Contraseña"></div>
+        <label><input type="checkbox">Recordar sesión</label>
+      </form>
+      <form>
+        <div><select id="region" title="Provincia"><option value="">Seleccione</option><option>Madrid</option></select></div>
+        <input type="checkbox" id="privacy" aria-hidden="true" style="position: absolute; opacity: 0; width: 0; height: 0">
+        <label for="privacy"><span aria-hidden="true">□</span> Acepto la política de privacidad</label>
+        <div hidden><input type="checkbox" id="concealed"><label for="concealed">Concealed</label></div>
+      </form>`);
+      const read = await readRawApplyPage(page);
+      const byId = (id: string) =>
+        read.controls.find((control) => control.id === id)!;
+      expect([
+        byId("email").label,
+        byId("password").label,
+        byId("region").label,
+      ]).toEqual(["Email", "Contraseña", "Provincia"]);
+      expect(byId("privacy")).toMatchObject({
+        label: "Acepto la política de privacidad",
+        visible: true,
+        visibility: { inViewport: true, zeroSize: false, cssHidden: false },
+      });
+      expect(byId("concealed").visible).toBe(false);
+      const result = await createPlaywrightApplyPageMechanics(page).setToggle(
+        byId("privacy").ref!,
+        true,
+      );
+      expect(result.ok).toBe(true);
+      expect(await page.locator("#privacy").isChecked()).toBe(true);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("separate dropdown labels keep their common question in a plain form row", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form>
+        <div>
+          <label>Fecha de nacimiento (DD/MM/AAAA)</label>
+          <div>
+            <select id="day" aria-label="Día"><option value="">Día</option><option>7</option></select>
+            <select id="month" aria-label="Mes"><option value="">Mes</option><option>Octubre</option></select>
+            <select id="year" aria-label="Año"><option value="">Año</option><option>2000</option></select>
+          </div>
+        </div>
+        <label for="postal">Código postal</label><input id="postal">
+      </form>`);
+      const read = await readRawApplyPage(page);
+      expect(
+        read.controls.map(({ label, groupLabel }) => [label, groupLabel]),
+      ).toEqual([
+        ["Día", "Fecha de nacimiento (DD/MM/AAAA)"],
+        ["Mes", "Fecha de nacimiento (DD/MM/AAAA)"],
+        ["Año", "Fecha de nacimiento (DD/MM/AAAA)"],
+        ["Código postal", ""],
+      ]);
     } finally {
       await page.close();
     }

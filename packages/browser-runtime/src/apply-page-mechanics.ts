@@ -1182,7 +1182,7 @@ export function collectApplyDocumentSnapshot(
       const clone = element.cloneNode(true) as Element;
       clone
         .querySelectorAll(
-          `input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox'], ${selectors.listboxTriggers}`,
+          `input, textarea, select, svg, script, style, noscript, template, [hidden], [aria-hidden='true'], [role='option'], [role='listbox'], ${selectors.listboxTriggers}`,
         )
         .forEach((control) => control.remove());
       return readLabelClone(clone);
@@ -1272,7 +1272,16 @@ export function collectApplyDocumentSnapshot(
         .filter(Boolean)
         .join(" ");
       if (text) return text;
-      const enclosing = labelText(element.closest("label"));
+      const wrapper = element.closest("label");
+      const enclosing = labelText(
+        wrapper instanceof HTMLLabelElement &&
+          (!wrapper.control ||
+            wrapper.control === element ||
+            (element.matches("[role='checkbox'], [role='radio']") &&
+              element.contains(wrapper.control)))
+          ? wrapper
+          : null,
+      );
       if (enclosing) return enclosing;
       // Some buttons name what they currently show ("Select One Required").
       // The question is next to the button, like the label of a native select.
@@ -1286,19 +1295,47 @@ export function collectApplyDocumentSnapshot(
         const ownText = labelText(element);
         if (ownText) return ownText;
       }
-      let ancestor = element.parentElement;
-      for (let depth = 0; ancestor && depth < 5; depth += 1) {
+      for (
+        let ancestor = element.parentElement, depth = 0;
+        ancestor && depth < 5 && !ancestor.matches("form, [role='form'], body");
+        ancestor = ancestor.parentElement, depth += 1
+      ) {
+        // Some pickers draw a button beside a concealed backing field.
+        const ownsField = (field: HTMLElement) =>
+          field === element ||
+          element.contains(field) ||
+          (triggerText !== undefined &&
+            ancestor!.contains(field) &&
+            !isVisible(field));
+        if (
+          fieldsIn(ancestor).some((field) => !ownsField(field as HTMLElement))
+        )
+          break;
         const clone = ancestor.cloneNode(true) as HTMLElement;
+        // A label can sit in this box and still name a control outside it.
+        const clonedLabels = clone.querySelectorAll("label");
+        for (const [index, label] of Array.from(
+          ancestor.querySelectorAll("label"),
+        ).entries()) {
+          if (label.control && !ownsField(label.control))
+            clonedLabels.item(index)?.remove();
+        }
         clone
           .querySelectorAll(
-            `input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i], ${selectors.listboxTriggers}`,
+            `input, textarea, select, button, svg, [hidden], [aria-hidden='true'], [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i], ${selectors.listboxTriggers}`,
           )
           .forEach((candidate) => candidate.remove());
         const nearby = readLabelClone(clone);
         if (nearby.length > 0 && nearby.length <= 500) return nearby;
-        ancestor = ancestor.parentElement;
       }
-      return "";
+      const placeholder = element.getAttribute("placeholder");
+      const emptyOption =
+        element instanceof HTMLSelectElement ? element.options[0] : undefined;
+      return cleanLabel(
+        element.getAttribute("title") ||
+          placeholder ||
+          (emptyOption?.value === "" ? emptyOption.label : ""),
+      );
     };
     const groupLabel = (element: Element): string => {
       const legends: string[] = [];
@@ -1396,6 +1433,14 @@ export function collectApplyDocumentSnapshot(
     const fieldsByBox = new Map<Element, Element[]>();
     const indexes = new Map(elements.map((element, index) => [element, index]));
     const namedRadios = new Map<string, number>();
+    const fieldsIn = (box: Element) => {
+      let fields = fieldsByBox.get(box);
+      if (!fields) {
+        fields = Array.from(box.querySelectorAll(selectors.controls));
+        fieldsByBox.set(box, fields);
+      }
+      return fields;
+    };
     for (const element of elements) {
       const name = nativeName(element);
       if (choiceKind(element) !== "radio" || !name) continue;
@@ -1436,6 +1481,32 @@ export function collectApplyDocumentSnapshot(
       }
       return "";
     };
+    const rowQuestion = (element: Element): string => {
+      // Some forms put a shared title in an ordinary wrapper above several
+      // individually named fields. Keep the smallest row's title and stop
+      // when the wrapper starts including other fields.
+      let rowFields: Element[] | undefined;
+      for (
+        let box = element.parentElement;
+        box &&
+        !box.matches(
+          "form, [role='form'], fieldset, [role='group'], [role='radiogroup'], dialog, [role='dialog'], body",
+        );
+        box = box.parentElement
+      ) {
+        const fields = fieldsIn(box);
+        if (fields.length < 2) continue;
+        if (rowFields && fields.length !== rowFields.length) break;
+        rowFields = fields;
+        const first = Array.from(box.children).find((child) =>
+          child.contains(fields[0]!),
+        );
+        if (!first) continue;
+        const title = precedingQuestion(first, fields);
+        if (title) return title;
+      }
+      return "";
+    };
     const ownedChoiceGroup = (element: Element) => {
       const known = ownedChoices.get(element);
       if (known) return known;
@@ -1457,11 +1528,7 @@ export function collectApplyDocumentSnapshot(
         box && box !== boundary?.parentElement && !box.matches("html, body");
         box = box.parentElement
       ) {
-        let peers = fieldsByBox.get(box);
-        if (!peers) {
-          peers = Array.from(box.querySelectorAll(selectors.controls));
-          fieldsByBox.set(box, peers);
-        }
+        const peers = fieldsIn(box);
         if (peers.length < Math.max(2, radioCount)) continue;
         if (
           peers.some(
@@ -1732,6 +1799,8 @@ export function collectApplyDocumentSnapshot(
         /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
           element.placeholder,
         ));
+    const painted = (facts: ReturnType<typeof fieldVisibility>) =>
+      !facts.ariaHidden && !facts.cssHidden && !facts.zeroSize;
     return elements.map((element, index) => {
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
@@ -1764,7 +1833,12 @@ export function collectApplyDocumentSnapshot(
       const role = element.getAttribute("role")?.toLowerCase() ?? "";
       const choice = ownedChoiceGroup(element);
       const ancestors = sectionPath(element);
-      const enclosingLabel = groupLabel(element);
+      const rowLabel = ["checkbox", "radio"].includes(choiceKind(element))
+        ? ""
+        : rowQuestion(element);
+      const enclosingLabel = [...new Set([groupLabel(element), rowLabel])]
+        .filter(Boolean)
+        .join(" — ");
       const label = challengeResponse
         ? "Site verification response"
         : directLabel(element, triggerText);
@@ -1777,12 +1851,32 @@ export function collectApplyDocumentSnapshot(
             : listboxTrigger
               ? element.tagName.toLowerCase()
               : "contenteditable";
+      const nativeVisibility = fieldVisibility(element);
+      const customToggle = input?.parentElement?.closest(
+        "[role='checkbox'], [role='radio']",
+      );
+      // A label associated by HTML activates its input even when the input
+      // is visually concealed. A visible ARIA control around a native
+      // input already has its own handle, so keep that mirror hidden.
+      const labelVisibility =
+        input &&
+        ["checkbox", "radio"].includes(input.type) &&
+        !painted(nativeVisibility) &&
+        !(customToggle && painted(fieldVisibility(customToggle)))
+          ? Array.from(input.labels ?? [])
+              .filter(
+                (label) => getComputedStyle(label).pointerEvents !== "none",
+              )
+              .map(fieldVisibility)
+              .find(painted)
+          : undefined;
+      const visibility = labelVisibility ?? nativeVisibility;
       return {
         index,
         ...(selectors.controlRefPrefix
           ? { ref: `${selectors.controlRefPrefix}c${index}` }
           : {}),
-        visibility: fieldVisibility(element),
+        visibility,
         tagName,
         inputType: listboxTrigger
           ? "select"
@@ -1847,7 +1941,7 @@ export function collectApplyDocumentSnapshot(
         visible:
           !challengeResponse &&
           ((input?.type === "file" && !input.matches(":disabled")) ||
-            isVisible(html)),
+            painted(visibility)),
         value:
           (challengeResponse ? "" : selectedTriggerValue) ??
           (redactCredentials &&
