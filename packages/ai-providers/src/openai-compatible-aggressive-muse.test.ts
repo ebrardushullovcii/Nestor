@@ -143,12 +143,26 @@ test.each(["conservative", "balanced", "aggressive"] as const)(
   "%s writer gets the same prose and relevant-project instructions",
   (mode) => {
     const prompt = buildResumeRewriteProposalPrompt(mode);
-    expect(prompt).toContain("merging imported sentence fragments");
     expect(prompt).toContain(
-      "Keep the subject of any clause that needs one or recast the sentence",
+      "Give each clause the subject it needs and cut needless repetition.",
     );
     expect(prompt).toContain(
-      "avoid unnecessary repetition within each sentence or bullet",
+      "Use separate clauses or sentences for distinct results, giving each its own verb.",
+    );
+    expect(prompt).toContain(
+      "Keep each number, time span, and qualifier with the fact it describes.",
+    );
+    expect(prompt).toContain(
+      "Turn standalone feature lists into sentences that say what the product does.",
+    );
+    expect(prompt).toContain(
+      "The opening verb can leave the candidate implied; recast a dependent clause if it needs its own subject.",
+    );
+    expect(prompt).toContain(
+      "Join setup, action and result when they describe the same accomplishment.",
+    );
+    expect(prompt).toContain(
+      "supply a clean summary in the corresponding experienceEntries or projectEntries proposal",
     );
     expect(prompt).toContain("use resumeHeadline as the title in the summary");
     expect(prompt).toContain(
@@ -158,9 +172,6 @@ test.each(["conservative", "balanced", "aggressive"] as const)(
     expect(prompt).toContain("without cover-letter promises");
     expect(prompt).toContain(
       "Keep the person's most relevant projects visible",
-    );
-    expect(prompt).toContain(
-      "Keep each distinct measured result as its own claim, with its own verb, number and qualifiers.",
     );
     expect(prompt).toContain(
       "Put a project's launch or availability status in its outcome field",

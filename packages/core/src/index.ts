@@ -32,3 +32,6 @@ export function fnv1a32(value: string): string {
 }
 
 export { createConnectionIdleTimeout } from "./connection-idle";
+
+export const DOCUMENT_PROSE_GUIDANCE =
+  "Write prose in complete, natural sentences. Give each clause the subject it needs and cut needless repetition. Use separate clauses or sentences for distinct results, giving each its own verb. Keep each number, time span, and qualifier with the fact it describes. For example, 'The team catalogued 300 items and reduced lookup time to 30 seconds.' Turn standalone feature lists into sentences that say what the product does.";

@@ -172,10 +172,19 @@ describe("the letter one application sends", () => {
     expect(request.prompt).toContain("About 120 words");
     expect(request.prompt).toContain("Direct and brief");
     expect(request.prompt).toContain(
-      "Write in complete, natural sentences with the subjects each clause needs",
+      "Give each clause the subject it needs and cut needless repetition.",
     );
     expect(request.prompt).toContain(
-      "avoid repeating words or phrases unnecessarily within a sentence or bullet",
+      "Use separate clauses or sentences for distinct results, giving each its own verb.",
+    );
+    expect(request.prompt).toContain(
+      "Keep each number, time span, and qualifier with the fact it describes.",
+    );
+    expect(request.prompt).toContain(
+      "Turn standalone feature lists into sentences that say what the product does.",
+    );
+    expect(request.prompt).toContain(
+      "Use the original imported resume and saved profile to clarify how facts and qualifiers relate",
     );
     expect(request.prompt).toContain("Match the voice, not the content");
     expect(request.prompt).toContain("Do not state anything else as fact");
@@ -277,6 +286,9 @@ test("letter input makes accepted contacts and role constraints authoritative", 
 
 test("review evidence has single stops and the letter receives complete facts", () => {
   const applicant = sources("Build tools").profile;
+  const originalResume =
+    "Restored the archive catalog in 45 minutes. Maintained 98% indexing accuracy.";
+  applicant.baseResume.textContent = originalResume;
   applicant.proofBank = CandidateProfileSchema.parse({
     ...applicant,
     proofBank: [
@@ -316,6 +328,8 @@ test("review evidence has single stops and the letter receives complete facts", 
   });
   expect(request.prompt).toContain("PRIVATE_HISTORY_SENTINEL");
   expect(request.prompt).toContain("RESUME_TAIL_SENTINEL");
+  expect(request.prompt).toContain(`"text": "${originalResume}"`);
+  expect(request.prompt).toContain("Cut reporting time.");
   expect(request.prompt).toContain("Do not ask the employer to accommodate");
   expect(request.groundedIn.join(" ")).not.toContain("..");
 });
