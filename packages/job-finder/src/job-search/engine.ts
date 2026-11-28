@@ -743,15 +743,10 @@ export function createListingSearchEngine(deps: {
         () =>
           fitJobs({
             ...modelContext(),
-            client: {
-              chatWithTools: (messages, tools, options) =>
-                client.chatWithTools(messages, tools, {
-                  ...options,
-                  conversationKey: modelConversationKeys.fitJudging(
-                    input.context.profile,
-                  ),
-                }),
-            },
+            client,
+            conversationKey: modelConversationKeys.fitJudging(
+              input.context.profile,
+            ),
             ...input,
             onUsage: (usage, stage) => {
               onUsage(usage, stage);

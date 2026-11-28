@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  shareDescriptionEndings,
   sharePageText,
   splitLinksOnEveryPage,
   textCoveredBy,
@@ -8,6 +9,29 @@ import {
 
 const paragraph = (label: string) =>
   `${label}: the synthetic team builds and runs the order service that venues use during every shift of the day.`;
+
+test("shared description endings preserve the exact text and its own listing ids", () => {
+  const footer = `\n\n${paragraph("Footer")}\nHours: 08:00–16:00\n`;
+  const bodies = [
+    `Own duties A${footer}`,
+    "Own duties B\nHours: 09:00–16:00\n",
+    `Own duties C${footer}`,
+  ];
+  const { descriptionEndings, listings } = shareDescriptionEndings(
+    bodies.map((description, id) => ({ id, description })),
+  );
+  const descriptions = listings.map(({ description }) => description);
+  expect(descriptionEndings).toEqual([{ ids: [0, 2], text: footer }]);
+  expect(descriptions).toEqual(["Own duties A", bodies[1], "Own duties C"]);
+  expect(
+    descriptions.map(
+      (text, id) =>
+        text +
+        (descriptionEndings.find((ending) => ending.ids.includes(id))?.text ??
+          ""),
+    ),
+  ).toEqual(bodies);
+});
 
 describe("page material without its own copies", () => {
   test("a body is covered by its page text across different line breaks and spacing", () => {

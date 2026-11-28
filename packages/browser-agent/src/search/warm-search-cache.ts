@@ -5,9 +5,10 @@ type StreamListener = NonNullable<
   NonNullable<Parameters<Chat>[2]>["onStreamEvent"]
 >;
 
+type Wave = { ready: Promise<void>; active: number };
 const searches = new WeakMap<
   LLMClient,
-  WeakMap<AbortSignal, Map<string, Promise<void>>>
+  WeakMap<AbortSignal, Map<string, Wave>>
 >();
 
 /**
@@ -33,22 +34,29 @@ export async function withWarmSearchCache(
     runs.set(signal, prefixes);
   }
   const first = prefixes.get(key);
-  if (first) {
-    await first;
-    signal.throwIfAborted();
-    return send();
-  }
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  prefixes.set(key, promise);
+  let release: (() => void) | undefined;
+  const wave = first ?? {
+    ready: new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+    active: 0,
+  };
+  if (!first) prefixes.set(key, wave);
+  wave.active++;
   try {
+    if (first) {
+      await wave.ready;
+      signal.throwIfAborted();
+      return await send();
+    }
     return await send((event) => {
       if (event.type !== "attempt_started" && event.type !== "provider_wait")
-        release();
+        release?.();
     });
   } finally {
-    release();
+    release?.();
+    // A later wave may run after the cache expired or the provider refused
+    // the first wave. Coordinate it again when no request is left in flight.
+    if (--wave.active === 0) prefixes.delete(key);
   }
 }

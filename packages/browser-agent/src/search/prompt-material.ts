@@ -79,6 +79,66 @@ export function withoutRepeatedBlocks(text: string): string {
     .replace(/\n{3,}/gu, "\n\n");
 }
 
+/** Keep each distinct body inline and send verbatim repeated endings once. */
+export function shareDescriptionEndings<
+  T extends { id: number; description: string },
+>(
+  listings: readonly T[],
+): {
+  descriptionEndings: { ids: number[]; text: string }[];
+  listings: T[];
+} {
+  const encoded = [...listings];
+  const descriptionEndings: { ids: number[]; text: string }[] = [];
+  const groups = new Map<string, { index: number; listing: T }[]>();
+  for (const [index, listing] of listings.entries()) {
+    const { description } = listing;
+    const lastLine = description.slice(
+      description.lastIndexOf("\n", description.trimEnd().length - 1) + 1,
+    );
+    const group = groups.get(lastLine);
+    if (group) group.push({ index, listing });
+    else groups.set(lastLine, [{ index, listing }]);
+  }
+  for (const group of groups.values()) {
+    const [head, ...rest] = group;
+    if (!head || !rest.length) continue;
+    const first = head.listing.description;
+    let common = first.length;
+    for (const {
+      listing: { description },
+    } of rest) {
+      common = Math.min(common, description.length);
+      let length = 0;
+      while (
+        length < common &&
+        first[first.length - length - 1] ===
+          description[description.length - length - 1]
+      )
+        length++;
+      common = length;
+    }
+    // Only move whole lines and leave the first line inline with its listing.
+    const start = first.indexOf("\n", first.length - common);
+    if (start < 0) continue;
+    const text = first.slice(start);
+    const ending = { ids: group.map(({ listing }) => listing.id), text };
+    // Only use the representation when it pays for its own JSON fields.
+    if (
+      (JSON.stringify(text).length - 2) * group.length <=
+      JSON.stringify({ descriptionEndings: [ending] }).length
+    )
+      continue;
+    descriptionEndings.push(ending);
+    for (const { index, listing } of group)
+      encoded[index] = {
+        ...listing,
+        description: listing.description.slice(0, -text.length),
+      };
+  }
+  return { descriptionEndings, listings: encoded };
+}
+
 /**
  * Links present on every page of a batch, in the first page's order, and
  * each page's remaining links. Site navigation then appears once per request
