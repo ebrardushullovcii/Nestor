@@ -87,13 +87,10 @@ function PasswordImportReceipt({
     ...(
       [
         [counts.alreadySaved, "Already saved"],
+        [counts.upgradedToHttps, "Moved to the HTTPS version of the site"],
         [counts.locked, "Locked to the browser"],
         [counts.unsupportedEncryption, "Unsupported encryption"],
         [counts.unreadable, "Couldn’t be unlocked"],
-        [
-          counts.insecureHttp,
-          "For sites without HTTPS that Nestor doesn’t fill",
-        ],
         [counts.androidApp, "For Android apps"],
         [counts.unsupportedOrigin, "Other unsupported login addresses"],
         [counts.invalid, "Empty or damaged login records"],
@@ -114,10 +111,12 @@ function PasswordImportReceipt({
             ))}
           </ul>
         </div>
-        {(counts.locked > 0 || counts.unreadable > 0) && (
+        {(counts.locked > 0 ||
+          counts.unsupportedEncryption > 0 ||
+          counts.unreadable > 0) && (
           <p>
-            To bring over locked or unreadable logins, export passwords from
-            your browser’s password manager, then choose Import password CSV.
+            To bring over these logins, export passwords from your browser’s
+            password manager, then choose Import password CSV.
           </p>
         )}
         <p>{message}</p>

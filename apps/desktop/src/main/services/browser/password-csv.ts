@@ -5,6 +5,8 @@ import type {
 import type { PasswordVault, PasswordValue } from "./password-vault";
 import { passwordImportOrigin } from "./password-origin";
 
+export type PasswordImportValue = PasswordValue & { upgradedToHttps: boolean };
+
 /** RFC 4180 fields, including escaped quotes and embedded CR/LF. Errors never quote input. */
 export function parsePasswordCsv(text: string): string[][] {
   if (text.length > 10 * 1024 * 1024)
@@ -49,13 +51,20 @@ export function parsePasswordCsv(text: string): string[][] {
 
 export function savePasswordValues(
   vault: PasswordVault,
-  values: readonly PasswordValue[],
+  values: readonly PasswordImportValue[],
 ) {
-  const counts = { added: 0, updated: 0, alreadySaved: 0, couldNotSave: 0 };
-  for (const value of values) {
+  const counts = {
+    added: 0,
+    updated: 0,
+    upgradedToHttps: 0,
+    alreadySaved: 0,
+    couldNotSave: 0,
+  };
+  for (const { upgradedToHttps, ...value } of values) {
     try {
       const outcome = vault.save(value);
       counts[outcome === "skipped" ? "alreadySaved" : outcome]++;
+      if (upgradedToHttps && outcome !== "skipped") counts.upgradedToHttps++;
     } catch {
       counts.couldNotSave++;
     }
@@ -66,8 +75,16 @@ export function savePasswordValues(
 export function countSkippedPasswordImports(
   counts: BrowserPasswordImportCounts,
 ) {
-  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-  return total - counts.added - counts.updated;
+  return (
+    counts.alreadySaved +
+    counts.locked +
+    counts.unsupportedEncryption +
+    counts.unreadable +
+    counts.androidApp +
+    counts.unsupportedOrigin +
+    counts.invalid +
+    counts.couldNotSave
+  );
 }
 
 export function importPasswordCsv(
@@ -87,12 +104,11 @@ export function importPasswordCsv(
     throw new Error(
       "Choose a Chrome, Edge or Firefox password CSV with URL, username and password columns.",
     );
-  const values: PasswordValue[] = [];
+  const values: PasswordImportValue[] = [];
   const rejected = {
     locked: 0,
     unsupportedEncryption: 0,
     unreadable: 0,
-    insecureHttp: 0,
     androidApp: 0,
     unsupportedOrigin: 0,
     invalid: 0,
@@ -114,7 +130,7 @@ export function importPasswordCsv(
       rejected.couldNotSave++;
       continue;
     }
-    values.push({ origin: origin.origin, username, password });
+    values.push({ ...origin, username, password });
   }
   const saved = savePasswordValues(vault, values);
   const counts = {

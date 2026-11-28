@@ -10,7 +10,11 @@ import {
   savePasswordValues,
   parsePasswordCsv,
 } from "./password-csv";
-import { passwordOrigin, passwordOriginsMatch } from "./password-origin";
+import {
+  passwordImportOrigin,
+  passwordOrigin,
+  passwordOriginsMatch,
+} from "./password-origin";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -119,7 +123,8 @@ it("imports Chrome/Edge and Firefox CSV and separates rejected rows in the recei
       'Site,https://second.test,user,"line 1\nline ""2"""',
       "Local,http://127.0.0.1:8080,,synthetic",
       "Unsupported,javascript:alert(1),user,ignored",
-      "HTTP,http://example.test,user,ignored",
+      "HTTP,http://example.test,user,synthetic",
+      "HTTP,http://example.test,user,synthetic",
       "Android,android://fixture@com.example.fixture/,user,ignored",
       "Malformed,not-a-url,user,ignored",
       "Empty,https://empty.test,user,",
@@ -127,12 +132,12 @@ it("imports Chrome/Edge and Firefox CSV and separates rejected rows in the recei
     ].join("\r\n"),
   );
   expect(result).toMatchObject({
-    added: 3,
+    added: 4,
     updated: 1,
     skipped: 7,
     counts: {
-      alreadySaved: 1,
-      insecureHttp: 1,
+      alreadySaved: 2,
+      upgradedToHttps: 1,
       androidApp: 1,
       unsupportedOrigin: 1,
       invalid: 2,
@@ -140,7 +145,9 @@ it("imports Chrome/Edge and Firefox CSV and separates rejected rows in the recei
     },
   });
   expect(JSON.stringify(result)).not.toMatch(/example\.test|ignored|synthetic/);
-  expect(vault.list().length).toBe(3);
+  expect(vault.list().length).toBe(4);
+  expect(vault.list("https://example.test")).toHaveLength(2);
+  expect(vault.list("http://example.test")).toHaveLength(0);
   expect(
     importPasswordCsv(
       vault,
@@ -174,13 +181,15 @@ it("does not report an empty or wholly rejected password import as successful", 
           origin: "http://remote.test",
           username: "synthetic",
           password: "synthetic",
+          upgradedToHttps: true,
         },
       ]),
-    ).toMatchObject({ couldNotSave: 1 });
+    ).toMatchObject({ couldNotSave: 1, upgradedToHttps: 0 });
     const value = {
       origin: "https://example.test",
       username: "synthetic",
       password: "synthetic",
+      upgradedToHttps: false,
     };
     expect(savePasswordValues(vault, [value])).toMatchObject({ added: 1 });
     expect(savePasswordValues(vault, [value])).toMatchObject({
@@ -191,6 +200,25 @@ it("does not report an empty or wholly rejected password import as successful", 
   } finally {
     repository.close();
   }
+});
+it.each([
+  ["http://example.test/sign-in", "https://example.test", true],
+  ["http://example.test:80/sign-in", "https://example.test", true],
+  ["http://example.test:443/sign-in", "https://example.test", true],
+  ["http://example.test:8443/sign-in", "https://example.test:8443", true],
+  ["http://localhost:8080/sign-in", "http://localhost:8080", false],
+  ["http://127.0.0.1:8080/sign-in", "http://127.0.0.1:8080", false],
+  ["http://[::1]:8080/sign-in", "http://[::1]:8080", false],
+])(
+  "imports %s under the expected scheme and port",
+  (url, origin, upgradedToHttps) => {
+    expect(passwordImportOrigin(url)).toEqual({ origin, upgradedToHttps });
+  },
+);
+it("rejects HTTP URLs with embedded user info during import", () => {
+  expect(passwordImportOrigin("http://fixture@example.test")).toEqual({
+    skipped: "unsupportedOrigin",
+  });
 });
 it("uses exact secure origins including ports; loopback HTTP is allowed for replicas", () => {
   expect(passwordOrigin("https://example.test/path")).toBe(

@@ -27,7 +27,7 @@ import type {
   ImportBrowserSignInsInput,
 } from "@nestor/contracts";
 import type { EmbeddedBrowser } from "./embedded-browser";
-import type { PasswordValue } from "./password-vault";
+import type { PasswordImportValue } from "./password-csv";
 import { passwordImportOrigin } from "./password-origin";
 
 /**
@@ -577,18 +577,17 @@ export async function readBrowserPasswords(
   sourceId: string,
   env: ImportEnvironment = defaultImportEnvironment(),
 ): Promise<{
-  values: PasswordValue[];
+  values: PasswordImportValue[];
   unsupported: boolean;
   counts: Omit<
     BrowserPasswordImportCounts,
-    "added" | "updated" | "alreadySaved"
+    "added" | "updated" | "upgradedToHttps" | "alreadySaved"
   >;
 }> {
   const counts = {
     locked: 0,
     unsupportedEncryption: 0,
     unreadable: 0,
-    insecureHttp: 0,
     androidApp: 0,
     unsupportedOrigin: 0,
     invalid: 0,
@@ -607,7 +606,7 @@ export async function readBrowserPasswords(
           : chromiumKey(source.family, env)
       ).catch(() => null);
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
-  const values: PasswordValue[] = [];
+  const values: PasswordImportValue[] = [];
   try {
     for (const file of await passwordFiles(source.profileDirectory)) {
       snapshot = await snapshotDatabase(file);
@@ -661,7 +660,7 @@ export async function readBrowserPasswords(
             continue;
           }
           values.push({
-            origin: origin.origin,
+            ...origin,
             username: row.username_value,
             password,
           });
