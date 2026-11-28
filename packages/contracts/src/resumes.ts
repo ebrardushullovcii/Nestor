@@ -52,7 +52,7 @@ export const ShortlistedApplicationSchema = z.object({
   id: z.number().int().positive(),
   status: z.enum(["applying", "ready", "needs_you", "failed", "closed"]),
   /** Why Apply could not finish; only for `failed`. */
-  reason: z.string().max(500).nullable().optional(),
+  reason: z.string().nullable().optional(),
   /** When Apply last tried it. */
   triedAt: z.string().optional(),
 });

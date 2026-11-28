@@ -18,8 +18,8 @@ function hostOf(url: string): string | null {
  * …/apply). Each such link is followed once, through the reader's per-host
  * pacing, and the employer page it lands on is stored as the apply link, so
  * the employer's form ties one posting together across boards. A link that
- * stays on the board is kept as it was. Either way the listing records that
- * its link was followed, so a later search does not read it again for this.
+ * stays on the board is kept as it was. An answered lookup records which
+ * link was followed. A failed lookup leaves that link due for a later search.
  */
 export async function followBoardApplyLinks(
   result: ReadListingResult,
@@ -53,12 +53,14 @@ export async function followBoardApplyLinks(
       )
         return job;
       const landed = await land(job.applyUrl);
-      if (landed === null) return job;
-      const host = hostOf(landed);
+      const host = landed && hostOf(landed);
       return {
         ...job,
-        ...(host && host !== board ? { applyUrl: landed } : {}),
-        facts: { ...job.facts, applyLinkFollowed: true },
+        ...(landed && host && host !== board ? { applyUrl: landed } : {}),
+        facts: {
+          ...job.facts,
+          applyLinkFollowedUrl: host ? job.applyUrl : null,
+        },
       };
     }),
   );

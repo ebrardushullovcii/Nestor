@@ -538,8 +538,7 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     attention: null,
     presentation: "peek",
   };
-  const note =
-    "macOS asks once for Keychain access to read the saved sign-ins.";
+  const note = "macOS asks once for Keychain access to read browser cookies.";
   const sources = ["Ebrar", "James"].map((profileLabel) => ({
     id: `chrome-${profileLabel}`,
     browser: "chrome" as const,
@@ -553,8 +552,8 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     status: "imported",
     cookieCount: 3,
     siteCount: 2,
-    message:
-      "Imported 3 cookies for 2 sites from Google Chrome. Your Google accounts do not come over.",
+    message: "Imported 3 cookies for 2 sites from Google Chrome.",
+    googleSignInNotice: "Your Google sign-in stays in your other browser.",
   });
   Object.defineProperty(window, "nestor", {
     configurable: true,
@@ -591,10 +590,24 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     expect(screen.queryByRole("button", { name: note })).toBeNull();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     fireEvent.click(row);
-    await screen.findByText(/Your Google accounts do not come over/);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Sign in to Google here" }),
+    const notice = await screen.findByText(
+      "Your Google sign-in stays in your other browser.",
     );
+    const signIn = screen.getByRole("button", {
+      name: "Sign in to Google here",
+    });
+    const counts = screen.getByText(/Imported 3 cookies for 2 sites/);
+    expect(notice.compareDocumentPosition(signIn)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(signIn.compareDocumentPosition(counts)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Import browser cookies" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/This copies cookies only/)).toBeTruthy();
+    fireEvent.click(signIn);
     await waitFor(() =>
       expect(command).toHaveBeenCalledWith({
         type: "navigate",

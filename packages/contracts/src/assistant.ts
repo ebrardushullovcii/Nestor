@@ -238,14 +238,14 @@ const DiffPreviewSchema = z
   .strict();
 
 export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("text"), text: z.string().max(40_000) }).strict(),
+  z.object({ type: z.literal("text"), text: z.string() }).strict(),
   z
     .object({
       type: z.literal("change"),
       receiptId: IdSchema,
       target: AssistantChangeTargetSchema,
       targetId: IdSchema.nullable().default(null),
-      summary: NonEmptyStringSchema.max(400),
+      summary: NonEmptyStringSchema,
       fields: z.array(NonEmptyStringSchema.max(160)).max(40).default([]),
       preview: z.array(DiffPreviewSchema).max(24).default([]),
       status: z
@@ -260,7 +260,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
       type: z.literal("proposal"),
       proposalId: IdSchema,
       kind: z.enum(["profile_operations", "job_finder_action"]),
-      summary: NonEmptyStringSchema.max(400),
+      summary: NonEmptyStringSchema,
       status: z.enum(["pending", "applied", "rejected"]).default("pending"),
       targetId: IdSchema.nullable().default(null),
       items: z
@@ -269,7 +269,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
             .object({
               id: IdSchema,
               label: NonEmptyStringSchema.max(400),
-              detail: z.string().max(100_000).nullable().default(null),
+              detail: z.string().nullable().default(null),
             })
             .strict(),
         )
@@ -318,7 +318,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
               toolName: NonEmptyStringSchema.max(80),
               label: NonEmptyStringSchema.max(200),
               outcome: z.enum(["done", "failed", "cancelled", "refused"]),
-              detail: z.string().max(400).nullable().default(null),
+              detail: z.string().nullable().default(null),
               at: IsoDateTimeSchema,
             })
             .strict(),
@@ -331,8 +331,8 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("question"),
       questionId: IdSchema,
-      prompt: NonEmptyStringSchema.max(1000),
-      options: z.array(NonEmptyStringSchema.max(200)).max(8).default([]),
+      prompt: NonEmptyStringSchema,
+      options: z.array(NonEmptyStringSchema).max(8).default([]),
       status: z.enum(["open", "answered", "cancelled"]).default("open"),
       answer: z.string().max(2000).nullable().default(null),
       /** The Needs you step this asks about; answering it there closes this. */
@@ -370,7 +370,7 @@ export const AssistantMessagePartSchema = z.discriminatedUnion("type", [
         "interrupted",
         "continued",
       ]),
-      text: NonEmptyStringSchema.max(1000),
+      text: NonEmptyStringSchema,
     })
     .strict(),
   z
@@ -456,7 +456,7 @@ export const AssistantTurnSchema = z
     endedAt: IsoDateTimeSchema.nullable().default(null),
     model: z.string().max(200).nullable().default(null),
     usage: AssistantUsageSchema.nullable().default(null),
-    error: z.string().max(1000).nullable().default(null),
+    error: z.string().nullable().default(null),
     planId: IdSchema.nullable().default(null),
   })
   .strict();
@@ -527,7 +527,7 @@ export const AssistantChangeReceiptSchema = z
     operationId: IdSchema.nullable().default(null),
     target: AssistantChangeTargetSchema,
     targetId: IdSchema.nullable().default(null),
-    summary: NonEmptyStringSchema.max(400),
+    summary: NonEmptyStringSchema,
     fieldLabels: z.array(NonEmptyStringSchema.max(160)).max(60).default([]),
     entries: z.array(AssistantChangeEntrySchema).max(600),
     undoCommand: z
@@ -563,14 +563,14 @@ export const AssistantProposalSchema = z
     messageId: IdSchema.nullable().default(null),
     kind: z.enum(["profile_operations", "job_finder_action"]),
     targetId: IdSchema.nullable().default(null),
-    summary: NonEmptyStringSchema.max(400),
+    summary: NonEmptyStringSchema,
     items: z
       .array(
         z
           .object({
             id: IdSchema,
             label: NonEmptyStringSchema.max(400),
-            detail: z.string().max(100_000).nullable().optional(),
+            detail: z.string().nullable().optional(),
             payload: z.unknown(),
           })
           .strict(),
@@ -680,7 +680,7 @@ export const AssistantTaskPlanStepSchema = z
     dependsOn: z.array(IdSchema).max(20).default([]),
     operationId: IdSchema.nullable().default(null),
     run: AssistantRunRefSchema.nullable().default(null),
-    note: z.string().max(600).nullable().default(null),
+    note: z.string().nullable().default(null),
   })
   .strict();
 export type AssistantTaskPlanStep = z.infer<typeof AssistantTaskPlanStepSchema>;
@@ -829,7 +829,7 @@ export const AssistantEventPayloadSchema = z.discriminatedUnion("type", [
       type: z.literal("text_delta"),
       /** Replaces the whole draft reply of this attempt; never appended across attempts. */
       attempt: z.number().int().nonnegative(),
-      text: z.string().max(40_000),
+      text: z.string(),
     })
     .strict(),
   z
@@ -841,7 +841,7 @@ export const AssistantEventPayloadSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("progress"),
-      text: NonEmptyStringSchema.max(1000),
+      text: NonEmptyStringSchema,
     })
     .strict(),
   z
@@ -853,9 +853,7 @@ export const AssistantEventPayloadSchema = z.discriminatedUnion("type", [
       conversation: AssistantConversationSchema,
     })
     .strict(),
-  z
-    .object({ type: z.literal("stall"), text: NonEmptyStringSchema.max(400) })
-    .strict(),
+  z.object({ type: z.literal("stall"), text: NonEmptyStringSchema }).strict(),
   /** The person asked to see something; a live renderer opens the route. */
   z
     .object({
@@ -891,7 +889,7 @@ export const AssistantStatusSchema = z
   .object({
     available: z.boolean(),
     /** Plain outage wording when the model is unreachable; never a setup task. */
-    detail: z.string().max(400).nullable().default(null),
+    detail: z.string().nullable().default(null),
     model: z.string().max(200).nullable().default(null),
     scripted: z.boolean().default(false),
   })
@@ -915,7 +913,7 @@ export const AssistantConversationViewSchema = z
     hasOlderMessages: z.boolean().default(false),
     activeTurn: AssistantTurnSchema.nullable().default(null),
     activity: AssistantActivitySchema.nullable().default(null),
-    draftText: z.string().max(40_000).nullable().default(null),
+    draftText: z.string().nullable().default(null),
     plans: z.array(AssistantTaskPlanSchema).default([]),
     lastSequence: z.number().int().nonnegative(),
     /** Messages accepted while a turn runs and not yet read by the model. */
@@ -932,7 +930,7 @@ export const AssistantNavigationDisplaySchema = z
     section: z.string().max(80).nullable(),
     overlay: z.enum(["none", "browser", "dialog", "chat"]),
     status: z.enum(["displayed", "blocked"]),
-    reason: z.string().max(400).nullable(),
+    reason: z.string().nullable(),
   })
   .strict();
 export type AssistantNavigationDisplay = z.infer<
@@ -1032,7 +1030,7 @@ export const AssistantUndoChangeResultSchema = z
   .object({
     receipt: AssistantChangeReceiptSchema,
     /** Plain sentence: what was undone and what could not be. */
-    message: NonEmptyStringSchema.max(800),
+    message: NonEmptyStringSchema,
   })
   .strict();
 export type AssistantUndoChangeResult = z.infer<
@@ -1079,7 +1077,7 @@ export const AssistantAttachFileResultSchema = z
     attachment: AssistantAttachmentSchema.nullable(),
     /** Every file attached by this call (the picker allows several). */
     attachments: z.array(AssistantAttachmentSchema).max(5).default([]),
-    message: z.string().max(400).nullable().default(null),
+    message: z.string().nullable().default(null),
   })
   .strict();
 export type AssistantAttachFileResult = z.infer<
@@ -1091,7 +1089,7 @@ export const AssistantMentionCandidateSchema = z
     kind: AssistantEntityKindSchema,
     id: IdSchema,
     label: NonEmptyStringSchema.max(300),
-    detail: z.string().max(300).nullable().default(null),
+    detail: z.string().nullable().default(null),
   })
   .strict();
 export type AssistantMentionCandidate = z.infer<

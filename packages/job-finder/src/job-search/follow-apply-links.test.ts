@@ -1,4 +1,8 @@
-import type { FoundJob, ReadDiscoveryPostingPage } from "@nestor/contracts";
+import {
+  DiscoveryPageReadError,
+  type FoundJob,
+  type ReadDiscoveryPostingPage,
+} from "@nestor/contracts";
 import { expect, it, vi } from "vitest";
 import { followBoardApplyLinks } from "./follow-apply-links";
 
@@ -38,7 +42,7 @@ it("stores the employer page a board's own apply link redirects to, following ea
     const finalUrl = landings[url];
     return finalUrl
       ? Promise.resolve({ html: "", finalUrl })
-      : Promise.reject(new Error("connection reset"));
+      : Promise.reject(new DiscoveryPageReadError(403));
   });
   const jobs = [
     listing(
@@ -71,17 +75,27 @@ it("stores the employer page a board's own apply link redirects to, following ea
   );
   expect(readPage).toHaveBeenCalledTimes(3);
   expect(
-    result.jobs.map((job) => [job.applyUrl, job.facts?.applyLinkFollowed]),
+    result.jobs.map((job) => [job.applyUrl, job.facts?.applyLinkFollowedUrl]),
   ).toEqual([
-    ["https://jobs.ashby.test/n8n/896c58a8", true],
-    ["https://jobs.ashby.test/n8n/896c58a8", true],
+    [
+      "https://jobs.ashby.test/n8n/896c58a8",
+      "https://www.nomads.test/job/go/2033454/",
+    ],
+    [
+      "https://jobs.ashby.test/n8n/896c58a8",
+      "https://www.nomads.test/job/go/2033454/",
+    ],
     // A link that stays on the board is kept, and not followed again.
-    ["https://www.nomads.test/job/go/1950011/", true],
+    [
+      "https://www.nomads.test/job/go/1950011/",
+      "https://www.nomads.test/job/go/1950011/",
+    ],
     // Not answered: the next search follows it again.
-    ["https://www.nomads.test/job/go/3000000/", undefined],
+    ["https://www.nomads.test/job/go/3000000/", null],
     // Already the employer's form, or no link at all.
     ["https://jobs.lever.test/n8n/4000000", undefined],
     [null, undefined],
   ]);
   expect(result.jobs[0]?.facts?.fullListingRead).toBe(true);
+  expect(result.jobs[3]?.facts?.fullListingRead).toBe(true);
 });

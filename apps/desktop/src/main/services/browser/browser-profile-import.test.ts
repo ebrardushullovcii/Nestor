@@ -422,13 +422,13 @@ describe("Windows cookie import accounting", () => {
       siteCount: 1,
     });
     expect(result.message).toMatch(
-      /^Imported 1 cookies for 1 site.*Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*1 rejected/,
+      /^Imported 1 cookie for 1 site.*Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*1 rejected/,
     );
-    expect(result.message).toContain("do not guarantee a working sign-in");
+    expect(result.message).toContain("If a site still asks you to sign in");
     // Running searches and applications are left alone during an import.
     expect(takeControl).not.toHaveBeenCalled();
     // No Google cookies in this profile, so no Google sentence.
-    expect(result.message).not.toContain("Google accounts");
+    expect(result.googleSignInNotice).toBeUndefined();
     expect(JSON.stringify(result)).not.toMatch(/synthetic|example|legacy/);
     expect(unwrapped.every((byte) => byte === 0)).toBe(true);
     const traceFile = (await readdir(traceDir)).find((file) =>
@@ -443,6 +443,33 @@ describe("Windows cookie import accounting", () => {
       const cookie = call[0] as { value?: string };
       if (cookie.value) expect(trace).not.toContain(cookie.value);
     }
+  });
+
+  test("returns Google sign-in guidance separately from the cookie counts", async () => {
+    const { env, file } = await windowsCookieProfile();
+    const db = new DatabaseSync(file);
+    db.exec(
+      "DELETE FROM cookies WHERE name <> 'plain'; UPDATE cookies SET host_key='accounts.google.com'",
+    );
+    db.close();
+    const host = {
+      getSession: () => ({ cookies: { set: vi.fn(), flushStore: vi.fn() } }),
+    } as unknown as EmbeddedBrowser;
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    const result = await importSignInsFromBrowser(
+      host,
+      { sourceId: source.id },
+      env,
+    );
+    expect(result).toMatchObject({
+      status: "imported",
+      cookieCount: 1,
+      siteCount: 1,
+    });
+    expect(result.googleSignInNotice).toContain(
+      "Your Google sign-in stays in your other browser.",
+    );
+    expect(result.message).toMatch(/^Imported 1 cookie for 1 site/);
   });
 
   test("does not attempt app-bound decryption and explains a protected-only profile", async () => {
@@ -785,7 +812,7 @@ describe("browser profile import", () => {
     expect(
       windows.sources.map((source) => [source.browser, source.supported]),
     ).toEqual([["chrome", false]]);
-    expect(windows.sources[0]?.note).toMatch(/Sign in here directly/);
+    expect(windows.sources[0]?.note).toContain("sign in directly in Nestor");
   });
 
   test("reads and decrypts a Chromium cookie store end to end", async () => {
@@ -885,7 +912,7 @@ describe("browser profile import", () => {
       env,
     );
     expect(chromeResult.status).toBe("unsupported");
-    expect(chromeResult.message).toMatch(/Sign in here directly/);
+    expect(chromeResult.message).toContain("sign in directly in Nestor");
     expect(
       (
         await importSignInsByName(

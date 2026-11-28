@@ -161,22 +161,34 @@ test("a saved listing whose apply link is its board's own redirect is read once 
   const store = openJobStore(":memory:");
   try {
     const hop = { ...job, applyUrl: "https://board.example/job/go/101/" };
-    store.saveFoundJobs({ searchId: "old", jobs: [hop] });
+    const [id] = store.saveFoundJobs({ searchId: "old", jobs: [hop] }).added;
     const first = store.prepareListingCards([card]);
     saveRead(store, first.cards[0]!, hop);
-    // Remembered, unchanged, and its link still never followed.
+    store.setFit([
+      { id: id!, score: 82, summary: "Same duties", reasons: [], gaps: [] },
+    ]);
+    store.db
+      .prepare(
+        "UPDATE job_details SET facts_json=json_set(facts_json, '$.applyLinkFollowed', json('true')) WHERE job_id=?",
+      )
+      .run(id!);
+    // Older versions set this flag even when the board returned a refusal.
     expect(store.prepareListingCards([card]).refreshUrls).toEqual([url]);
-    // That read followed it to the employer's form.
-    saveRead(store, first.cards[0]!, {
-      ...job,
-      applyUrl: "https://jobs.employer.example/own-employer/101",
-      facts: { fullListingRead: true, applyLinkFollowed: true },
-    });
-    expect(store.prepareListingCards([card]).refreshUrls).toEqual([]);
-    // A link that stayed on the board is not read again for it either.
     saveRead(store, first.cards[0]!, {
       ...hop,
-      facts: { fullListingRead: true, applyLinkFollowed: true },
+      facts: { fullListingRead: true, applyLinkFollowedUrl: null },
+    });
+    expect(store.getJob(id!)).toMatchObject({
+      description: job.description,
+      applyUrl: hop.applyUrl,
+      fitScore: 82,
+      fitStale: false,
+    });
+    expect(store.prepareListingCards([card]).refreshUrls).toEqual([url]);
+    // The board answered on the next search, even though it kept the link.
+    saveRead(store, first.cards[0]!, {
+      ...hop,
+      facts: { fullListingRead: true, applyLinkFollowedUrl: hop.applyUrl },
     });
     expect(store.prepareListingCards([card]).refreshUrls).toEqual([]);
   } finally {

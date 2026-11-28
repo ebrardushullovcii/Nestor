@@ -248,7 +248,8 @@ test("a landing read returns where a link's redirects end without reading the pa
     .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
     .mockResolvedValueOnce(landed(200))
     .mockResolvedValueOnce(landed(403))
-    .mockResolvedValueOnce(landed(404));
+    .mockResolvedValueOnce(landed(404))
+    .mockResolvedValueOnce(new Response("board refused", { status: 403 }));
   const reader = createHttpPageReader({ fetch: request });
   expect(
     await reader("https://board.test/job/go/123/", { landingOnly: true }),
@@ -263,4 +264,7 @@ test("a landing read returns where a link's redirects end without reading the pa
   await expect(
     reader("https://board.test/job/go/125/", { landingOnly: true }),
   ).rejects.toMatchObject({ status: 404 });
+  await expect(
+    reader("https://board.test/job/go/126/", { landingOnly: true }),
+  ).rejects.toMatchObject({ status: 403 });
 });

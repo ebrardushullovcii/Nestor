@@ -537,7 +537,7 @@ export function toConversationTool(
               : result.status === "failed"
                 ? "failed"
                 : "done",
-          detail: result.summary.slice(0, 400),
+          detail: result.summary,
           at,
         });
         if (result.endTurn) {
@@ -594,7 +594,7 @@ export function toConversationTool(
           toolName: definition.name,
           label,
           outcome: toolError.kind === "refused" ? "refused" : "failed",
-          detail: toolError.message.slice(0, 400),
+          detail: toolError.message,
           at,
         });
         return {

@@ -159,13 +159,13 @@ async function chromiumSupport(
   if (env.platform === "darwin")
     return {
       supported: true,
-      note: "macOS asks once for Keychain access to read the saved sign-ins.",
+      note: "macOS asks once for Keychain access to read browser cookies.",
     };
   if (env.platform === "linux") return { supported: true, note: null };
   if (env.platform !== "win32" || !cookiesPath)
     return {
       supported: false,
-      note: "This browser protects its sign-ins on Windows so other apps cannot read them. Sign in here directly instead.",
+      note: "This browser protects its cookies on Windows. You can sign in directly in Nestor.",
     };
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
   try {
@@ -194,7 +194,7 @@ async function chromiumSupport(
   } catch {
     return {
       supported: false,
-      note: "Saved sign-ins could not be read while the browser is open or its database is unavailable. Try again later. Sign in here directly in Nestor instead.",
+      note: "Nestor could not read this browser's cookies. Close the browser and try again, or sign in directly in Nestor.",
     };
   } finally {
     await snapshot?.dispose();
@@ -433,9 +433,7 @@ async function resolveSources(
           browserLabel: family.label,
           profileLabel: profile.label,
           supported: !!cookiesPath && support.supported,
-          note: cookiesPath
-            ? support.note
-            : "No saved sign-ins in this profile.",
+          note: cookiesPath ? support.note : "No cookies in this profile.",
           passwordImport,
           passwordCount,
           cookiesPath,
@@ -980,8 +978,15 @@ export async function importSignInsFromBrowser(
     message: string,
     cookieCount = 0,
     siteCount = 0,
+    googleSignInNotice?: string,
   ): DesktopBrowserImportResult => {
-    const output = { status, message, cookieCount, siteCount };
+    const output = {
+      status,
+      message,
+      cookieCount,
+      siteCount,
+      googleSignInNotice,
+    };
     traceEvent("browser_import_result", output);
     return output;
   };
@@ -996,8 +1001,7 @@ export async function importSignInsFromBrowser(
   if (!source.supported || !source.cookiesPath)
     return result(
       "unsupported",
-      source.note ??
-        "Sign-ins from this browser cannot be read on this device.",
+      source.note ?? "Cookies from this browser cannot be read on this device.",
     );
   // Writing cookies does not touch the pages the agent works in, so the
   // import leaves running searches and applications alone: nothing is
@@ -1008,7 +1012,7 @@ export async function importSignInsFromBrowser(
   if (!snapshot)
     return result(
       "failed",
-      `${source.browserLabel} did not let its saved sign-ins be read. Close it and try again.`,
+      `Close ${source.browserLabel} and try importing its cookies again.`,
     );
   try {
     if (source.family.browser === "firefox")
@@ -1034,7 +1038,7 @@ export async function importSignInsFromBrowser(
           env.platform === "darwin" ? "cancelled" : "failed",
           env.platform === "darwin"
             ? `Keychain access was not granted, so nothing was imported from ${source.browserLabel}.`
-            : `The saved sign-ins in ${source.browserLabel} could not be unlocked. Sign in here directly in Nestor instead.`,
+            : `Nestor could not unlock cookies from ${source.browserLabel}. You can sign in directly in Nestor.`,
         );
       }
       try {
@@ -1051,7 +1055,7 @@ export async function importSignInsFromBrowser(
   } catch {
     return result(
       "failed",
-      `The saved sign-ins in ${source.browserLabel} could not be read. Close it and try again.`,
+      `Nestor could not read cookies from ${source.browserLabel}. Close it and try again.`,
     );
   } finally {
     await snapshot.dispose().catch(() => undefined);
@@ -1071,13 +1075,13 @@ export async function importSignInsFromBrowser(
   const hadGoogle = cookies.some((cookie) =>
     isGoogleAccountHost(new URL(cookie.url).hostname),
   );
-  const googleMessage = hadGoogle
-    ? "Your Google accounts do not come over: Google ties each sign-in to the browser it was made in. Sign in to Google here once and Nestor keeps it."
-    : "";
+  const googleSignInNotice = hadGoogle
+    ? "Your Google sign-in stays in your other browser. Sign in once in Nestor to use Google here."
+    : undefined;
   if (!cookies.length)
     return result(
       "unsupported",
-      `${skippedMessage} No cookies were imported from ${source.browserLabel}. Sign in here directly in Nestor instead. Saved passwords are imported separately from Saved passwords.`,
+      `No cookies were imported from ${source.browserLabel}. You can sign in directly in Nestor. ${skippedMessage}`.trim(),
     );
   let imported = 0;
   const sites = new Set<string>();
@@ -1104,23 +1108,24 @@ export async function importSignInsFromBrowser(
       "The imported cookies could not be saved. Sign in here directly in Nestor instead.",
       imported,
       sites.size,
+      googleSignInNotice,
     );
   }
   return result(
     imported ? "imported" : "failed",
     imported
       ? [
-          `Imported ${imported} cookies for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}.`,
-          googleMessage,
-          "Cookies do not guarantee a working sign-in. For any site still signed out, sign in here directly in Nestor once.",
+          `Imported ${imported} ${imported === 1 ? "cookie" : "cookies"} for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}.`,
+          "If a site still asks you to sign in, sign in directly in Nestor.",
           skippedMessage,
-          `${cookies.length - imported} rejected by Nestor's browser. Saved passwords are imported separately from Saved passwords.`,
+          `${cookies.length - imported} rejected by Nestor's browser.`,
         ]
           .filter(Boolean)
           .join(" ")
-      : `${skippedMessage} No cookies could be imported from ${source.browserLabel}; ${cookies.length} rejected by Nestor's browser. Sign in here directly in Nestor instead.`,
+      : `Nestor rejected all ${cookies.length} cookies from ${source.browserLabel}. You can sign in directly in Nestor. ${skippedMessage}`.trim(),
     imported,
     sites.size,
+    googleSignInNotice,
   );
 }
 

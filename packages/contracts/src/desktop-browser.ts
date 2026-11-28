@@ -28,7 +28,7 @@ export const DesktopBrowserTabSchema = z.object({
 
 export const DesktopBrowserAttentionSchema = z.object({
   kind: z.enum(["sign_in", "challenge", "permission", "error", "user_action"]),
-  title: z.string().max(160),
+  title: z.string(),
   detail: z.string(),
 });
 
@@ -119,6 +119,7 @@ export const DesktopBrowserImportResultSchema = z.object({
   cookieCount: z.number().int().nonnegative(),
   siteCount: z.number().int().nonnegative(),
   message: z.string(),
+  googleSignInNotice: z.string().optional(),
 });
 export type DesktopBrowserImportResult = z.infer<
   typeof DesktopBrowserImportResultSchema

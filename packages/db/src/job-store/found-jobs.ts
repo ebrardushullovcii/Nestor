@@ -581,7 +581,7 @@ export function writeFoundJobs(
         fullRead,
         JSON.stringify(
           held
-            ? { applyLinkFollowed: job.facts?.applyLinkFollowed }
+            ? { applyLinkFollowedUrl: job.facts?.applyLinkFollowedUrl }
             : (job.facts ?? {}),
         ),
         ...[

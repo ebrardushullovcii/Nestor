@@ -601,19 +601,17 @@ describe("embedded browser tab state", () => {
 
   test("sign-in attention follows its tab instead of the active public listing", async () => {
     const { browser } = makeBrowser();
-    browser.requestAttention(
-      {
-        kind: "sign_in",
-        title: "Sign in to continue: Example Jobs",
-        detail: "Sign in here.",
-      },
-      "failed",
-    );
-    expect(browser.getState().attention?.title).toContain("Example Jobs");
+    const attention = {
+      kind: "sign_in",
+      title: `Sign in to continue: ${"Example Jobs ".repeat(16).trim()}`,
+      detail: "Additional sign-in guidance for the person. ".repeat(20).trim(),
+    } as const;
+    browser.requestAttention(attention, "failed");
+    expect(browser.getState().attention).toEqual(attention);
     await browser.command({ type: "select_tab", tabId: "person" });
     expect(browser.getState().attention).toBeNull();
     await browser.command({ type: "select_tab", tabId: "failed" });
-    expect(browser.getState().attention?.kind).toBe("sign_in");
+    expect(browser.getState().attention).toEqual(attention);
   });
 
   test("cleanup closes only finished tabs and preserves unsent forms and occupied tabs", async () => {

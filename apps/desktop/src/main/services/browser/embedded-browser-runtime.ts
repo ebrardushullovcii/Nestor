@@ -200,10 +200,10 @@ export function withEmbeddedBrowserActivity(
           : "challenge",
       title:
         result.agentMetadata?.accessBlockerReason === "auth_required"
-          ? `Sign in to continue: ${siteLabel}`.slice(0, 160)
-          : `This page needs you: ${siteLabel}`.slice(0, 160),
+          ? `Sign in to continue: ${siteLabel}`
+          : `This page needs you: ${siteLabel}`,
       detail:
-        result.warning?.slice(0, 500) ??
+        result.warning ??
         "Finish the step in this browser tab; Job Finder carries on with this source by itself.",
     } as const;
     if (tab) browser.parkTab(tab.id, attention);

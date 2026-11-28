@@ -1124,7 +1124,7 @@ export class AssistantSessionHost {
             {
               type: "text_delta",
               attempt: live.attempt,
-              text: live.draftText.slice(-40_000),
+              text: live.draftText,
             },
             persist,
           );
@@ -1140,7 +1140,7 @@ export class AssistantSessionHost {
         });
         await this.emit(conversationId, live.turn.id, {
           type: "progress",
-          text: event.text.slice(0, 1_000),
+          text: event.text,
         });
         return;
       }
@@ -1501,7 +1501,7 @@ export class AssistantSessionHost {
           operationId: null,
           target: input.target,
           targetId: input.targetId,
-          summary: input.summary.slice(0, 400),
+          summary: input.summary,
           fieldLabels: [
             ...new Set(
               input.entries.map(
@@ -1625,8 +1625,8 @@ export class AssistantSessionHost {
         live.outputs.parts.push({
           type: "question",
           questionId,
-          prompt: prompt.slice(0, 1_000),
-          options: options.map((option) => option.slice(0, 200)).slice(0, 8),
+          prompt,
+          options: options.slice(0, 8),
           status: "open",
           answer: null,
           needsYouRequestId: needsYouRequestId ?? null,
@@ -1643,7 +1643,7 @@ export class AssistantSessionHost {
       reportProgress: async (text) => {
         await this.emit(conversationId, live.turn.id, {
           type: "progress",
-          text: text.slice(0, 1_000),
+          text,
         });
       },
       reportGap: async (text) => {
@@ -2194,7 +2194,7 @@ export class AssistantSessionHost {
       clientMessageId: null,
       role: "user",
       origin: "host",
-      parts: [{ type: "text", text: note.slice(0, 40_000) }],
+      parts: [{ type: "text", text: note }],
       turnId: null,
       context: null,
       contextResultSetIds: [],
@@ -2599,7 +2599,7 @@ export class AssistantSessionHost {
         kind: "job",
         id: String(job.id),
         label: `${job.title} at ${job.company}`.slice(0, 300),
-        detail: job.location.slice(0, 300),
+        detail: job.location,
       });
     }
     for (const row of applications.rows)
