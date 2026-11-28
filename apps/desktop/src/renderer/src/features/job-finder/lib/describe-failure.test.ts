@@ -59,10 +59,10 @@ it("keeps service listing advice without its Electron wrapper and hides arbitrar
   expect(
     describeBrowserJobFailure(
       new Error(
-        "No job listing was found on this page. Open the job's own listing and try again.",
+        "Job Finder could not read a job title and employer on this page. Open the job's own listing and try again.",
       ),
     ),
-  ).toContain("No job listing");
+  ).toContain("could not read a job title and employer");
 });
 
 it("names a failed listing site and reserves the internet sentence for an offline device", async () => {

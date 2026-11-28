@@ -248,6 +248,7 @@ export const AddBrowserJobResultSchema = z
     title: z.string(),
     company: z.string(),
     planName: z.string().nullable(),
+    warning: z.string().min(1).optional(),
   })
   .strict();
 export type AddBrowserJobResult = z.infer<typeof AddBrowserJobResultSchema>;

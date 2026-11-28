@@ -586,6 +586,30 @@ test("a replaced Next control gives the model a fresh full page and waits for it
   expect(click.mock.calls).toEqual([["a-old"], ["a-new"]]);
 });
 
+test("keeps a partial vacancy read without marking its missing description as read", async () => {
+  const partial = {
+    ...posting("Platform Engineer", "Northwind", "j1"),
+    description: "",
+    needsRenderedPage: true,
+  };
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage({ url: partial.canonicalUrl }) }),
+    config: config(),
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "job_detail" } },
+      { name: "finish", args: { reason: "The page had a partial vacancy." } },
+    ]),
+    jobExtractor: { extractJobsFromPage: () => Promise.resolve([partial]) },
+  });
+  expect(result.jobs).toHaveLength(1);
+  expect(result.jobs[0]).toMatchObject({
+    title: partial.title,
+    description: "",
+    detailQuality: "card_only",
+    listingDetailFetch: null,
+  });
+});
+
 test.each(["job_detail", "explicit"])(
   "a later model decision can correct a duplicate's earlier rejection (%s)",
   async (kind) => {

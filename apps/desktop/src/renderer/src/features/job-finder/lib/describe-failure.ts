@@ -382,7 +382,8 @@ export function describeListingReadFailure(
 const BROWSER_JOB_MESSAGES = new Set([
   "Open a job listing on a website first.",
   "Wait for this page to finish loading, then try again.",
-  "No job listing was found on this page. Open the job's own listing and try again.",
+  "Job Finder could not read a job title and employer on this page. Open the job's own listing and try again.",
+  "This job listing has been taken down.",
   "This job could not be saved. Try again.",
 ]);
 export function describeBrowserJobFailure(error: unknown): string {

@@ -112,6 +112,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
     title: string;
     company: string;
     planName: string;
+    warning?: string;
   }) => void;
   const addCurrentJob = vi.fn(
     () =>
@@ -124,6 +125,8 @@ it("saves the exact current tab from the visible Add this job action", async () 
     title: "Designer",
     company: "Example Studio",
     planName: "Design",
+    warning:
+      "Job Finder could not read the full description from the application link.",
   };
   const runJobs = vi.fn().mockResolvedValue({ moved: 1, moveId: 3 });
   const state: DesktopBrowserState = {
@@ -173,7 +176,9 @@ it("saves the exact current tab from the visible Add this job action", async () 
       "Adding this job…",
     );
     finishAdd(saved);
-    await screen.findByText("Saved Designer at Example Studio.");
+    await screen.findByText(
+      `Saved Designer at Example Studio. ${saved.warning}`,
+    );
     expect(screen.getByRole("status").textContent).toContain("Shortlist");
     fireEvent.click(screen.getByRole("button", { name: "Shortlist" }));
     await waitFor(() =>
@@ -186,7 +191,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
     addCurrentJob.mockImplementationOnce(() =>
       Promise.reject(
         new Error(
-          "No job listing was found on this page. Open the job's own listing and try again.",
+          "Error invoking remote method 'browser:add-job': Error: This job listing has been taken down.",
         ),
       ),
     );
@@ -196,7 +201,7 @@ it("saves the exact current tab from the visible Add this job action", async () 
     fireEvent.click(screen.getByRole("menuitem", { name: "Add this job" }));
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toContain(
-        "No job listing",
+        "This job listing has been taken down.",
       ),
     );
   } finally {

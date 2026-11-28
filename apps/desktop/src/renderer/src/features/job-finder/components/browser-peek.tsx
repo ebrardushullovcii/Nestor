@@ -211,7 +211,7 @@ export function BrowserPeek(props: {
       const saved = await bridge.addCurrentJob({ tabId: state.activeTabId });
       setSavedJob(saved);
       setMessage(
-        `Saved ${saved.title}${saved.company ? ` at ${saved.company}` : ""}.`,
+        `Saved ${saved.title}${saved.company ? ` at ${saved.company}` : ""}.${saved.warning ? ` ${saved.warning}` : ""}`,
       );
     } catch (error) {
       setMessage(describeBrowserJobFailure(error));

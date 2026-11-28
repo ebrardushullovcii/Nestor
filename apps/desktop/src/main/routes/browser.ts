@@ -2,12 +2,14 @@ import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import {
   AddBrowserJobInputSchema,
   AddBrowserJobResultSchema,
+  browserAgentPermissionsOf,
   DesktopBrowserCommandSchema,
   DesktopBrowserImportInputSchema,
   DesktopBrowserImportResultSchema,
   DesktopBrowserImportSourcesSchema,
   DesktopBrowserSnapshotSchema,
   DesktopBrowserViewportSchema,
+  intendedAccountEmail,
   SiteIconsInputSchema,
   SiteIconsSchema,
 } from "@nestor/contracts";
@@ -47,21 +49,36 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
       import("@nestor/job-finder/job-commands"),
       import("../services/job-finder/runtime"),
     ]);
-    const { aiClient, browserRuntime } = await startJobFinderRuntime();
-    const posting = await readJobFromBrowserPage(aiClient, {
-      html: page.value,
-      pageUrl: page.url,
-      ...(browserRuntime?.readRenderedPage
-        ? {
-            readRenderedPage: (url, options) =>
-              browserRuntime.readRenderedPage!(url, options),
-          }
-        : {}),
-    });
+    const { aiClient, browserRuntime, repository } =
+      await startJobFinderRuntime();
+    const { posting, fullListingRead, warning } = await readJobFromBrowserPage(
+      aiClient,
+      {
+        html: page.value,
+        pageUrl: page.url,
+        browser: {
+          runtime: browserRuntime,
+          async readContext() {
+            const [profile, searchPreferences] = await Promise.all([
+              repository.getProfile(),
+              repository.getSearchPreferences(),
+            ]);
+            return {
+              profile,
+              searchPreferences,
+              readIntendedAccountEmail: async () =>
+                intendedAccountEmail(await repository.getProfile()),
+              readBrowserPermissions: async () =>
+                browserAgentPermissionsOf(await repository.getSettings()),
+            };
+          },
+        },
+      },
+    );
     const [jobId] = savePageJobs(getJobStore(), {
       postings: [posting],
       pageUrl: page.url,
-      fullListingRead: true,
+      fullListingRead,
     }).ids;
     if (jobId === undefined)
       throw new Error("This job could not be saved. Try again.");
@@ -72,6 +89,7 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
       title: posting.title,
       company: posting.company,
       planName: null,
+      ...(warning ? { warning } : {}),
     });
   });
   // Job sites' own icons from the local cache (never fetched here: only a
