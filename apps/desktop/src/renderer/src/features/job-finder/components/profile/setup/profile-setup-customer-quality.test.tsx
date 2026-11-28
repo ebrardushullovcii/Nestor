@@ -395,7 +395,20 @@ describe("profile setup customer-quality guidance", () => {
     const blocks = [
       ...(container?.querySelectorAll("[data-profile-setup-block]") ?? []),
     ].map((block) => block.getAttribute("data-profile-setup-block"));
-    expect(blocks).toEqual(["look-for", "more-about-you"]);
+    expect(blocks).toEqual(["look-for", "pay", "more-about-you"]);
+    const pay = container?.querySelector<HTMLDetailsElement>(
+      "[data-profile-setup-block='pay']",
+    );
+    expect(pay?.tagName).toBe("DETAILS");
+    expect(pay?.open).toBe(false);
+    expect(pay?.querySelector("summary")?.textContent).toContain(
+      "whether it is before or after tax",
+    );
+    expect(
+      pay?.querySelector<HTMLSelectElement>(
+        "select[name='compensationTaxBasis']",
+      ),
+    ).toBeTruthy();
     expect(container?.textContent).toContain(
       "Job Finder answers from these and checks each job against them",
     );

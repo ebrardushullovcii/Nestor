@@ -679,6 +679,7 @@ export function useProfileScreenForms(input: {
     minimumWeeklyHours,
     maximumWeeklyHours,
     compensationBasis,
+    compensationTaxBasis,
   ] = useWatch({
     control: preferencesForm.control,
     name: [
@@ -702,6 +703,7 @@ export function useProfileScreenForms(input: {
       "minimumWeeklyHours",
       "maximumWeeklyHours",
       "compensationBasis",
+      "compensationTaxBasis",
     ],
   });
   const draftProfileResult = useMemo(
@@ -754,6 +756,7 @@ export function useProfileScreenForms(input: {
       companyWhitelist,
       compensationInterval,
       compensationBasis,
+      compensationTaxBasis,
       shiftPreference,
       minimumWeeklyHours,
       maximumWeeklyHours,

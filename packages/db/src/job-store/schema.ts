@@ -145,6 +145,12 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     column: "work_eligibility_work_authorization_in_own_words",
     definition: "TEXT",
   },
+  // Whether the saved pay is before or after tax; empty means not said.
+  {
+    table: "profile_goals",
+    column: "compensation_tax_basis",
+    definition: "TEXT",
+  },
 ];
 
 const JOBS = `

@@ -189,3 +189,45 @@ test("single-job output truncation returns a real error instead of replaying the
   ).rejects.toThrow();
   expect(chatWithTools).toHaveBeenCalledOnce();
 });
+
+test("the fit model gets the saved pay's tax basis and estimates across bases itself", async () => {
+  const chatWithTools = vi.fn<
+    NonNullable<Parameters<typeof fitJobs>[0]["client"]>["chatWithTools"]
+  >((messages) => {
+    expect(messages[0].content).toContain("goals.compensation.taxBasis");
+    expect(messages[0].content).toContain(
+      "estimate the saved figure on the listing's basis yourself and say so",
+    );
+    expect(messages[1].content).toContain('"taxBasis":"after_tax"');
+    return Promise.resolve({
+      content: JSON.stringify({
+        fits: [
+          verdict(1, {
+            minimum: 50000,
+            maximum: 80000,
+            currency: "EUR",
+            interval: "year",
+            basis: "base",
+            quote: "EUR 50,000-80,000 per year",
+          }),
+        ],
+      }),
+    });
+  });
+  await fitJobs({
+    profile,
+    goals: {
+      ...goals,
+      compensation: {
+        ...goals.compensation,
+        minimum: 2000,
+        maximum: 4000,
+        interval: "month" as const,
+        taxBasis: "after_tax" as const,
+      },
+    },
+    jobs: [job(1, "SQL reporting. EUR 50,000-80,000 per year.")],
+    client: { chatWithTools },
+  });
+  expect(chatWithTools).toHaveBeenCalledOnce();
+});

@@ -570,6 +570,8 @@ export function useProfileSetupForms(input: {
     targetSalaryUsd,
     salaryCurrency,
     compensationInterval,
+    compensationBasis,
+    compensationTaxBasis,
   ] = useWatch({
     control: preferencesForm.control,
     name: [
@@ -589,6 +591,8 @@ export function useProfileSetupForms(input: {
       "targetSalaryUsd",
       "salaryCurrency",
       "compensationInterval",
+      "compensationBasis",
+      "compensationTaxBasis",
     ],
   });
   const draftProfileResult = useMemo(
@@ -622,7 +626,9 @@ export function useProfileSetupForms(input: {
     [
       companyBlacklist,
       companyWhitelist,
+      compensationBasis,
       compensationInterval,
+      compensationTaxBasis,
       currentSearchPreferencesBaseline,
       employmentTypes,
       excludedLocations,

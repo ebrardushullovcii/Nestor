@@ -730,6 +730,7 @@ test("structured preference facts remain model-owned rather than guessed by fall
     "limitedWorkPermissions",
     "searchSelectivity",
     "shiftPreference",
+    "taxBasis",
     "weeklyHours",
     "workAuthorizationInOwnWords",
   ]);

@@ -45,6 +45,7 @@ import {
   profileSelectTriggerClassName,
 } from "../profile-form-primitives";
 import { ProfileBasicsFields } from "../profile-basics-fields";
+import { ProfilePayFields } from "../profile-pay-fields";
 import {
   parseProfileLocationDraft,
   ProfileListEditor,
@@ -875,6 +876,32 @@ export function ProfileSetupTargetingStep(props: {
             }
           />
         </section>
+
+        <Disclosure
+          className={SETUP_BLOCK_CLASS}
+          contentClassName="pt-0"
+          data-profile-setup-block="pay"
+          size="block"
+          summary={
+            <span className="grid gap-1">
+              <span className="text-sm font-semibold text-foreground">
+                Pay{" "}
+                <span className="font-normal text-foreground-soft">
+                  (optional)
+                </span>
+              </span>
+              <span className="text-sm font-normal leading-6 text-foreground-soft">
+                Your pay range and whether it is before or after tax. Searches
+                weigh jobs against it, and pay questions on forms are answered
+                from it in their own currency, period and tax basis.
+              </span>
+            </span>
+          }
+        >
+          <div className="grid gap-(--gap-content) pt-4 md:grid-cols-2 md:items-start">
+            <ProfilePayFields preferencesForm={props.preferencesForm} />
+          </div>
+        </Disclosure>
 
         <SetupSites registerFlush={registerSiteFlush} />
 

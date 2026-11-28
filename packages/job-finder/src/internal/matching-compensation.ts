@@ -349,6 +349,25 @@ export function evaluateCompensationFit(
     };
   }
 
+  // Listings publish pay before tax. A floor saved after tax is compared by
+  // the job assessment, which estimates the before-tax figure itself; this
+  // parser would compare a net floor with gross pay as if they were the same.
+  if (
+    compensation &&
+    "taxBasis" in compensation &&
+    compensation.taxBasis === "after_tax"
+  ) {
+    return {
+      state: "unknown",
+      confidence: "unavailable",
+      minimumSalaryUsd: null,
+      listingMinimumAnnualUsd: null,
+      listingCurrency: null,
+      explanation:
+        "Your minimum is pay after tax. The job assessment estimates the before-tax equivalent and compares the listing on that basis.",
+    };
+  }
+
   const normalized = parseNormalizedCompensation(salaryText);
   const preferenceCurrency = compensation?.currency?.toUpperCase() ?? null;
   const preferenceMinimumAnnualAmount = compensation

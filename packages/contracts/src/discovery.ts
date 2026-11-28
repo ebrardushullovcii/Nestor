@@ -194,9 +194,20 @@ export type CompensationCurrencyStatus = z.infer<
   typeof CompensationCurrencyStatusSchema
 >;
 
+/**
+ * Whether the saved pay figures are before tax (gross) or after tax (net).
+ * Unset means the person has not said. Nestor never converts between the
+ * two: the models read this fact and estimate the other basis themselves
+ * when a listing or form uses it.
+ */
+export const compensationTaxBasisValues = ["before_tax", "after_tax"] as const;
+export const CompensationTaxBasisSchema = z.enum(compensationTaxBasisValues);
+export type CompensationTaxBasis = z.infer<typeof CompensationTaxBasisSchema>;
+
 const CompensationAmountSchema = z.number().int().nonnegative().nullable();
 export const CompensationPreferenceObjectSchema = z.object({
   basis: z.enum(["base", "total_ote"]).optional(),
+  taxBasis: CompensationTaxBasisSchema.optional(),
   minimum: CompensationAmountSchema.default(null),
   maximum: CompensationAmountSchema.default(null),
   interval: CompensationIntervalSchema.default("year"),
@@ -356,6 +367,9 @@ function normalizeCompensationCompatibility(
       ? {
           ...(value.compensation.basis
             ? { basis: value.compensation.basis }
+            : {}),
+          ...(value.compensation.taxBasis
+            ? { taxBasis: value.compensation.taxBasis }
             : {}),
           minimum: value.minimumSalaryUsd,
           maximum: value.targetSalaryUsd,

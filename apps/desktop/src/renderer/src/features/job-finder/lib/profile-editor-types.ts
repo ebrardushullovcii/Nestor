@@ -101,6 +101,8 @@ export interface SearchPreferencesEditorValues {
   locations: string;
   minimumSalaryUsd: string;
   compensationBasis: "base" | "total_ote";
+  /** Empty when the person has not said whether the pay is before or after tax. */
+  compensationTaxBasis: "" | "before_tax" | "after_tax";
   compensationInterval: JobSearchPreferences["compensation"]["interval"];
   salaryCurrency: string;
   seniorityLevels: string;

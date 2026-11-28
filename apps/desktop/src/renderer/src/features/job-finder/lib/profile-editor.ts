@@ -303,6 +303,7 @@ export function createSearchPreferencesEditorValues(
     locations: joinListInput(searchPreferences.locations),
     minimumSalaryUsd: searchPreferences.compensation.minimum?.toString() ?? "",
     compensationBasis: searchPreferences.compensation.basis ?? "base",
+    compensationTaxBasis: searchPreferences.compensation.taxBasis ?? "",
     compensationInterval: searchPreferences.compensation.interval,
     salaryCurrency: searchPreferences.compensation.currency ?? "",
     seniorityLevels: joinListInput(searchPreferences.seniorityLevels),
@@ -751,6 +752,20 @@ export function buildProfilePayload(
   return { payload: followPrimaryContacts(profile, parsedPayload.data) };
 }
 
+/** Sets the saved pay's tax basis, or leaves it unset when none is chosen. */
+function withCompensationTaxBasis<
+  Compensation extends Partial<JobSearchPreferences["compensation"]>,
+>(
+  compensation: Compensation,
+  taxBasis: SearchPreferencesEditorValues["compensationTaxBasis"],
+): Omit<Compensation, "taxBasis"> & {
+  taxBasis?: JobSearchPreferences["compensation"]["taxBasis"];
+} {
+  const { taxBasis: _previous, ...rest } = compensation;
+  void _previous;
+  return taxBasis ? { ...rest, taxBasis } : rest;
+}
+
 export function buildSearchPreferencesPayload(
   searchPreferences: JobSearchPreferences,
   values: SearchPreferencesEditorValues,
@@ -850,27 +865,35 @@ export function buildSearchPreferencesPayload(
       ? values.compensationInterval ===
           searchPreferences.compensation.interval &&
         values.compensationBasis ===
-          (searchPreferences.compensation.basis ?? "base")
+          (searchPreferences.compensation.basis ?? "base") &&
+        values.compensationTaxBasis ===
+          (searchPreferences.compensation.taxBasis ?? "")
         ? searchPreferences.compensation
-        : {
-            ...searchPreferences.compensation,
+        : withCompensationTaxBasis(
+            {
+              ...searchPreferences.compensation,
+              ...(values.compensationBasis !== "base" ||
+              searchPreferences.compensation.basis
+                ? { basis: values.compensationBasis }
+                : {}),
+              interval: values.compensationInterval,
+            },
+            values.compensationTaxBasis,
+          )
+      : withCompensationTaxBasis(
+          {
             ...(values.compensationBasis !== "base" ||
             searchPreferences.compensation.basis
               ? { basis: values.compensationBasis }
               : {}),
+            minimum: parsedMinimumSalaryUsd,
+            maximum: parsedTargetSalaryUsd,
             interval: values.compensationInterval,
-          }
-      : {
-          ...(values.compensationBasis !== "base" ||
-          searchPreferences.compensation.basis
-            ? { basis: values.compensationBasis }
-            : {}),
-          minimum: parsedMinimumSalaryUsd,
-          maximum: parsedTargetSalaryUsd,
-          interval: values.compensationInterval,
-          currency: compensationCurrency,
-          currencyStatus,
-        },
+            currency: compensationCurrency,
+            currencyStatus,
+          },
+          values.compensationTaxBasis,
+        ),
     // The resume approach and the strict collection filter are saved from
     // Settings (AI behavior), not from this form. A profile save carries the
     // saved values through unchanged so it can never write back a stale copy

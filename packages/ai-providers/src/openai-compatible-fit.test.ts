@@ -534,6 +534,12 @@ test("bounds twenty-job batch evidence while keeping eligibility facts", () => {
   expect(buildJobFitJudgingPrompt()).toContain("bounded excerpts");
 });
 
+test("the fit prompt has the model estimate pay across tax bases itself", () => {
+  expect(buildJobFitJudgingPrompt()).toContain(
+    "When they differ, estimate it on the listing's basis yourself and say so.",
+  );
+});
+
 test("measures the twenty-job request against the previous uncapped shape", () => {
   const profile = createProfile();
   profile.baseResume.textContent =
@@ -618,9 +624,26 @@ test("R3-065, R3-105 and R3-138 give the judge permit, schedule and OTE facts", 
     "Weekly hours": { Minimum: 20, Maximum: 30 },
     "Pay preference": {
       "Pay basis": "Total on-target earnings",
+      "Tax basis": "Not stated",
       Minimum: 160000,
     },
   });
+  for (const [taxBasis, label] of [
+    ["after_tax", "After tax (net)"],
+    ["before_tax", "Before tax (gross)"],
+  ] as const) {
+    expect(
+      buildJobFitJudgingPayload({
+        assessmentDate: "2026-10-05",
+        profile,
+        searchPreferences: {
+          ...preferences,
+          compensation: { ...preferences.compensation, taxBasis },
+        },
+        jobs: [{ jobId: "ote", posting }],
+      }).goals["Pay preference"]["Tax basis"],
+    ).toBe(label);
+  }
   expect(payload.jobs[0]?.salaryText).toBe(posting.salaryText);
   const instructions = buildFitEvidenceInstructions();
   expect(instructions).toContain("Will need sponsorship later");

@@ -96,7 +96,7 @@ const modelOwnedPreferenceFields = {
     "weeklyHours",
     "searchSelectivity",
   ],
-  replace_compensation_preferences_fields: ["basis"],
+  replace_compensation_preferences_fields: ["basis", "taxBasis"],
 } as const;
 
 export function getReplacementFieldOwnershipSnapshot(): ReplacementFieldOwnershipEntry[] {

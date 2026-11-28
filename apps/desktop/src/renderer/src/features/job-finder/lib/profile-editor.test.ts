@@ -1224,6 +1224,55 @@ test("R3-138 saves an OTE pay floor and preserves it on unrelated edits", () => 
   ).toEqual(saved.compensation);
 });
 
+test("saves whether the pay range is after tax and keeps it on unrelated edits", () => {
+  const preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+  });
+  const values = createSearchPreferencesEditorValues(preferences);
+  expect(values.compensationTaxBasis).toBe("");
+  values.minimumSalaryUsd = "2000";
+  values.targetSalaryUsd = "4000";
+  values.compensationInterval = "month";
+  values.salaryCurrency = "EUR";
+  values.compensationTaxBasis = "after_tax";
+  const saved = buildSearchPreferencesPayload(preferences, values).payload!;
+  expect(saved.compensation).toMatchObject({
+    minimum: 2000,
+    maximum: 4000,
+    interval: "month",
+    currency: "EUR",
+    taxBasis: "after_tax",
+  });
+
+  const reopened = createSearchPreferencesEditorValues(saved);
+  expect(reopened.compensationTaxBasis).toBe("after_tax");
+  reopened.targetRoles = "Software engineer";
+  expect(
+    buildSearchPreferencesPayload(saved, reopened).payload?.compensation,
+  ).toEqual(saved.compensation);
+
+  reopened.compensationTaxBasis = "";
+  expect(
+    buildSearchPreferencesPayload(saved, reopened).payload?.compensation,
+  ).not.toHaveProperty("taxBasis");
+});
+
+test("a tax basis chosen before any pay amount is saved too", () => {
+  const preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+  });
+  const values = createSearchPreferencesEditorValues(preferences);
+  values.compensationTaxBasis = "before_tax";
+  expect(
+    buildSearchPreferencesPayload(preferences, values).payload?.compensation
+      .taxBasis,
+  ).toBe("before_tax");
+});
+
 test("normalizes a bare portfolio domain and removes trailing skill punctuation", () => {
   const profile = createProfile();
   const values = createProfileEditorValues(profile);
