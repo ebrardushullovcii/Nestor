@@ -1,18 +1,33 @@
-/** Exact origins only: no suffix matching, HTTP downgrade, userinfo or opaque origins. */
-export function passwordOrigin(value: string): string | null {
+type PasswordImportOrigin =
+  | { origin: string }
+  | {
+      skipped: "insecureHttp" | "androidApp" | "unsupportedOrigin" | "invalid";
+    };
+
+export function passwordImportOrigin(value: string): PasswordImportOrigin {
   try {
     const url = new URL(value);
     const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (
-      url.username ||
-      url.password ||
-      (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))
+      !url.username &&
+      !url.password &&
+      (url.protocol === "https:" || (url.protocol === "http:" && loopback))
     )
-      return null;
-    return url.origin;
+      return { origin: url.origin };
+    if (url.protocol === "http:" && !loopback)
+      return { skipped: "insecureHttp" };
+    if (url.protocol === "android:")
+      return { skipped: url.hostname ? "androidApp" : "invalid" };
+    return { skipped: "unsupportedOrigin" };
   } catch {
-    return null;
+    return { skipped: "invalid" };
   }
+}
+
+/** Exact origins only: no suffix matching, HTTP downgrade, userinfo or opaque origins. */
+export function passwordOrigin(value: string): string | null {
+  const result = passwordImportOrigin(value);
+  return "origin" in result ? result.origin : null;
 }
 
 export function passwordOriginsMatch(

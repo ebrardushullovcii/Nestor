@@ -165,7 +165,7 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     status: "imported",
     added: 1,
     updated: 2,
-    skipped: 7,
+    skipped: 188,
     counts: {
       added: 1,
       updated: 2,
@@ -173,6 +173,9 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
       locked: 0,
       unsupportedEncryption: 1,
       unreadable: 0,
+      insecureHttp: 147,
+      androidApp: 33,
+      unsupportedOrigin: 1,
       invalid: 2,
       couldNotSave: 1,
     },
@@ -211,7 +214,10 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     "2Updated",
     "3Already saved",
     "1Unsupported encryption",
-    "2Invalid login records",
+    "147For sites without HTTPS that Nestor doesn’t fill",
+    "33For Android apps",
+    "1Other unsupported login addresses",
+    "2Empty or damaged login records",
     "1Couldn’t be saved in Nestor",
   ]);
   expect(receipt.queryByText(/choose Import password CSV/i)).toBeNull();
@@ -227,7 +233,7 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     passwords.importFromBrowser.mockResolvedValueOnce({
       ...result,
       counts,
-      skipped: 7 + counts.locked + counts.unreadable,
+      skipped: result.skipped + counts.locked + counts.unreadable,
     });
     fireEvent.click(readable);
     const nextReceipt = within(await screen.findByRole("status"));

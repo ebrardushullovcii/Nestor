@@ -1,13 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import type { EmbeddedBrowser } from "../services/browser/embedded-browser";
-import type * as PasswordCsv from "../services/browser/password-csv";
 import type { PasswordValue } from "../services/browser/password-vault";
 const mocks = vi.hoisted(() => ({
   pick: vi.fn(),
   read: vi.fn(),
   stat: vi.fn(),
-  importCsv: vi.fn(),
   trace: vi.fn(),
   browser: vi.fn(),
 }));
@@ -17,15 +15,21 @@ vi.mock("electron", () => ({
 }));
 vi.mock("node:fs/promises", () => ({ readFile: mocks.read, stat: mocks.stat }));
 vi.mock("@nestor/core/run-trace", () => ({ traceEvent: mocks.trace }));
-vi.mock("../services/browser/password-csv", async (importOriginal) => ({
-  ...(await importOriginal<typeof PasswordCsv>()),
-  importPasswordCsv: mocks.importCsv,
-}));
 vi.mock("../services/browser/browser-profile-import", () => ({
   readBrowserPasswords: mocks.browser,
 }));
 import { registerBrowserPasswordRoutes } from "./browser-passwords";
 beforeEach(() => vi.clearAllMocks());
+const emptyReadCounts = {
+  locked: 0,
+  unsupportedEncryption: 0,
+  unreadable: 0,
+  insecureHttp: 0,
+  androidApp: 0,
+  unsupportedOrigin: 0,
+  invalid: 0,
+  couldNotSave: 0,
+};
 function setup() {
   const handlers = new Map<
     string,
@@ -104,24 +108,44 @@ it("authenticates every password IPC and accepts only opaque IDs for save/fill/d
   });
 });
 it("imports only a native-picked file in main, returns counts, and never deletes the file", async () => {
-  const { handlers, event } = setup();
+  const { handlers, event, vault } = setup();
   mocks.pick.mockResolvedValue({
     canceled: false,
     filePaths: ["synthetic-export.csv"],
   });
   mocks.stat.mockResolvedValue({ size: 80 });
-  mocks.read.mockResolvedValue("synthetic-csv");
+  mocks.read.mockResolvedValue(
+    [
+      "url,username,password",
+      "https://example.test,synthetic-account,synthetic-value",
+      "http://example.test,synthetic-account,synthetic-value",
+      "android://fixture@com.example.fixture/,synthetic-account,synthetic-value",
+      "https://empty.test,synthetic-account,",
+    ].join("\n"),
+  );
+  vault.save.mockReturnValueOnce("added");
   const counts = {
-    status: "imported",
-    added: 2,
-    updated: 1,
-    skipped: 0,
-    message: "Imported.",
+    ...emptyReadCounts,
+    added: 1,
+    updated: 0,
+    alreadySaved: 0,
+    insecureHttp: 1,
+    androidApp: 1,
+    invalid: 1,
   };
-  mocks.importCsv.mockReturnValue(counts);
-  expect(await handlers.get("browser-passwords:import-csv")!(event)).toEqual(
+  const receipt = await handlers.get("browser-passwords:import-csv")!(event);
+  expect(receipt).toMatchObject({
+    status: "imported",
+    added: 1,
+    updated: 0,
+    skipped: 3,
+    counts,
+  });
+  expect(mocks.trace).toHaveBeenCalledExactlyOnceWith(
+    "browser_password_import_result",
     counts,
   );
+  expect(JSON.stringify(receipt)).not.toMatch(/synthetic|example\.test/);
   expect(mocks.read).toHaveBeenCalledExactlyOnceWith(
     "synthetic-export.csv",
     "utf8",
@@ -149,7 +173,11 @@ it("keeps browser passwords in main, returns only counts and releases plaintext 
     locked: 2,
     unsupportedEncryption: 3,
     unreadable: 4,
+    insecureHttp: 7,
+    androidApp: 3,
+    unsupportedOrigin: 2,
     invalid: 5,
+    couldNotSave: 1,
   };
   mocks.browser.mockResolvedValue({
     values,
@@ -172,13 +200,13 @@ it("keeps browser passwords in main, returns only counts and releases plaintext 
     added: 1,
     updated: 1,
     alreadySaved: 1,
-    couldNotSave: 1,
+    couldNotSave: 2,
   };
   expect(result).toMatchObject({
     status: "imported",
     added: 1,
     updated: 1,
-    skipped: 16,
+    skipped: 29,
     counts,
   });
   expect(mocks.trace).toHaveBeenCalledExactlyOnceWith(
@@ -200,7 +228,7 @@ it("reports protected and undecryptable counts and sanitizes native errors", asy
     });
   mocks.browser.mockResolvedValueOnce({
     values: [],
-    counts: { locked: 3, unsupportedEncryption: 0, unreadable: 0, invalid: 0 },
+    counts: { ...emptyReadCounts, locked: 3 },
     unsupported: true,
   });
   expect(await run()).toMatchObject({
@@ -211,7 +239,7 @@ it("reports protected and undecryptable counts and sanitizes native errors", asy
   });
   mocks.browser.mockResolvedValueOnce({
     values: [],
-    counts: { locked: 0, unsupportedEncryption: 0, unreadable: 2, invalid: 0 },
+    counts: { ...emptyReadCounts, unreadable: 2 },
     unsupported: false,
   });
   expect(await run()).toMatchObject({

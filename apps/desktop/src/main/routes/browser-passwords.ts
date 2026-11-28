@@ -17,6 +17,7 @@ import {
 } from "@nestor/contracts";
 import type { EmbeddedBrowser } from "../services/browser/embedded-browser";
 import {
+  countSkippedPasswordImports,
   importPasswordCsv,
   savePasswordValues,
 } from "../services/browser/password-csv";
@@ -91,9 +92,12 @@ export function registerBrowserPasswordRoutes(
         return failure("cancelled", "Password import cancelled.");
       if ((await stat(file)).size > 10 * 1024 * 1024)
         return failure("failed", "Password CSV is too large (maximum 10 MB).");
-      return BrowserPasswordImportResultSchema.parse(
+      const receipt = BrowserPasswordImportResultSchema.parse(
         importPasswordCsv(vault, await readFile(file, "utf8")),
       );
+      if (receipt.counts)
+        traceEvent("browser_password_import_result", receipt.counts);
+      return receipt;
     } catch {
       // Native/file/parser/crypto errors can contain secret material or paths.
       return failure(
@@ -118,9 +122,11 @@ export function registerBrowserPasswordRoutes(
           await import("../services/browser/browser-profile-import");
         const result = await readBrowserPasswords(sourceId);
         try {
+          const saved = savePasswordValues(vault, result.values);
           const counts = {
-            ...savePasswordValues(vault, result.values),
             ...result.counts,
+            ...saved,
+            couldNotSave: result.counts.couldNotSave + saved.couldNotSave,
           };
           const {
             added,
@@ -129,8 +135,6 @@ export function registerBrowserPasswordRoutes(
             locked,
             unsupportedEncryption,
             unreadable,
-            invalid,
-            couldNotSave,
           } = counts;
           const imported = added + updated + alreadySaved > 0;
           const status = imported
@@ -145,13 +149,7 @@ export function registerBrowserPasswordRoutes(
             status,
             added,
             updated,
-            skipped:
-              alreadySaved +
-              locked +
-              unsupportedEncryption +
-              unreadable +
-              invalid +
-              couldNotSave,
+            skipped: countSkippedPasswordImports(counts),
             counts,
             message: imported
               ? "Passwords do not bring over signed-in sessions. Sign in to the site in Nestor when needed."

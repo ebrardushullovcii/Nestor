@@ -107,15 +107,40 @@ it.each(["unavailable", "basic_text"])(
     repository.close();
   },
 );
-it("imports Chrome/Edge and Firefox CSV with quotes, embedded newlines, duplicates and invalid URLs", () => {
+it("imports Chrome/Edge and Firefox CSV and separates rejected rows in the receipt", () => {
   const { vault, repository } = setup();
   const result = importPasswordCsv(
     vault,
-    '\uFEFFname,url,username,password\r\nSite,https://example.test/login,"a,b","first"\r\nSite,https://example.test/other,"a,b","second"\r\nSite,https://example.test,"a,b","second"\r\nSite,https://second.test,user,"line 1\nline ""2"""\r\nBad,javascript:alert(1),user,ignored\r\nBad,http://example.test,user,ignored',
+    [
+      "\uFEFFname,url,username,password",
+      'Site,https://example.test/login,"a,b","first"',
+      'Site,https://example.test/other,"a,b","second"',
+      'Site,https://example.test,"a,b","second"',
+      'Site,https://second.test,user,"line 1\nline ""2"""',
+      "Local,http://127.0.0.1:8080,,synthetic",
+      "Unsupported,javascript:alert(1),user,ignored",
+      "HTTP,http://example.test,user,ignored",
+      "Android,android://fixture@com.example.fixture/,user,ignored",
+      "Malformed,not-a-url,user,ignored",
+      "Empty,https://empty.test,user,",
+      `Long,https://long.test,user,${"x".repeat(10001)}`,
+    ].join("\r\n"),
   );
-  expect(result).toMatchObject({ added: 2, updated: 1, skipped: 3 });
-  expect("password" in result).toBe(false);
-  expect(vault.list().length).toBe(2);
+  expect(result).toMatchObject({
+    added: 3,
+    updated: 1,
+    skipped: 7,
+    counts: {
+      alreadySaved: 1,
+      insecureHttp: 1,
+      androidApp: 1,
+      unsupportedOrigin: 1,
+      invalid: 2,
+      couldNotSave: 1,
+    },
+  });
+  expect(JSON.stringify(result)).not.toMatch(/example\.test|ignored|synthetic/);
+  expect(vault.list().length).toBe(3);
   expect(
     importPasswordCsv(
       vault,

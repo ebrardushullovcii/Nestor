@@ -58,6 +58,9 @@ export const BrowserPasswordImportCountsSchema = z.object({
   locked: PasswordCount,
   unsupportedEncryption: PasswordCount,
   unreadable: PasswordCount,
+  insecureHttp: PasswordCount,
+  androidApp: PasswordCount,
+  unsupportedOrigin: PasswordCount,
   invalid: PasswordCount,
   couldNotSave: PasswordCount,
 });
