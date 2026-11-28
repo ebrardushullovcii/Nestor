@@ -61,6 +61,7 @@ interface ActiveSearch {
 
 /** How long site progress gathers before it commits in one write. */
 const SOURCE_WRITE_GATHER_MS = 200;
+const PROFILE_FIT_QUIET_MS = 10_000;
 
 export function createJobSearchRunner(
   deps: JobSearchRunnerDeps,
@@ -84,13 +85,15 @@ export function createJobSearchRunner(
   let visibleIds: readonly number[] = [];
   const syncFitContextForView = (context: JobSearchContext) => {
     const { fingerprint, scoringFingerprint } = fitContextFingerprints(context);
-    deps.store.syncFitContext(fingerprint, scoringFingerprint);
+    const changed = deps.store.syncFitContext(fingerprint, scoringFingerprint);
     deps.store.requestDeferredFits(visibleIds);
+    return changed;
   };
-  const enqueueSavedFits = (fits: FitQueue) => {
-    fits.enqueue(
+  const enqueueSavedFits = (fits: FitQueue, contextChanged = false) => {
+    fits.refresh(
       deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
       visibleIds,
+      contextChanged,
     );
   };
   // Only quitting cancels a fit request already sent; Stop and a new search
@@ -98,6 +101,21 @@ export function createJobSearchRunner(
   const fitLifetime = new AbortController();
   setMaxListeners(0, fitLifetime.signal);
   const sentFits = createFitRequests(fitLifetime.signal);
+  const readFitContext = async (signal: AbortSignal) => {
+    for (;;) {
+      signal.throwIfAborted();
+      const revision = deps.store.fitRevision();
+      const context = await abortable(deps.readContext(), signal);
+      if (revision !== deps.store.fitRevision()) continue;
+      return {
+        ...context,
+        remoteCountsAsAnyLocation:
+          deps.readRemoteCountsAsAnyLocation?.() ??
+          context.remoteCountsAsAnyLocation ??
+          true,
+      };
+    }
+  };
   const scheduleFit = (delay = 300) => {
     if (fitRequestRejected) return;
     if (continuation) clearTimeout(continuation);
@@ -106,6 +124,53 @@ export function createJobSearchRunner(
       void runner.scoreUnscored().catch(() => undefined);
     }, delay);
     continuation.unref();
+  };
+  let profileFitTimer: ReturnType<typeof setTimeout> | null = null;
+  let releaseFitPause: (() => void) | null = null;
+  const clearProfileFitRefresh = () => {
+    if (profileFitTimer) clearTimeout(profileFitTimer);
+    profileFitTimer = null;
+    sentFits.paused = null;
+    releaseFitPause?.();
+    releaseFitPause = null;
+  };
+  const refreshProfileFits = async (timer: ReturnType<typeof setTimeout>) => {
+    let refreshed = false;
+    try {
+      const context = await readFitContext(fitLifetime.signal);
+      if (profileFitTimer !== timer) return;
+      const contextChanged = syncFitContextForView(context);
+      refreshed = true;
+      const fits = active?.fits ?? recoveryQueue;
+      if (fits) enqueueSavedFits(fits, contextChanged);
+    } catch {
+      if (profileFitTimer === timer) {
+        recoveryError =
+          "Fit scoring did not finish. Your progress is kept; retry fit to continue.";
+        notify();
+      }
+    } finally {
+      if (profileFitTimer === timer) {
+        clearProfileFitRefresh();
+        const fits = active?.fits ?? recoveryQueue;
+        if (fits) fits.resume();
+        else if (refreshed && !recovery && !active)
+          void runner.scoreUnscored().catch(() => undefined);
+      }
+    }
+  };
+  const scheduleProfileFit = () => {
+    if (fitLifetime.signal.aborted) return;
+    if (profileFitTimer) clearTimeout(profileFitTimer);
+    sentFits.paused ??= new Promise<void>((resolve) => {
+      releaseFitPause = resolve;
+    });
+    const timer = setTimeout(
+      () => void refreshProfileFits(timer),
+      PROFILE_FIT_QUIET_MS,
+    );
+    profileFitTimer = timer;
+    timer.unref();
   };
   // Fit the AI account refused: the unscored jobs stay saved and are scored
   // once calls go through again, at the queue's normal pace. A search saved
@@ -209,11 +274,9 @@ export function createJobSearchRunner(
   };
   deps.store.onChange((change) => {
     if (fitLifetime.signal.aborted) return;
-    if (
-      change.cause === "profile" ||
-      change.cause === "settings" ||
-      change.cause === "saved_answers"
-    ) {
+    if (change.cause === "profile" || change.cause === "settings") {
+      scheduleProfileFit();
+    } else if (change.cause === "saved_answers") {
       if (recovery) {
         const pending = recovery;
         const continueFit = () => {
@@ -779,7 +842,7 @@ export function createJobSearchRunner(
       run.enqueue = enqueue;
       await pipeline.start();
       run.setReady(fits);
-      enqueueSavedFits(fits);
+      if (!sentFits.paused) enqueueSavedFits(fits);
       for (;;) {
         await abortable(Promise.all([http.idle(), browser.idle()]), signal);
         await pipeline.drain();
@@ -862,17 +925,10 @@ export function createJobSearchRunner(
     active = run;
     run.starting = Promise.resolve()
       .then(async () => {
-        const context = await abortable(
-          deps.readContext(),
-          run.controller.signal,
-        );
-        context.remoteCountsAsAnyLocation =
-          deps.readRemoteCountsAsAnyLocation?.() ??
-          context.remoteCountsAsAnyLocation ??
-          true;
+        const context = await readFitContext(run.controller.signal);
         // A search's note shapes the fit of the jobs it finds; it is not a
         // reason to judge every saved job again.
-        syncFitContextForView(context);
+        if (!sentFits.paused) syncFitContextForView(context);
         deps.store.restoreAgeHidden(
           settings.postedWithin === "any"
             ? null
@@ -1086,6 +1142,7 @@ export function createJobSearchRunner(
       if (continuation) clearTimeout(continuation);
       continuation = null;
       recovery?.controller.abort();
+      clearProfileFitRefresh();
       if (!active && parked) {
         // Stop on a parked search ends it as stopped, its saved results kept.
         parked = null;
@@ -1130,6 +1187,7 @@ export function createJobSearchRunner(
       continuation = null;
       recovery?.controller.abort();
       fitLifetime.abort();
+      clearProfileFitRefresh();
       const run = active;
       if (!run) return;
       run.flush?.();
@@ -1146,6 +1204,7 @@ export function createJobSearchRunner(
         listeners.delete(listener);
       };
     },
+    scheduleProfileFit,
     prioritizeFit(ids) {
       if (fitLifetime.signal.aborted) return;
       if (
@@ -1157,8 +1216,8 @@ export function createJobSearchRunner(
       const requested = deps.store.requestDeferredFits(ids);
       const fits = active ? active.fits : recoveryQueue;
       if (fits) {
-        if (requested.length) fits.enqueue(requested, ids);
-        else fits.prioritize(ids);
+        fits.prioritize(ids);
+        if (requested.length) fits.enqueue(requested);
       } else if (requested.length && !fitRefused && !continuation) {
         scheduleFit();
       }
@@ -1178,33 +1237,21 @@ export function createJobSearchRunner(
               const liveFits = run
                 ? await abortable(run.ready, controller.signal)
                 : null;
+              let context: JobSearchContext;
+              do {
+                while (sentFits.paused)
+                  await abortable(sentFits.paused, controller.signal);
+                context = await readFitContext(controller.signal);
+              } while (sentFits.paused);
+              const contextChanged = syncFitContextForView(context);
               // Use the live queue, so recovery and discovery cannot score a job twice.
               if (run && !run.controller.signal.aborted && liveFits) {
-                const current = await abortable(
-                  deps.readContext(),
-                  controller.signal,
-                );
-                current.remoteCountsAsAnyLocation =
-                  deps.readRemoteCountsAsAnyLocation?.() ??
-                  current.remoteCountsAsAnyLocation ??
-                  true;
-                syncFitContextForView(current);
                 const before = liveFits.scored;
-                enqueueSavedFits(liveFits);
+                enqueueSavedFits(liveFits, contextChanged);
                 await liveFits.drain();
                 if (liveFits.needsAnotherPass) scheduleFit(5000);
                 return liveFits.scored - before;
               }
-              controller.signal.throwIfAborted();
-              const context = await abortable(
-                deps.readContext(),
-                controller.signal,
-              );
-              context.remoteCountsAsAnyLocation =
-                deps.readRemoteCountsAsAnyLocation?.() ??
-                context.remoteCountsAsAnyLocation ??
-                true;
-              syncFitContextForView(context);
               const fits = createFitQueue(
                 deps,
                 context,

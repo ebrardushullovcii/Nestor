@@ -13,6 +13,7 @@ import {
 import {
   approveOriginalResumesForTests,
   createJobSitesStore,
+  createProfileStore,
   createSearchSourcesStore,
   createSourceAccessStore,
   type JobStore,
@@ -1938,6 +1939,65 @@ function seedBacklog(store: JobStore, count: number, description: string) {
 }
 const LONG_LISTING = "Complete listing requirements. ".repeat(500);
 
+test("a burst of saved profile edits scores the latest inputs, visible and shortlisted jobs first", async () => {
+  const { runner, context, engine, store } = setup();
+  await runner.scoreUnscored();
+  const [high, low, visible, shortlisted, ready] = seedBacklog(
+    store,
+    5,
+    "Complete listing: requires SQL.",
+  ) as [number, number, number, number, number];
+  store.setFit(
+    [high, low, visible, shortlisted, ready].map((id, index) => ({
+      id,
+      score: [98, 20, 10, 30, 25][index]!,
+      summary: "Earlier verdict",
+      reasons: [],
+      gaps: [],
+    })),
+  );
+  store.setStage([shortlisted], "shortlisted");
+  store.setStage([ready], "resume");
+  const profile = createProfileStore(store);
+  const saveHeadline = (headline: string) => {
+    context.profile = { ...context.profile, headline };
+    profile.patch({ fields: { headline } });
+  };
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    saveHeadline("Database engineer");
+    await vi.advanceTimersByTimeAsync(4000);
+    saveHeadline("Database platform engineer");
+    // Startup, a visible row and an explicit retry can arrive mid-edit.
+    void runner.scoreUnscored();
+    runner.prioritizeFit([high]);
+    await vi.advanceTimersByTimeAsync(4000);
+    saveHeadline("Database reliability engineer");
+    runner.prioritizeFit([visible]);
+    const fit = runner.scoreUnscored(true);
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(engine.fitJobs).not.toHaveBeenCalled();
+    expect(store.getJob(visible)?.fitScore).toBe(10);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await fit).toBe(5);
+    expect(engine.fitJobs).toHaveBeenCalledOnce();
+    const request = engine.fitJobs.mock.calls[0]![0];
+    expect(request.context.profile.headline).toBe(
+      "Database reliability engineer",
+    );
+    expect(request.jobs.map(({ id }) => id)).toEqual([
+      visible,
+      shortlisted,
+      ready,
+      high,
+      low,
+    ]);
+    expect(store.unscoredJobIds(10)).toHaveLength(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("one pass scores the whole backlog, visible jobs first, in bounded batches", async () => {
   const { runner, context, engine, store } = setup();
   context.sources = [];
@@ -1993,8 +2053,8 @@ test.each(["matching", "mismatched"] as const)(
     } else {
       expect(engine.fitJobs).toHaveBeenCalledOnce();
       expect(asked[0]).toBe(visible);
-      expect(asked.toSorted((a, b) => a - b)).toEqual(ids.slice(0, -1));
-      expect(store.getJob(low!)?.fitStale).toBe(true);
+      expect(asked.toSorted((a, b) => a - b)).toEqual(ids);
+      expect(store.getJob(low!)?.fitStale).toBe(false);
     }
     expect(store.sql("SELECT * FROM fit_context WHERE id=1").get()).toEqual({
       id: 1,
@@ -2005,7 +2065,7 @@ test.each(["matching", "mismatched"] as const)(
   },
 );
 
-test("a scorer bump refreshes only priority jobs, then takes displayed or opened jobs once", async () => {
+test("a scorer bump refreshes the full backlog and keeps the historical applied score", async () => {
   const { runner, context, engine, store } = setup();
   const previousInput = {
     ...fitContextInput(context),
@@ -2021,15 +2081,11 @@ test("a scorer bump refreshes only priority jobs, then takes displayed or opened
   store.syncFitContext(previousContext, previousScoring);
   const ids = seedBacklog(store, 3400, "Complete listing: requires SQL.");
   const visible = ids[600]!;
-  const scrolledTo = ids[601]!;
-  const opened = ids[602]!;
   const shortlisted = ids[603]!;
   const ready = ids[604]!;
   const applied = ids[605]!;
   const hidden = ids[606]!;
-  const untouched = ids[607]!;
-  const hiddenHigh = ids[0]!;
-  const newJob = ids.at(-1)!;
+  const closed = ids[607]!;
   store.setFit(
     ids.slice(0, -1).map((id, index) => ({
       id,
@@ -2042,7 +2098,8 @@ test("a scorer bump refreshes only priority jobs, then takes displayed or opened
   store.setStage([shortlisted], "shortlisted");
   store.setStage([ready], "resume");
   store.setStage([applied], "applied");
-  store.moveJobs({ selection: { ids: [hidden, hiddenHigh] }, to: "hidden" });
+  store.moveJobs({ selection: { ids: [hidden] }, to: "hidden" });
+  store.closeFoundUrls([store.getJob(closed)!.url]);
   runner.prioritizeFit([visible]);
   const asked = () =>
     engine.fitJobs.mock.calls.flatMap(([input]) =>
@@ -2051,55 +2108,40 @@ test("a scorer bump refreshes only priority jobs, then takes displayed or opened
   const sorted = (values: number[]) => values.toSorted((a, b) => a - b);
   await runner.scoreUnscored();
   expect(asked()[0]).toBe(visible);
+  expect(sorted(asked().slice(1, 3))).toEqual(sorted([shortlisted, ready]));
   expect(sorted(asked())).toEqual(
-    sorted([...ids.slice(0, 600), visible, shortlisted, ready, newJob]),
+    sorted(ids.filter((id) => id !== applied && id !== closed)),
   );
   expect(runner.status()).toMatchObject({ fitChecking: 0, fitRechecking: 0 });
   expect(store.getJob(applied)).toMatchObject({
     fitScore: 39,
     fitStale: false,
   });
-  expect(store.getJob(untouched)).toMatchObject({
-    fitScore: 39,
-    fit: { summary: "Earlier model verdict" },
-    fitStale: true,
-  });
-  expect(store.countJobs({ stage: "found", minFit: 39 })).toBe(3395);
-  expect(
-    store.listJobs({ stage: "found", text: "Backend Engineer 607" }).rows[0],
-  ).toMatchObject({
-    id: untouched,
-    fitScore: 39,
-    fitStale: true,
+  expect(store.getJob(hidden)).toMatchObject({
+    stage: "hidden",
+    fitScore: 82,
+    fitStale: false,
   });
 
   engine.fitJobs.mockClear();
-  try {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    runner.prioritizeFit([scrolledTo]);
-    runner.prioritizeFit([scrolledTo, opened]);
-    runner.prioritizeFit([hidden]);
-    runner.prioritizeFit([]); // Leaving the page keeps the requested work.
-    expect(sorted(store.unscoredJobIds(20))).toEqual(
-      sorted([scrolledTo, opened, hidden]),
-    );
-    await vi.advanceTimersByTimeAsync(300);
-    await runner.scoreUnscored();
-    expect(sorted(asked())).toEqual(sorted([scrolledTo, opened, hidden]));
-    runner.prioritizeFit([scrolledTo, opened, hidden]);
-    await runner.scoreUnscored();
-    expect(sorted(asked())).toEqual(sorted([scrolledTo, opened, hidden]));
-    expect(store.getJob(opened)).toMatchObject({
-      fitScore: 82,
-      fitStale: false,
-    });
-    expect(store.getJob(untouched)).toMatchObject({
-      fitScore: 39,
-      fitStale: true,
-    });
-  } finally {
-    vi.useRealTimers();
-  }
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).not.toHaveBeenCalled();
+});
+
+test("a legacy low score waiting for a view is still recovered from disk", async () => {
+  const { runner, context, engine, store } = setup();
+  const { fingerprint, scoringFingerprint } = fitContextFingerprints(context);
+  store.syncFitContext(fingerprint, scoringFingerprint);
+  const [id] = seedBacklog(store, 1, "Complete listing: requires SQL.");
+  store.setFit([
+    { id: id!, score: 20, summary: "Earlier verdict", reasons: [], gaps: [] },
+  ]);
+  store.sql("UPDATE jobs SET fit_stale=2 WHERE id=?").run(id!);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs.mock.calls[0]?.[0].jobs.map((job) => job.id)).toEqual([
+    id,
+  ]);
+  expect(store.getJob(id!)?.fitStale).toBe(false);
 });
 
 test("saving a Needs you answer waits for a job view and sends the full answer bank", async () => {
@@ -2225,9 +2267,9 @@ test("saving a Needs you answer waits for a job view and sends the full answer b
       input.jobs.map(({ id }) => id),
     );
     expect(requested.toSorted((a, b) => a - b)).toEqual(
-      [opened, high, ready, shortlisted].toSorted((a, b) => a - b),
+      [opened, high, ready, shortlisted, low].toSorted((a, b) => a - b),
     );
-    expect(store.getJob(low)?.fitStale).toBe(true);
+    expect(store.getJob(low)?.fitStale).toBe(false);
     expect(store.unscoredJobIds(10)).toEqual([]);
   } finally {
     runner.suspend();
@@ -2535,6 +2577,90 @@ function scriptedFit(engine: ReturnType<typeof setup>["engine"]) {
     },
   };
 }
+
+test.each(["background", "search"] as const)(
+  "an edit replaces queued work during %s scoring and fences responses already sent",
+  async (mode) => {
+    const { runner, engine, context, store } = setup();
+    context.sources = [];
+    const ids = seedBacklog(store, 120, LONG_LISTING);
+    const score = engine.fitJobs.getMockImplementation()!;
+    const model = scriptedFit(engine);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      if (mode === "search") await runner.start({ postedWithin: "any" });
+      const pass =
+        mode === "search" ? finished(runner) : runner.scoreUnscored();
+      await vi.advanceTimersByTimeAsync(0);
+      const [late, ...earlier] = model.open.splice(0);
+      expect(late).toBeDefined();
+      const previousCalls = earlier.length + 1;
+      expect(previousCalls).toBe(6);
+      const sent = [...late!.ids, ...earlier.flatMap((request) => request.ids)];
+      const visible = ids.findLast((id) => !sent.includes(id))!;
+      const profile = createProfileStore(store);
+      context.profile = { ...context.profile, headline: "Database engineer" };
+      profile.patch({ fields: { headline: context.profile.headline } });
+      for (const request of earlier) request.answer();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(engine.fitJobs).toHaveBeenCalledTimes(previousCalls);
+      context.profile = { ...context.profile, headline: "Platform engineer" };
+      profile.patch({ fields: { headline: context.profile.headline } });
+      runner.prioritizeFit([visible]);
+
+      engine.fitJobs.mockImplementation(score);
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(engine.fitJobs).toHaveBeenCalledTimes(previousCalls);
+      await vi.advanceTimersByTimeAsync(1);
+      const latest = () => engine.fitJobs.mock.calls.slice(previousCalls);
+      expect(latest()[0]?.[0].jobs[0]?.id).toBe(visible);
+      expect(late!.signal?.aborted).toBe(false);
+      late!.answer();
+      await pass;
+      expect(
+        latest().every(
+          ([input]) => input.context.profile.headline === "Platform engineer",
+        ),
+      ).toBe(true);
+      expect(
+        latest()
+          .flatMap(([input]) => input.jobs.map(({ id }) => id))
+          .toSorted((a, b) => a - b),
+      ).toEqual(ids);
+      expect(store.unscoredJobIds(200)).toEqual([]);
+      expect(store.getJob(late!.ids[0]!)?.fitScore).toBe(82);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+test("a paid fit answer is reused when profile edits return to its exact inputs", async () => {
+  const { runner, engine, context, store } = setup();
+  await runner.scoreUnscored();
+  const [id] = seedBacklog(store, 1, "Complete listing: requires SQL.");
+  const originalHeadline = context.profile.headline;
+  const profile = createProfileStore(store);
+  const model = scriptedFit(engine);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const pass = runner.scoreUnscored();
+    await vi.advanceTimersByTimeAsync(0);
+    context.profile = { ...context.profile, headline: "Database engineer" };
+    profile.patch({ fields: { headline: context.profile.headline } });
+    model.answerAll();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(store.getJob(id!)?.fitScore).toBeNull();
+    context.profile = { ...context.profile, headline: originalHeadline };
+    profile.patch({ fields: { headline: originalHeadline } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await pass).toBe(1);
+    expect(engine.fitJobs).toHaveBeenCalledOnce();
+    expect(store.getJob(id!)).toMatchObject({ fitScore: 70, fitStale: false });
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("Stop keeps fit requests already sent; a new search mid-batch and new cards never ask about the same inputs twice", async () => {
   const { runner, engine, store } = setup();
