@@ -154,9 +154,19 @@ export function createHttpPageReader(
           answered(address.hostname);
           if (readOptions.landingOnly) {
             await response.body?.cancel();
-            if (response.status === 404 || response.status === 410)
+            const finalUrl = response.url || url;
+            // A refusal from the requested site leaves the lookup unresolved.
+            // A redirect to another site can establish the destination even
+            // if that site refuses to serve the page.
+            if (
+              !response.ok &&
+              (response.status === 404 ||
+                response.status === 410 ||
+                new URL(finalUrl).hostname.replace(/^www\./u, "") ===
+                  address.hostname.replace(/^www\./u, ""))
+            )
               throw new DiscoveryPageReadError(response.status);
-            return { html: "", finalUrl: response.url || url };
+            return { html: "", finalUrl };
           }
           if (!response.ok) {
             await response.body?.cancel();

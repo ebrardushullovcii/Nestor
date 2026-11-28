@@ -1018,11 +1018,10 @@ export class EmbeddedBrowser {
     attention: DesktopBrowserAttention,
     tabId: string | null = this.activeTabId,
   ): void {
-    const clamped = clampAttention(attention);
     if (tabId && this.parkedTabs.has(tabId)) {
-      this.parkedTabs.set(tabId, clamped);
+      this.parkedTabs.set(tabId, attention);
     } else {
-      this.attention = clamped;
+      this.attention = attention;
       this.attentionTabId = tabId;
     }
     this.emit();
@@ -1039,7 +1038,7 @@ export class EmbeddedBrowser {
       this.requestAttention(attention, tabId);
       return;
     }
-    this.parkedTabs.set(tabId, clampAttention(attention));
+    this.parkedTabs.set(tabId, attention);
     this.bridge?.releasePage(tabId);
     this.openTabForPerson(tabId);
     this.emit();
@@ -1062,7 +1061,7 @@ export class EmbeddedBrowser {
       url,
       undefined,
       undefined,
-      (id) => this.parkedTabs.set(id, clampAttention(attention)),
+      (id) => this.parkedTabs.set(id, attention),
       tabId ?? undefined,
     );
     this.bridge?.releasePage(page.id);
@@ -2879,21 +2878,6 @@ export class EmbeddedBrowser {
     if (pauseActivity) await this.stopEverythingForClose();
     return closing;
   }
-}
-
-function clampAttention(
-  attention: DesktopBrowserAttention,
-): DesktopBrowserAttention {
-  // The banner shows a run's own sentence, which can run long. The state
-  // schema caps it; an over-long sentence used to make the state read throw,
-  // which failed the apply call that had just finished the form.
-  const clamp = (text: string, max: number): string =>
-    text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
-  return {
-    ...attention,
-    title: clamp(attention.title, 160),
-    detail: clamp(attention.detail, 500),
-  };
 }
 
 let browser: EmbeddedBrowser | null = null;

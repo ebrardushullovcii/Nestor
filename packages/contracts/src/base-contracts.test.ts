@@ -13,7 +13,10 @@ import {
   DesktopWindowControlsStateSchema,
   JobSearchPreferencesSchema,
   JobFinderSettingsSchema,
+  JobFinderActivityControlSchema,
   ResumeApplicationModeSchema,
+  SetJobFinderActivityControlInputSchema,
+  ShortlistedApplicationSchema,
   SourceAccessPromptStateSchema,
   WorkModeListSchema,
   WriteClipboardTextInputSchema,
@@ -26,6 +29,17 @@ import {
 } from "./index";
 
 describe("contracts base schemas", () => {
+  test("preserves the full pause and unsuccessful application reasons", () => {
+    const reason = "A synthetic reason with more detail. ".repeat(20).trim();
+    const pause = { paused: true, reason };
+    expect(SetJobFinderActivityControlInputSchema.parse(pause)).toEqual(pause);
+    expect(JobFinderActivityControlSchema.parse(pause).reason).toBe(reason);
+    expect(
+      ShortlistedApplicationSchema.parse({ id: 1, status: "failed", reason })
+        .reason,
+    ).toBe(reason);
+  });
+
   test("bounds clipboard text and its success result", () => {
     expect(
       WriteClipboardTextInputSchema.parse({ text: "https://example.test" }),

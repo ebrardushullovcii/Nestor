@@ -28,9 +28,10 @@ import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset
 
 test("attempts every file in the person's multi-selection", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const failure = "The file could not be read. ".repeat(18).trim();
   const read = vi
     .spyOn(CandidateAssetLibrary.prototype, "importFromSourcePath")
-    .mockRejectedValue(Error("synthetic unavailable file"));
+    .mockRejectedValue(Error(failure));
   try {
     vi.mocked(getCandidateAssetLibrary).mockReturnValue(
       new CandidateAssetLibrary("unused"),
@@ -46,10 +47,16 @@ test("attempts every file in the person's multi-selection", async () => {
     registerAssistantRouteHandlers({
       handle: (name: string, handler: never) => handlers.set(name, handler),
     } as unknown as IpcMain);
-    await handlers.get("job-finder:assistant:attach-file")!(
+    const result = await handlers.get("job-finder:assistant:attach-file")!(
       { sender: { id: 1 } } as unknown as IpcMainInvokeEvent,
       {},
     );
+    expect(result).toMatchObject({
+      message: Array.from(
+        { length: 6 },
+        (_, i) => `synthetic${i}.txt: ${failure}`,
+      ).join(" "),
+    });
     expect(read).toHaveBeenCalledTimes(6);
     expect(log).not.toHaveBeenCalled();
   } finally {

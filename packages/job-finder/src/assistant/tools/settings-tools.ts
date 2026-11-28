@@ -350,7 +350,7 @@ export const pauseActivityTool = defineTool({
   input: z.object({
     paused: z.boolean(),
     finishCurrent: z.boolean().default(false),
-    reason: z.string().trim().max(500).optional(),
+    reason: z.string().trim().optional(),
   }),
   label: (input) =>
     input.paused ? "Pausing Job Finder" : "Resuming Job Finder",

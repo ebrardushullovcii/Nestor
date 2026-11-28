@@ -262,8 +262,8 @@ export const askPersonTool = defineTool({
     ["question"],
   ),
   input: z.object({
-    question: z.string().trim().min(1).max(1_000),
-    options: z.array(z.string().trim().min(1).max(200)).max(6).default([]),
+    question: z.string().trim().min(1),
+    options: z.array(z.string().trim().min(1)).max(6).default([]),
     needsYouRequestId: Id.optional(),
   }),
   label: () => "Asking you a question",
@@ -288,7 +288,7 @@ export const reportProgressTool = defineTool({
   description:
     "Shows the person a short progress note while you keep working, only when there is something new to say (what you found, what is next). Not needed if you already write a sentence alongside your tool calls.",
   parameters: json.object({ text: json.string() }, ["text"]),
-  input: z.object({ text: z.string().trim().min(1).max(500) }),
+  input: z.object({ text: z.string().trim().min(1) }),
   label: () => "Noting progress",
   effect: "read",
   async execute(input, { session }) {

@@ -93,9 +93,9 @@ function unboundApplyUrl(card: ListingCard, applyUrl: string): boolean {
 }
 
 /**
- * A stored apply link on the listing's own board that is not its own form
- * (a /go/ or /l/ hop) was never followed to the employer's form. The listing
- * is read once more, and that read follows it.
+ * Revisit a board's apply hop until its landing is established. The old
+ * boolean also counted refused requests, so only evidence for the current
+ * apply URL can settle the lookup.
  */
 function unfollowedBoardLink(
   sql: Statements,
@@ -114,9 +114,11 @@ function unfollowedBoardLink(
     return false;
   }
   const followed = sql(
-    "SELECT json_extract(facts_json, '$.applyLinkFollowed') AS followed FROM job_details WHERE job_id=?",
-  ).get(row.id) as { followed: number | null } | undefined;
-  return !followed?.followed;
+    "SELECT json_extract(facts_json, '$.applyLinkFollowedUrl') AS url FROM job_details WHERE job_id=?",
+  ).get(row.id) as { url: string | null } | undefined;
+  return (
+    !followed?.url || normalizeUrl(followed.url) !== normalizeUrl(row.apply_url)
+  );
 }
 
 function legacyNeedsRead(card: ListingCard, row: StoredListing): boolean {

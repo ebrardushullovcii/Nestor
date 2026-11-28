@@ -278,7 +278,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
         } catch (error) {
           failures.push(
             error instanceof Error
-              ? `${fileName}: ${error.message.slice(0, 200)}`
+              ? `${fileName}: ${error.message}`
               : `${fileName} could not be attached.`,
           );
         }
@@ -288,7 +288,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
         attachments: attached,
         message:
           failures.length > 0
-            ? failures.join(" ").slice(0, 400)
+            ? failures.join(" ")
             : attached.length === 0
               ? "The file could not be attached."
               : null,

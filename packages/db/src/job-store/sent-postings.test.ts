@@ -111,7 +111,10 @@ it("joins a board's second listing to the applied posting once its redirect is f
       {
         ...relisted,
         applyUrl: "https://jobs.ashby.test/n8n/896c58a8-0388",
-        facts: { fullListingRead: true, applyLinkFollowed: true },
+        facts: {
+          fullListingRead: true,
+          applyLinkFollowedUrl: relisted.applyUrl,
+        },
       },
     ],
   });

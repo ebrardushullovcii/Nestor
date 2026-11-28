@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AssistantEventPayloadSchema,
   AssistantMessagePartSchema,
   AssistantProposalSchema,
+  AssistantStatusSchema,
 } from "./assistant";
 
 describe("assistant change preview", () => {
@@ -55,4 +57,17 @@ it("keeps exact proposal wording beyond two thousand characters in storage and t
     source: { store: "assistant" },
   });
   expect(part.type === "proposal" && part.items[0]!.detail).toBe(detail);
+});
+
+it("preserves long status details and complete assistant replies", () => {
+  const text = "A synthetic sentence for the person. ".repeat(1500).trim();
+  expect(
+    AssistantStatusSchema.parse({ available: false, detail: text }).detail,
+  ).toBe(text);
+  expect(AssistantMessagePartSchema.parse({ type: "text", text })).toEqual({
+    type: "text",
+    text,
+  });
+  const draft = { type: "text_delta", attempt: 1, text };
+  expect(AssistantEventPayloadSchema.parse(draft)).toEqual(draft);
 });

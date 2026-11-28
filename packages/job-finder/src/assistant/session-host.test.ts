@@ -458,7 +458,7 @@ describe("assistant session host", () => {
     });
   });
 
-  it("clears streamed commentary before publishing its shortened progress note", async () => {
+  it("clears streamed commentary before publishing the full progress note", async () => {
     const text = "Reading the profile before changing it. ".repeat(40);
     let calls = 0;
     const { host, events } = setup({
@@ -491,7 +491,7 @@ describe("assistant session host", () => {
     expect(index).toBeGreaterThan(0);
     expect(events[index]?.payload).toEqual({
       type: "progress",
-      text: text.trim().slice(0, 1_000).trim(),
+      text: text.trim(),
     });
     expect(events[index - 1]?.payload).toMatchObject({
       type: "text_delta",

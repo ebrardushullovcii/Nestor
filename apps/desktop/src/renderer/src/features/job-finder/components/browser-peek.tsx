@@ -266,7 +266,12 @@ export function BrowserPeek(props: {
         note: string | null;
       }
     | { step: "importing"; source: DesktopBrowserImportSource }
-    | { step: "done"; ok: boolean; message: string }
+    | {
+        step: "done";
+        ok: boolean;
+        message: string;
+        googleSignInNotice?: string | undefined;
+      }
   >(null);
   const [importSources, setImportSources] = useState<
     DesktopBrowserImportSource[] | null
@@ -557,6 +562,7 @@ export function BrowserPeek(props: {
         step: "done",
         ok: result.status === "imported",
         message: result.message,
+        googleSignInNotice: result.googleSignInNotice,
       });
     } catch {
       setImportPanel({
@@ -1167,12 +1173,13 @@ export function BrowserPeek(props: {
                     <div className="browser-import-card">
                       <div className="browser-import-head">
                         <div>
-                          <h3>Bring your sign-ins over</h3>
-                          <p>
-                            Pick a browser you already use. Its saved sign-ins
-                            are copied into this browser so job sites remember
-                            you here too.
-                          </p>
+                          <h3>Import browser cookies</h3>
+                          {importPanel.step !== "done" && (
+                            <p>
+                              Choose a browser profile to copy its cookies into
+                              Nestor. Some sites may keep you signed in.
+                            </p>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -1185,14 +1192,14 @@ export function BrowserPeek(props: {
                       {importPanel.step === "loading" && (
                         <div className="browser-import-empty">
                           <LoaderCircle size={16} className="browser-spin" />
-                          Looking for browsers on this Mac…
+                          Looking for browsers on this device…
                         </div>
                       )}
                       {importPanel.step === "pick" &&
                         (importPanel.sources.length === 0 ? (
                           <div className="browser-import-empty">
                             {importPanel.note ??
-                              "No other browsers with saved sign-ins were found on this device."}
+                              "No other browser profiles with cookies were found on this device."}
                           </div>
                         ) : (
                           <ul className="browser-import-list">
@@ -1225,21 +1232,36 @@ export function BrowserPeek(props: {
                       {importPanel.step === "importing" && (
                         <div className="browser-import-empty">
                           <LoaderCircle size={16} className="browser-spin" />
-                          Bringing sign-ins over from{" "}
+                          Importing cookies from{" "}
                           {importPanel.source.browserLabel}…
                         </div>
                       )}
                       {importPanel.step === "done" && (
-                        <div
-                          className={`browser-import-result ${importPanel.ok ? "is-ok" : ""}`}
-                        >
-                          {importPanel.ok ? (
-                            <Check size={16} />
-                          ) : (
-                            <KeyRound size={16} />
+                        <>
+                          {importPanel.googleSignInNotice && (
+                            <div className="browser-import-google-step">
+                              <p>{importPanel.googleSignInNotice}</p>
+                              <button
+                                type="button"
+                                className="browser-import-google"
+                                onClick={() => void signInToGoogleHere()}
+                              >
+                                Sign in to Google here
+                              </button>
+                            </div>
                           )}
-                          <span>{importPanel.message}</span>
-                        </div>
+                          <div
+                            role="status"
+                            className={`browser-import-result ${importPanel.ok ? "is-ok" : ""}`}
+                          >
+                            {importPanel.ok ? (
+                              <Check size={16} />
+                            ) : (
+                              <KeyRound size={16} />
+                            )}
+                            <span>{importPanel.message}</span>
+                          </div>
+                        </>
                       )}
                       <div className="browser-import-foot">
                         {importPanel.step === "pick" &&
@@ -1249,22 +1271,21 @@ export function BrowserPeek(props: {
                           </span>
                         ) : (
                           <span>
-                            Only sign-ins are copied. Passwords, bookmarks and
-                            history stay where they are.
+                            This copies cookies only. To import passwords, open
+                            Saved passwords.
                           </span>
                         )}
                         {importPanel.step === "done" && (
                           <div className="browser-import-actions">
-                            {/* Google keeps its sign-ins in the browser they
-                                were made in; one sign-in here is the route,
-                                and Nestor keeps it across restarts. */}
-                            <button
-                              type="button"
-                              className="browser-import-google"
-                              onClick={() => void signInToGoogleHere()}
-                            >
-                              Sign in to Google here
-                            </button>
+                            {!importPanel.googleSignInNotice && (
+                              <button
+                                type="button"
+                                className="browser-import-google"
+                                onClick={() => void signInToGoogleHere()}
+                              >
+                                Sign in to Google here
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="browser-import-done"
