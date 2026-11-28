@@ -77,6 +77,8 @@ export interface JobSearchRunner {
   status(): JobSearchStatus;
   /** Coalesced to at most four notifications per second. */
   onStatus(listener: (status: JobSearchStatus) => void): () => void;
+  /** Starts the quiet period if an edit initialized the runner. */
+  scheduleProfileFit(): void;
   /** Scores new jobs and saved jobs that are due for a refresh. */
   scoreUnscored(explicit?: boolean): Promise<number>;
   prioritizeFit(ids: readonly number[]): void;

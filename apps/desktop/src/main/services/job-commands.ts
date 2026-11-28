@@ -20,6 +20,7 @@ import { getJobStore } from "./job-store";
 
 /** A search runner that also reports its progress. */
 export interface JobSearchService extends JobSearchControl {
+  scheduleProfileFit(): void;
   suspend?(): void;
   onStatus(listener: (status: JobSearchStatus) => void): () => void;
 }
@@ -139,16 +140,20 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     const { found, shortlisted, resume, hidden } = store.stageCounts();
     return found + shortlisted + resume + hidden > 0;
   };
-  let fitRefresh: ReturnType<typeof setTimeout> | null = null;
   store.onChange((change) => {
     if (
       !searchService &&
       (change.cause === "profile" || change.cause === "settings") &&
       hasSavedFits()
     ) {
-      if (fitRefresh) clearTimeout(fitRefresh);
-      fitRefresh = setTimeout(scoreUnscoredJobs, 300);
-      fitRefresh.unref?.();
+      void getSearchService()
+        .then((service) => service.scheduleProfileFit())
+        .catch((error: unknown) => {
+          console.warn(
+            "[Desktop] Could not schedule saved-job scoring.",
+            error,
+          );
+        });
     }
     // Checked here, since the preload passes it through. A bad change is
     // dropped rather than thrown into the write that made it.

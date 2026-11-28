@@ -55,6 +55,8 @@ function reportFitLimit(
  */
 export interface FitRequests {
   signal: AbortSignal;
+  /** Profile edits hold dispatch across both search and background queues. */
+  paused: Promise<void> | null;
   /** Each listing's request that has not answered yet. */
   inFlight: Map<number, Promise<void>>;
   /** Requests sent and not answered yet, from every queue. */
@@ -65,6 +67,7 @@ export interface FitRequests {
 
 export const createFitRequests = (signal: AbortSignal): FitRequests => ({
   signal,
+  paused: null,
   inFlight: new Map(),
   sent: new Set(),
   wake: new Set(),
@@ -82,10 +85,22 @@ export function createFitQueue(
   onProgress: () => void = () => {},
   requests: FitRequests = createFitRequests(signal),
 ) {
-  const pending: number[] = [];
+  const pending = new Set<number>();
   const seen = new Set<number>();
   const inFlight = new Set<number>();
   const active = new Set<Promise<void>>();
+  const ranks = (ids: readonly number[]) =>
+    new Map(ids.map((id, index) => [id, index]));
+  let visibleOrder = ranks([]);
+  let savedOrder = ranks([]);
+  const orderedPending = () =>
+    [...pending].sort(
+      (a, b) =>
+        (visibleOrder.get(a) ?? visibleOrder.size) -
+          (visibleOrder.get(b) ?? visibleOrder.size) ||
+        (savedOrder.get(a) ?? savedOrder.size) -
+          (savedOrder.get(b) ?? savedOrder.size),
+    );
   /** Listings this queue is waiting on because another queue asked first. */
   const waiting = new Map<number, Promise<void>>();
   const stopped = new Promise<void>((resolve) => {
@@ -158,6 +173,12 @@ export function createFitQueue(
     onProgress();
     try {
       const current = await liveContext();
+      // An edit can arrive while this batch is reading its inputs, before
+      // the request is sent. Return its IDs to the queue to be ordered anew.
+      if (requests.paused) {
+        if (!signal.aborted) for (const job of jobs) pending.add(job.id);
+        return;
+      }
       const key = fitContextFingerprint(current, settings?.note);
       const fingerprints = new Map(
         jobs.map((job) => [job.id, fitInputFingerprint(key, job)]),
@@ -182,7 +203,14 @@ export function createFitQueue(
         updates: Awaited<ReturnType<typeof deps.engine.fitJobs>>,
       ) => {
         requests.signal.throwIfAborted();
-        const latest = await liveContext();
+        // Keep a paid answer until the edits settle. If the final inputs
+        // match, including after a reverted edit, it can still be reused.
+        let latest: JobSearchContext;
+        do {
+          while (requests.paused)
+            await abortable(requests.paused, requests.signal);
+          latest = await liveContext();
+        } while (requests.paused);
         requests.signal.throwIfAborted();
         const latestKey = fitContextFingerprint(latest, settings?.note);
         const valid = updates.flatMap((update) => {
@@ -253,7 +281,7 @@ export function createFitQueue(
       flight.then(() => {
         waiting.delete(id);
         if (signal.aborted) return;
-        pending.push(id);
+        pending.add(id);
         pump();
       }),
     );
@@ -268,13 +296,12 @@ export function createFitQueue(
     const jobs: JobDetail[] = [];
     let tokens = overhead,
       full = false;
-    for (let index = 0; index < pending.length; ) {
-      const id = pending[index]!;
+    for (const id of orderedPending()) {
       const flight = requests.inFlight.get(id);
       const job = flight ? null : deps.store.getJobForFit(id);
       if (flight) awaitFlight(id, flight);
       if (!eligible(job)) {
-        pending.splice(index, 1);
+        pending.delete(id);
         continue;
       }
       const cost = estimate(job);
@@ -290,9 +317,8 @@ export function createFitQueue(
       }
       jobs.push(job);
       tokens += cost;
-      index++;
       if (jobs.length === BATCH_JOBS) {
-        if (index < pending.length)
+        if (jobs.length < pending.size)
           reportFitLimit(jobs, {
             limit: "fit_batch_jobs",
             kind: "jobs",
@@ -304,21 +330,28 @@ export function createFitQueue(
       }
     }
     if (!jobs.length || (!full && !draining)) return null;
-    pending.splice(0, jobs.length);
+    for (const job of jobs) pending.delete(job.id);
     return jobs;
   };
 
   const pump = () => {
     if (signal.aborted) {
       clearTimer();
-      pending.length = 0;
+      pending.clear();
       requests.wake.delete(pump);
       return;
     }
-    if (pending.length && requests.sent.size >= limit)
+    if (requests.paused) {
+      clearTimer();
+      requests.wake.delete(pump);
+      return;
+    }
+    if (pending.size && requests.sent.size >= limit)
       reportFitLimit(
         runTraceEnabled()
-          ? pending.slice(0, BATCH_JOBS).map((id) => deps.store.getJob(id))
+          ? orderedPending()
+              .slice(0, BATCH_JOBS)
+              .map((id) => deps.store.getJob(id))
           : [],
         {
           limit: "fit_concurrency",
@@ -327,7 +360,7 @@ export function createFitQueue(
           where: "job-finder/fitQueue/pump",
         },
       );
-    while (requests.sent.size < limit && pending.length) {
+    while (requests.sent.size < limit && pending.size) {
       const jobs = takeBatch(drainers > 0);
       if (!jobs) break;
       const task = judge(jobs)
@@ -340,9 +373,9 @@ export function createFitQueue(
         });
       active.add(task);
     }
-    if (pending.length && requests.sent.size >= limit) requests.wake.add(pump);
+    if (pending.size && requests.sent.size >= limit) requests.wake.add(pump);
     else requests.wake.delete(pump);
-    if (!pending.length || drainers || deferred) clearTimer();
+    if (!pending.size || drainers || deferred) clearTimer();
     else if (!partialTimer) {
       partialTimer = setTimeout(() => {
         partialTimer = null;
@@ -354,17 +387,9 @@ export function createFitQueue(
     }
   };
 
-  const prioritize = (ids: readonly number[]) => {
-    if (!ids.length) return;
-    const ranks = new Map(ids.map((id, i) => [id, i]));
-    pending.sort(
-      (a, b) => (ranks.get(a) ?? Infinity) - (ranks.get(b) ?? Infinity),
-    );
-  };
-
   return {
     get pendingCount() {
-      return pending.length;
+      return pending.size;
     },
     get activeCount() {
       return judging;
@@ -375,23 +400,43 @@ export function createFitQueue(
     get needsAnotherPass() {
       return deferred;
     },
-    enqueue(ids: readonly number[], priority: readonly number[] = []) {
+    enqueue(ids: readonly number[]) {
       if (signal.aborted) return;
       for (const id of ids)
         if (
           !seen.has(id) ||
           (!inFlight.has(id) &&
-            !pending.includes(id) &&
+            !pending.has(id) &&
             deps.store.getJobForFit(id)?.fitStale)
         ) {
           seen.add(id);
-          pending.push(id);
+          pending.add(id);
         }
-      prioritize(priority);
       pump();
       onProgress();
     },
-    prioritize,
+    refresh(
+      ids: readonly number[],
+      visible: readonly number[],
+      includeInFlight = false,
+    ) {
+      if (signal.aborted) return;
+      savedOrder = ranks(ids);
+      visibleOrder = ranks(visible);
+      // A change to the inputs also queues in-flight IDs. Once their
+      // requests answer, takeBatch checks whether there is still work.
+      for (const id of ids) {
+        if (!includeInFlight && inFlight.has(id)) continue;
+        seen.add(id);
+        pending.add(id);
+      }
+      pump();
+      onProgress();
+    },
+    prioritize(ids: readonly number[]) {
+      visibleOrder = ranks(ids);
+    },
+    resume: pump,
     /**
      * Settles when this queue's work has answered, or at once when it is
      * stopped: requests already sent then finish on their own.
@@ -399,11 +444,15 @@ export function createFitQueue(
     async drain() {
       drainers++;
       try {
-        for (;;) {
+        while (!signal.aborted) {
+          if (requests.paused) {
+            await Promise.race([requests.paused, stopped]);
+            continue;
+          }
           pump();
           const work = [...active, ...waiting.values()];
           // Work held back by the request limit waits for any request to answer.
-          if (pending.length) work.push(...requests.sent);
+          if (pending.size) work.push(...requests.sent);
           if (signal.aborted || !work.length) break;
           await Promise.race([...work, stopped]);
         }
