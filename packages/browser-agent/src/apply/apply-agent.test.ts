@@ -1,6 +1,7 @@
 import {
   CandidateProfileSchema,
   CandidateReusableAnswerSchema,
+  JobSearchPreferencesSchema,
   type ApplicationAttemptProgress,
   type RawApplyControl,
   type RawApplyPage,
@@ -417,6 +418,37 @@ test.each(["prepare_only", "autonomous_submit"] as const)(
     expect(prompt).toContain("Optimizely and A/B testing");
   },
 );
+
+test("the apply model gets the pay range's tax basis and estimates the other basis itself", async () => {
+  const input = config(page());
+  input.authority.salaryDisclosure = "answer_from_profile";
+  input.sources.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      minimum: 2000,
+      maximum: 4000,
+      interval: "month",
+      currency: "EUR",
+      currencyStatus: "explicit",
+      taxBasis: "after_tax",
+    },
+  });
+  const system = createApplySystemPrompt(input);
+  expect(system).toContain(
+    "preferences.compensation.taxBasis says whether those figures are before tax (gross) or after tax (net)",
+  );
+  expect(system).toContain(
+    "estimate the figure on the field's basis yourself from the employer's country",
+  );
+  expect(system).toContain("call a tax-basis conversion your estimate");
+  expect(system).not.toContain("otherwise ask for it under Needs you");
+  const client = model([done]);
+  await runApplyAgent(input, client);
+  const sent = JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]);
+  expect(sent).toContain('\\"taxBasis\\":\\"after_tax\\"');
+});
 
 test("a stale planned ref names every unattempted batch entry and leaves them untouched", async () => {
   const source = page({

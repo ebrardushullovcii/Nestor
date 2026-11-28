@@ -1,11 +1,8 @@
 import { ProfileHoursField } from "./profile-hours-field";
 import { workModeValues } from "@nestor/contracts";
-import { useId } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
-import { FieldLabel } from "@renderer/components/ui/field";
 import { CheckboxField } from "../checkbox-field";
-import { FormSelect } from "../form-select";
 import type { SearchPreferencesEditorValues } from "../../lib/profile-editor";
 import {
   formatStatusLabel,
@@ -22,15 +19,12 @@ import {
 } from "./profile-list-editor";
 import { PROFILE_WORK_CONSTRAINT_COPY } from "./profile-work-constraints-copy";
 import { ProfileSectionHeader } from "./profile-section-header";
+import { ProfilePayFields } from "./profile-pay-fields";
 
 export function ProfilePreferencesTargetingSection(props: {
   preferencesForm: UseFormReturn<SearchPreferencesEditorValues>;
 }) {
   const { control, register, setValue, watch } = props.preferencesForm;
-  const minimumSalaryId = useId();
-  const targetSalaryId = useId();
-  const compensationIntervalId = useId();
-  const salaryCurrencyId = useId();
   const listFieldOptions = {
     shouldDirty: true,
     shouldTouch: true,
@@ -240,9 +234,9 @@ export function ProfilePreferencesTargetingSection(props: {
             Where you work and pay
           </h3>
           <p className="text-sm leading-relaxed text-foreground-muted">
-            These values guide job matching. The minimum is your consideration
-            floor, not the salary answer sent with an application. Answer that
-            in Needs you when a form asks for it.
+            These values guide job matching. When Settings lets Job Finder
+            answer pay questions, application forms get your expected pay from
+            this range, in the form&apos;s own currency, period and tax basis.
           </p>
         </div>
         <div className="grid gap-(--gap-content) md:grid-cols-2 md:items-start">
@@ -292,93 +286,7 @@ export function ProfilePreferencesTargetingSection(props: {
           {/* The resume approach (original, light, tailored, aggressive) and
               how broadly a search collects live under Settings, AI behavior,
               with every other choice about how the AI works. */}
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={minimumSalaryId}>
-              Minimum worth considering
-            </FieldLabel>
-            <ProfileInput
-              id={minimumSalaryId}
-              min="0"
-              step="1"
-              type="number"
-              {...register("minimumSalaryUsd")}
-            />
-            <p className="text-xs leading-relaxed text-foreground-muted">
-              Used as a matching floor. Strong-fit roles can still be reviewed
-              deliberately.
-            </p>
-          </div>
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={targetSalaryId}>
-              Target compensation (optional)
-            </FieldLabel>
-            <ProfileInput
-              id={targetSalaryId}
-              min="0"
-              step="1"
-              type="number"
-              {...register("targetSalaryUsd")}
-            />
-            <p className="text-xs leading-relaxed text-foreground-muted">
-              Your preferred target. Matching still uses the minimum as the
-              floor, and higher compensation is always welcome.
-            </p>
-          </div>
-          <label className="grid gap-1 text-sm">
-            Minimum pay counts as
-            <select
-              className={profileSelectTriggerClassName}
-              {...register("compensationBasis")}
-            >
-              <option value="base">Base salary</option>
-              <option value="total_ote">
-                Total pay including commission (OTE)
-              </option>
-            </select>
-          </label>
-          <Controller
-            control={control}
-            name="compensationInterval"
-            render={({ field }) => (
-              <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-                <FieldLabel htmlFor={compensationIntervalId}>
-                  Compensation interval
-                </FieldLabel>
-                <FormSelect
-                  onValueChange={field.onChange}
-                  options={[
-                    { label: "Hourly", value: "hour" },
-                    { label: "Daily", value: "day" },
-                    { label: "Weekly", value: "week" },
-                    { label: "Monthly", value: "month" },
-                    { label: "Yearly", value: "year" },
-                  ]}
-                  triggerClassName={profileSelectTriggerClassName}
-                  triggerId={compensationIntervalId}
-                  value={field.value}
-                />
-              </div>
-            )}
-          />
-          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
-            <FieldLabel htmlFor={salaryCurrencyId}>
-              Compensation currency
-            </FieldLabel>
-            <ProfileInput
-              id={salaryCurrencyId}
-              maxLength={3}
-              placeholder="USD or EUR"
-              {...register("salaryCurrency")}
-            />
-            {!watch("salaryCurrency").trim() &&
-            (watch("minimumSalaryUsd").trim() ||
-              watch("targetSalaryUsd").trim()) ? (
-              <p className="text-xs leading-5 text-(--warning-text)">
-                Add a three-letter currency before relying on compensation
-                matching.
-              </p>
-            ) : null}
-          </div>
+          <ProfilePayFields preferencesForm={props.preferencesForm} />
         </div>
       </article>
     </section>

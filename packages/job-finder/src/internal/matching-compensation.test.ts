@@ -254,3 +254,17 @@ test("R3-138 leaves OTE comparison to the model instead of treating base as tota
   expect(result.explanation).toContain("total pay including commission");
   expect(result.listingMinimumAnnualUsd).toBeNull();
 });
+
+test("leaves an after-tax floor to the model instead of comparing it with gross pay", () => {
+  const result = evaluateCompensationFit("EUR 50,000 - 80,000 per year", {
+    minimum: 2000,
+    maximum: 4000,
+    interval: "month",
+    currency: "EUR",
+    currencyStatus: "explicit",
+    taxBasis: "after_tax",
+  });
+  expect(result.state).toBe("unknown");
+  expect(result.explanation).toContain("after tax");
+  expect(result.listingMinimumAnnualUsd).toBeNull();
+});

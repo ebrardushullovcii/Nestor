@@ -58,7 +58,7 @@ export function buildFitScoringInstructions(): string {
     "Step 2: 10-20 / skip for a clearly different profession, an explicitly incompatible career level, or a confirmed non-negotiable place, permission or saved-goal conflict. This applies even to cards and excerpts. The Work modes goal lists the allowed modes: when it contains only remote, fully remote work is required, not merely preferred, and unknown willingness to relocate does not relax it. A listed hybrid or onsite work mode requires presence, so it conflicts with that goal unless a fully remote option is explicitly offered. A remote tag alone does not make hybrid work fully remote. A city or employer address alone does not prove attendance or a worker-country restriction. Missing permission is not a proven conflict. A different function or specialization within the same broad profession is not a different profession. On a sparse card, an occupational rejection requires a clearly different professional practice or credential with no plausible transferable background; unclear duties within the same broad profession need review, even when the title is not a target title.",
     "Step 3: 50-60 / review_before_applying if listing evidence is incomplete: detailQuality is card_only or partial_detail, evidenceOmitted is true, or an excerpt marker says text was omitted. This takes precedence over skill gaps and positive matches. Request a full read and name the unknowns.",
     "Step 4: 35-45 / review_before_applying for a full listing whose central required qualification has neither direct nor credible transferable support in the supplied profile. Name missing evidence, never claim you cannot do it. A missing preferred tool alone does not qualify.",
-    "Step 5: 50-60 / review_before_applying if a material eligibility, place, pay or schedule question remains. If a minimum pay goal is set, unstated pay or different currencies without a supplied conversion leaves this question unresolved, regardless of how high the amount looks. Never invent exchange rates. A missing schedule matters only when a configured schedule goal cannot be checked.",
+    "Step 5: 50-60 / review_before_applying if a material eligibility, place, pay or schedule question remains. If a minimum pay goal is set, unstated pay or different currencies without a supplied conversion leaves this question unresolved, regardless of how high the amount looks. Never invent exchange rates. Tax basis says if the person's pay is before or after tax; listings usually mean before. When they differ, estimate it on the listing's basis yourself and say so. A missing schedule matters only when a configured schedule goal cannot be checked.",
     "Step 6: 65-75 / review_before_applying for a full listing with credible related experience but bridgeable required-skill or scope gaps needing checking or tailoring. Transferable experience is not direct proof of the required specialty, years or management scope.",
     "Step 7: 75-85 / apply_with_original when all essential requirements are directly supported and no material question remains, but at least one preferred qualification is not evidenced. Missing preferred evidence belongs here even when the gap is minor.",
     "Step 8: 90-100 / strong_fit only for a full listing for exactly the work you seek with direct support for all essential AND preferred qualifications (or no preferred qualifications), all configured goals met, and no unresolved constraint. Never promote a missing preferred qualification to support.",
@@ -295,6 +295,12 @@ function compactGoals(preferences: JobSearchPreferences) {
         preferences.compensation.basis === "total_ote"
           ? "Total on-target earnings"
           : "Base salary",
+      "Tax basis":
+        preferences.compensation.taxBasis === "after_tax"
+          ? "After tax (net)"
+          : preferences.compensation.taxBasis === "before_tax"
+            ? "Before tax (gross)"
+            : "Not stated",
       Minimum: preferences.compensation.minimum,
       Maximum: preferences.compensation.maximum,
       Interval: preferences.compensation.interval,

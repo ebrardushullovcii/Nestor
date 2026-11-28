@@ -313,6 +313,56 @@ test("goals retain all constraints and reject an invalid partial range atomicall
   expect(preferences.goals.read().compensation.maximum).toBe(27);
 });
 
+test("the pay range's tax basis is stored, cleared, and added to a file from before it existed", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-pay-tax-basis-"));
+  const file = path.join(dir, "jobs.sqlite");
+  try {
+    const first = openJobStore(file);
+    createPreferencesStore(first).goals.patch({
+      fields: { "compensation.minimum": 2000 },
+    });
+    first.close();
+    const old = new DatabaseSync(file);
+    old.exec("ALTER TABLE profile_goals DROP COLUMN compensation_tax_basis");
+    old.close();
+
+    const upgraded = openJobStore(file);
+    const goals = createPreferencesStore(upgraded).goals;
+    expect(goals.read().compensation).not.toHaveProperty("taxBasis");
+    expect(goals.read().compensation.minimum).toBe(2000);
+    goals.replace({
+      ...goals.read(),
+      compensation: {
+        ...goals.read().compensation,
+        maximum: 4000,
+        interval: "month",
+        currency: "EUR",
+        currencyStatus: "explicit",
+        taxBasis: "after_tax",
+      },
+    });
+    upgraded.close();
+
+    const reopened = openJobStore(file);
+    const saved = createPreferencesStore(reopened).goals;
+    expect(saved.read().compensation).toMatchObject({
+      minimum: 2000,
+      maximum: 4000,
+      interval: "month",
+      currency: "EUR",
+      taxBasis: "after_tax",
+    });
+    const { taxBasis: _cleared, ...withoutTaxBasis } =
+      saved.read().compensation;
+    void _cleared;
+    saved.replace({ ...saved.read(), compensation: withoutTaxBasis });
+    expect(saved.read().compensation).not.toHaveProperty("taxBasis");
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the work rule in the person's own words is stored, also in a file from before it existed", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "nestor-work-rule-"));
   const file = path.join(dir, "jobs.sqlite");

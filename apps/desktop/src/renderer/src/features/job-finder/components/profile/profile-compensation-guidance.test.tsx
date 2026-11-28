@@ -72,11 +72,11 @@ function Harness() {
     </>
   );
 }
-it("keeps search pay preferences separate from form answers in Needs you", () => {
+it("says the saved pay range answers pay questions when Settings allows it", () => {
   const { container } = render(<Harness />);
   expect(screen.getByText("Minimum worth considering")).toBeTruthy();
   expect(container.textContent).toContain(
-    "in Needs you when a form asks for it",
+    "application forms get your expected pay from this range, in the form's own currency, period and tax basis",
   );
   expect(container.querySelector('[name^="answerBank."]')).toBeNull();
   expect(screen.queryByText("Reusable screener answers")).toBeNull();
@@ -166,5 +166,24 @@ describe("preference usability controls", () => {
       "value",
       "total_ote",
     );
+  });
+
+  it("asks whether the pay range is before or after tax, next to the range", () => {
+    render(<TargetingHarness />);
+    const taxBasis = screen.getByLabelText("Before or after tax");
+    expect(taxBasis).toHaveProperty("value", "");
+    expect(
+      [...(taxBasis as HTMLSelectElement).options].map((option) => [
+        option.value,
+        option.text,
+      ]),
+    ).toEqual([
+      ["", "Not set"],
+      ["before_tax", "Before tax (gross)"],
+      ["after_tax", "After tax (net, take-home)"],
+    ]);
+    fireEvent.change(taxBasis, { target: { value: "after_tax" } });
+    expect(taxBasis).toHaveProperty("value", "after_tax");
+    expect(screen.getByText(/estimates the before-tax figure/)).toBeTruthy();
   });
 });
