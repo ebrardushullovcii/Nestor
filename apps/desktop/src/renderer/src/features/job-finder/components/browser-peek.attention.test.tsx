@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type {
   DesktopBrowserBridge,
@@ -552,8 +553,19 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     status: "imported",
     cookieCount: 3,
     siteCount: 2,
-    message: "Imported 3 cookies for 2 sites from Google Chrome.",
-    googleSignInNotice: "Your Google sign-in stays in your other browser.",
+    message: "Copied 3 cookies for 2 sites from Google Chrome.",
+    googleSignInNotice:
+      "Google keeps your sign-in in Google Chrome, so Gmail and “Sign in with Google” ask again here.",
+    counts: {
+      found: 400,
+      expired: 380,
+      partitioned: 12,
+      invalid: 1,
+      lockedToBrowser: 0,
+      unsupportedEncryption: 0,
+      couldNotDecrypt: 4,
+      refused: 0,
+    },
   });
   Object.defineProperty(window, "nestor", {
     configurable: true,
@@ -578,7 +590,7 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     render(<BrowserPeek />);
     fireEvent.click(
       await screen.findByRole("button", {
-        name: /Bring sign-ins from Google Chrome/,
+        name: /Import cookies from Google Chrome/,
       }),
     );
     const row = await screen.findByRole("button", {
@@ -590,19 +602,32 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     expect(screen.queryByRole("button", { name: note })).toBeNull();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     fireEvent.click(row);
-    const notice = await screen.findByText(
-      "Your Google sign-in stays in your other browser.",
-    );
+    // Google and its button lead; what came over and the counts follow.
+    const notice = await screen.findByRole("heading", {
+      name: "Google needs one sign-in here",
+    });
     const signIn = screen.getByRole("button", {
       name: "Sign in to Google here",
     });
-    const counts = screen.getByText(/Imported 3 cookies for 2 sites/);
+    const copied = screen.getByText(/Copied 3 cookies for 2 sites/);
     expect(notice.compareDocumentPosition(signIn)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(signIn.compareDocumentPosition(counts)).toBe(
+    expect(signIn.compareDocumentPosition(copied)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+    // Each reason a cookie stayed behind is its own line, none lumped.
+    const status = screen.getByRole("status");
+    expect(status.textContent).toContain("Not copied: 397 of 400");
+    const lines = within(status)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(lines).toEqual([
+      "380had already expired, so nothing is lost",
+      "12belong to a site shown inside another site, which Nestor leaves out",
+      "1has a site address Nestor’s browser can’t use",
+      "4couldn’t be unlocked",
+    ]);
     expect(
       screen.getByRole("heading", { name: "Import browser cookies" }),
     ).toBeTruthy();

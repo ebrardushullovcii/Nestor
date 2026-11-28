@@ -30,6 +30,7 @@ import {
   clearSelected,
   countSelected,
   isSelected,
+  LIST_DETAIL_REGION_ID,
   LIST_ROW_SELECT_PAD_CLASS,
   ListDetailLayout,
   ListPane,
@@ -58,6 +59,8 @@ import {
   type WorkItem,
 } from "./work-through";
 import { openPreparedApplication } from "@renderer/features/applications/open-application";
+import { ApplicationDetail } from "@renderer/features/applications/application-detail";
+import { SelectableRow } from "@renderer/components/ui/selectable-row";
 import {
   jobFinderListRowClassName,
   jobFinderListRowLinesClassName,
@@ -282,6 +285,9 @@ export function NeedsYouScreen() {
       : null;
   const [text, setText] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
+  // A filled form picked from "Ready to send" (its application id). While
+  // set, the details pane shows that application, not a Needs you item.
+  const [readyId, setReadyId] = useState<number | null>(null);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -436,6 +442,7 @@ export function NeedsYouScreen() {
   walkThroughState.current = walk;
   useEffect(() => {
     setActiveId(null);
+    setReadyId(null);
     setSelection(clearSelected);
     setEditing(false);
     setCreating(false);
@@ -464,6 +471,7 @@ export function NeedsYouScreen() {
   const sheet = useDetailSheet();
   const activate = useCallback((id: number) => {
     setEditing(false);
+    setReadyId(null);
     setActiveId(id);
     pinned.current = null;
     setCreating(false);
@@ -654,6 +662,17 @@ export function NeedsYouScreen() {
       .catch((error: unknown) =>
         showToast({ title: describeError(error), tone: "warning" }),
       );
+  // A form that was sent or stopped leaves the list, and its details with it.
+  const readyRow =
+    tab === "tasks" && readyId !== null
+      ? ready.rows.find((row) => row.id === readyId)
+      : undefined;
+  const selectReady = (id: number) => {
+    setEditing(false);
+    setCreating(false);
+    setReadyId(id);
+    sheet.openIfStacked();
+  };
   const readyCount = ready.rows.length;
   const readyLabel = `${readyCount}${ready.more ? "+" : ""}`;
   const walkSites = () =>
@@ -726,16 +745,19 @@ export function NeedsYouScreen() {
             <ul className="m-0 grid list-none p-0">
               {ready.rows.map((row) => (
                 <li key={row.id}>
-                  <button
+                  {/* Picked like any other item: its details (Send, Open
+                      application, what went on the form) show beside the
+                      list, never the item picked before it. */}
+                  <SelectableRow
+                    aria-controls={LIST_DETAIL_REGION_ID}
                     className={cn(
                       jobFinderListRowClassName,
                       LIST_ROW_SELECT_PAD_CLASS,
-                      "w-full text-left outline-none hover:bg-(--surface-overlay-list) focus-ring",
                     )}
-                    onClick={() => openReady(row.id)}
-                    title={
-                      row.error ?? "Open the filled form to review and send"
-                    }
+                    data-ready-application-id={row.id}
+                    onClick={() => selectReady(row.id)}
+                    selected={readyRow?.id === row.id}
+                    title={row.error ?? "Show the filled form's details"}
                     type="button"
                   >
                     <span className={jobFinderListRowLinesClassName}>
@@ -757,7 +779,7 @@ export function NeedsYouScreen() {
                         {row.error ?? "Filled in. Review it and send."}
                       </span>
                     </span>
-                  </button>
+                  </SelectableRow>
                 </li>
               ))}
             </ul>
@@ -778,7 +800,7 @@ export function NeedsYouScreen() {
             tab,
             text,
             kind,
-            focusId: activeId ?? undefined,
+            focusId: readyRow ? undefined : (activeId ?? undefined),
             selectedIds: [...visibleSelection.ids],
             all: selection.all,
           })}
@@ -919,12 +941,13 @@ export function NeedsYouScreen() {
     >
       <ListDetailLayout
         sheet={{
-          open: sheet.open && (activeId !== null || creating),
+          open:
+            sheet.open && (activeId !== null || creating || Boolean(readyRow)),
           onClose: sheet.close,
         }}
         list={
           <ListPane<Item>
-            activeId={activeId}
+            activeId={readyRow ? null : activeId}
             fillStacked
             label={
               tab === "tasks" ? "Things needing you" : "Saved form answers"
@@ -1080,7 +1103,10 @@ export function NeedsYouScreen() {
                     filled in and waiting for your Send, listed below.
                   </p>
                   <Button
-                    onClick={() => openReady(ready.rows[0]!.id)}
+                    onClick={() => {
+                      selectReady(ready.rows[0]!.id);
+                      openReady(ready.rows[0]!.id);
+                    }}
                     size="sm"
                   >
                     Review and send
@@ -1212,6 +1238,11 @@ export function NeedsYouScreen() {
                   });
                   void list.refresh();
                 }}
+              />
+            ) : readyRow ? (
+              <ApplicationDetail
+                key={`ready:${readyRow.id}`}
+                jobId={readyRow.jobId}
               />
             ) : activeId === null ? (
               <EmptyPane

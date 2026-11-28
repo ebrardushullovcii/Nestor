@@ -203,14 +203,14 @@ export const JOB_FINDER_ACTIONS = {
     empty,
     "browser",
     "read",
-    "List the browsers and profiles on this device that sign-ins can be brought over from, and whether each can be read here.",
+    "List the browsers and profiles on this device that cookies can be imported from, and whether each can be read here.",
   ),
   "browser-import-signins": desktopAction(
     "browser-import-signins",
     C.ImportBrowserSignInsInputSchema,
     "browser",
     "local",
-    "When the person asks, bring their site sign-ins over from a browser on this device into the Job Finder browser. Name a profile if it has several. Pauses running browser work.",
+    "When the person asks, copy cookies from a browser profile on this device into the Job Finder browser. Google sign-ins never come over. Running browser work keeps going.",
   ),
   "reveal-saved-file": desktopAction(
     "reveal-saved-file",

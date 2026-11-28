@@ -38,6 +38,7 @@ import {
   resolveBrowserAddress,
   type AddBrowserJobResult,
   type DesktopBrowserCommand,
+  type DesktopBrowserImportCounts,
   type DesktopBrowserImportSource,
   type DesktopBrowserState,
 } from "@nestor/contracts";
@@ -62,6 +63,53 @@ import {
 } from "./browser-passwords";
 
 const GOOGLE_SIGN_IN_URL = "https://accounts.google.com/";
+
+/**
+ * The cookies an import left out, one line per reason, in the order that
+ * matters to the person: what costs nothing first, then what may have been
+ * a sign-in. Reasons with no cookies are not listed.
+ */
+export function importLeftOutLines(
+  counts: DesktopBrowserImportCounts,
+  browser: string,
+): { count: number; text: string }[] {
+  const lines: [number, string, string][] = [
+    [
+      counts.expired,
+      "had already expired, so nothing is lost",
+      "had already expired, so nothing is lost",
+    ],
+    [
+      counts.partitioned,
+      "belongs to a site shown inside another site, which Nestor leaves out",
+      "belong to a site shown inside another site, which Nestor leaves out",
+    ],
+    [
+      counts.invalid,
+      "has a site address Nestor’s browser can’t use",
+      "have a site address Nestor’s browser can’t use",
+    ],
+    [
+      counts.lockedToBrowser,
+      `is locked to ${browser} by its encryption`,
+      `are locked to ${browser} by its encryption`,
+    ],
+    [
+      counts.unsupportedEncryption,
+      "uses encryption Nestor can’t read",
+      "use encryption Nestor can’t read",
+    ],
+    [counts.couldNotDecrypt, "couldn’t be unlocked", "couldn’t be unlocked"],
+    [
+      counts.refused,
+      "was refused by Nestor’s browser",
+      "were refused by Nestor’s browser",
+    ],
+  ];
+  return lines
+    .filter(([count]) => count > 0)
+    .map(([count, one, many]) => ({ count, text: count === 1 ? one : many }));
+}
 
 const initialState: DesktopBrowserState = {
   revision: 0,
@@ -271,6 +319,9 @@ export function BrowserPeek(props: {
         ok: boolean;
         message: string;
         googleSignInNotice?: string | undefined;
+        browserLabel?: string;
+        cookieCount?: number;
+        counts?: DesktopBrowserImportCounts | undefined;
       }
   >(null);
   const [importSources, setImportSources] = useState<
@@ -374,7 +425,7 @@ export function BrowserPeek(props: {
     sentAddress.current = null;
     setAddress(next);
   }, [active?.url, active?.id]);
-  // The welcome screen names the browsers it can bring sign-ins from.
+  // The welcome screen names the browsers it can import cookies from.
   useEffect(() => {
     if (!bridge || !shown || !blank || importSources !== null) return;
     void bridge
@@ -563,6 +614,9 @@ export function BrowserPeek(props: {
         ok: result.status === "imported",
         message: result.message,
         googleSignInNotice: result.googleSignInNotice,
+        browserLabel: source.browserLabel,
+        cookieCount: result.cookieCount,
+        counts: result.counts,
       });
     } catch {
       setImportPanel({
@@ -895,7 +949,7 @@ export function BrowserPeek(props: {
                           role="menuitem"
                           onClick={() => void openImportPicker()}
                         >
-                          <Import size={14} /> Bring sign-ins from another
+                          <Import size={14} /> Import cookies from another
                           browser…
                         </button>
                         <span className="browser-menu-separator" />
@@ -1149,7 +1203,7 @@ export function BrowserPeek(props: {
                           onClick={() => void openImportPicker()}
                         >
                           <Import size={14} />
-                          Bring sign-ins from{" "}
+                          Import cookies from{" "}
                           {importableBrowsers.length === 1
                             ? importableBrowsers[0]
                             : importableBrowsers.length === 2
@@ -1238,12 +1292,17 @@ export function BrowserPeek(props: {
                       )}
                       {importPanel.step === "done" && (
                         <>
+                          {/* Google first: it is the one sign-in that never
+                              comes over, and the button is the way on. */}
                           {importPanel.googleSignInNotice && (
                             <div className="browser-import-google-step">
-                              <p>{importPanel.googleSignInNotice}</p>
+                              <div>
+                                <h4>Google needs one sign-in here</h4>
+                                <p>{importPanel.googleSignInNotice}</p>
+                              </div>
                               <button
                                 type="button"
-                                className="browser-import-google"
+                                className="browser-import-google is-lead"
                                 onClick={() => void signInToGoogleHere()}
                               >
                                 Sign in to Google here
@@ -1259,7 +1318,38 @@ export function BrowserPeek(props: {
                             ) : (
                               <KeyRound size={16} />
                             )}
-                            <span>{importPanel.message}</span>
+                            <div className="browser-import-result-body">
+                              <p>{importPanel.message}</p>
+                              {importPanel.counts &&
+                                importPanel.counts.found >
+                                  (importPanel.cookieCount ?? 0) && (
+                                  <div className="browser-import-counts">
+                                    <p>
+                                      Not copied:{" "}
+                                      {(
+                                        importPanel.counts.found -
+                                        (importPanel.cookieCount ?? 0)
+                                      ).toLocaleString()}{" "}
+                                      of{" "}
+                                      {importPanel.counts.found.toLocaleString()}
+                                    </p>
+                                    <ul>
+                                      {importLeftOutLines(
+                                        importPanel.counts,
+                                        importPanel.browserLabel ??
+                                          "the other browser",
+                                      ).map((line) => (
+                                        <li key={line.text}>
+                                          <span>
+                                            {line.count.toLocaleString()}
+                                          </span>
+                                          <span>{line.text}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                            </div>
                           </div>
                         </>
                       )}
@@ -1288,7 +1378,7 @@ export function BrowserPeek(props: {
                             )}
                             <button
                               type="button"
-                              className="browser-import-done"
+                              className={`browser-import-done ${importPanel.step === "done" && importPanel.googleSignInNotice ? "is-quiet" : ""}`}
                               onClick={() => setImportPanel(null)}
                             >
                               Done
