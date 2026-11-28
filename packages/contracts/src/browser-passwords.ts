@@ -24,7 +24,7 @@ export const BrowserPasswordsListInputSchema = z
   .strict();
 export const BrowserPasswordsListSchema = z.object({
   available: z.boolean(),
-  message: z.string().max(500).nullable(),
+  message: z.string().nullable(),
   credentials: z.array(BrowserPasswordMetadataSchema),
 });
 export type BrowserPasswordsList = z.infer<typeof BrowserPasswordsListSchema>;
@@ -55,7 +55,7 @@ export const BrowserPasswordImportResultSchema = z.object({
   added: z.number().int().nonnegative(),
   updated: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
-  message: z.string().max(500),
+  message: z.string(),
 });
 export type BrowserPasswordImportResult = z.infer<
   typeof BrowserPasswordImportResultSchema

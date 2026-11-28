@@ -29,7 +29,7 @@ export const DesktopBrowserTabSchema = z.object({
 export const DesktopBrowserAttentionSchema = z.object({
   kind: z.enum(["sign_in", "challenge", "permission", "error", "user_action"]),
   title: z.string().max(160),
-  detail: z.string().max(500),
+  detail: z.string(),
 });
 
 /** Only display state crosses preload. Cookies, page content and CDP stay in main. */
@@ -118,7 +118,7 @@ export const DesktopBrowserImportResultSchema = z.object({
   status: z.enum(["imported", "cancelled", "unsupported", "failed"]),
   cookieCount: z.number().int().nonnegative(),
   siteCount: z.number().int().nonnegative(),
-  message: z.string().max(500),
+  message: z.string(),
 });
 export type DesktopBrowserImportResult = z.infer<
   typeof DesktopBrowserImportResultSchema
