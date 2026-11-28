@@ -1193,6 +1193,7 @@ test("a second application reads the first application's owner prefix", async ()
 
 test("an expanded opening can reuse the previous application history breakpoint", () => {
   const owner = "Same owner facts";
+  const answers = "Same general saved answers";
   const firstHistory = "Older applications";
   const newHistory = "More applications";
   const request = (history: string[], job: string) =>
@@ -1203,10 +1204,10 @@ test("an expanded opening can reuse the previous application history breakpoint"
         { role: "system", content: "Apply to the selected posting." },
         { role: "user", content: owner },
         ...history.map((content) => ({ role: "user" as const, content })),
+        { role: "user", content: answers },
         { role: "user", content: job },
       ],
-      stableLead: owner,
-      stableLeadEnd: history.at(-1),
+      stableLeadBreakpoints: [owner, ...history.slice(-1), answers],
     });
   type Block = { text: string; cache_control?: { type: string } };
   const opening = (body: Record<string, unknown>) =>
@@ -1226,13 +1227,20 @@ test("an expanded opening can reuse the previous application history breakpoint"
     "ephemeral",
     "ephemeral",
     undefined,
+    undefined,
   ]);
   expect(opening(next).map((block) => block.cache_control?.type)).toEqual([
     "ephemeral",
     undefined,
     "ephemeral",
     undefined,
+    undefined,
   ]);
+  expect(
+    opening(request([], "Third posting")).map(
+      (block) => block.cache_control?.type,
+    ),
+  ).toEqual(["ephemeral", "ephemeral", undefined]);
   expect(next.cache_control).toEqual({ type: "ephemeral" });
 });
 

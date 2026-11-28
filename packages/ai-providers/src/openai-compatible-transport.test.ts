@@ -15,6 +15,141 @@ import {
 } from "./openai-compatible-transport";
 
 describe("Responses API transport", () => {
+  test.each([
+    {
+      endpoint: "api.openai.com",
+      model: "gpt-6.2-sol",
+      apiMode: "responses",
+      explicit: true,
+    },
+    {
+      endpoint: "api.openai.com",
+      model: "gpt-5.4",
+      apiMode: "responses",
+      explicit: false,
+    },
+    {
+      endpoint: "opencode.ai",
+      model: "gpt-6.2-sol",
+      apiMode: "responses",
+      explicit: false,
+    },
+    {
+      endpoint: "opencode.ai",
+      model: "deepseek-v4.1-flash",
+      apiMode: "chat_completions",
+      explicit: false,
+    },
+  ] as const)(
+    "$endpoint $model keeps shared application requests on the same cache route",
+    async ({ endpoint, model, apiMode, explicit }) => {
+      const reply =
+        apiMode === "responses"
+          ? { status: "completed" }
+          : { choices: [{ message: { content: "done" } }] };
+      const stableLeadBreakpoints = [
+        "Applicant facts",
+        "Completed history block",
+        "Saved answers",
+      ];
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(() => Promise.resolve(Response.json(reply)));
+      try {
+        const request = async (
+          profileId: string,
+          job: string,
+          includesReply = false,
+        ) => {
+          const client = createOpenAiCompatibleJobFinderAiClient({
+            baseUrl: `https://${endpoint}/v1`,
+            apiKey: "synthetic",
+            apiMode,
+            model,
+          });
+          await client.chatWithTools(
+            [
+              { role: "system", content: "Application instructions" },
+              ...stableLeadBreakpoints.map((content) => ({
+                role: "user" as const,
+                content,
+              })),
+              { role: "user", content: job },
+              ...(includesReply
+                ? [
+                    { role: "assistant" as const, content: "Page inspected" },
+                    { role: "user" as const, content: "Saved answers" },
+                  ]
+                : []),
+            ],
+            [],
+            {
+              conversationKey: `apply:${profileId}`,
+              stableLeadBreakpoints,
+            },
+          );
+          const init = fetch.mock.calls.at(-1)?.[1];
+          const serialized = init?.body;
+          if (typeof serialized !== "string")
+            throw new Error("Expected a JSON request body");
+          const body = JSON.parse(serialized) as {
+            prompt_cache_key?: string;
+            prompt_cache_options?: { mode: string };
+            input?: Array<{ role: string; content: unknown }>;
+            messages?: Array<{ role: string; content: unknown }>;
+          };
+          const headers = new Headers(init?.headers);
+          const session = headers.get("x-opencode-session");
+          if (endpoint === "opencode.ai")
+            expect(body.prompt_cache_key).toBeUndefined();
+          else expect(session).toBeNull();
+          return {
+            key: body.prompt_cache_key ?? session,
+            options: body.prompt_cache_options,
+            input: body.input ?? body.messages ?? [],
+          };
+        };
+        const first = await request("test-person", "First job");
+        const next = await request("test-person", "Second job");
+        const other = await request("other-person", "Another job");
+        const laterTurn = await request("test-person", "First job", true);
+        expect(first.key).toMatch(/^ses_[a-z0-9]+$/);
+        expect(first.key).toBe(next.key);
+        expect(first.key).toBe(laterTurn.key);
+        expect(first.key).not.toBe(other.key);
+        expect(first.options).toEqual(
+          explicit ? { mode: "implicit" } : undefined,
+        );
+        expect(first.input).toEqual([
+          { role: "system", content: "Application instructions" },
+          ...stableLeadBreakpoints.map((text) => ({
+            role: "user",
+            content: explicit
+              ? [
+                  {
+                    type: "input_text",
+                    text,
+                    prompt_cache_breakpoint: { mode: "explicit" },
+                  },
+                ]
+              : text,
+          })),
+          { role: "user", content: "First job" },
+        ]);
+        expect(next.input.slice(0, -1)).toEqual(first.input.slice(0, -1));
+        expect(laterTurn.input.slice(0, first.input.length)).toEqual(
+          first.input,
+        );
+        expect(laterTurn.input.at(-1)).toEqual({
+          role: "user",
+          content: "Saved answers",
+        });
+      } finally {
+        fetch.mockRestore();
+      }
+    },
+  );
+
   test("a Responses tool reply asks the runtime to keep history append-only", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({

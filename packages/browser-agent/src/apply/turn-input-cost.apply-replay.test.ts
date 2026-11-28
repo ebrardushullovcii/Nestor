@@ -208,9 +208,10 @@ test("new applications and saved answers preserve the complete history blocks", 
     "application_10",
   );
   expect(next.owner).toBe(first.owner);
-  expect(next.historyCacheEnd).toBe(first.historyCacheEnd);
-  expect(first.history).toEqual([next.history[0]]);
-  expect(next.history[1]).toContain('"status":"interview"');
+  expect(first.completeHistory).toHaveLength(1);
+  expect(next.completeHistory).toEqual(first.completeHistory);
+  expect(first.partialHistory).toBeUndefined();
+  expect(next.partialHistory).toContain('"status":"interview"');
   expect(messageData(first.job)).toMatchObject({
     currentApplication: { id: 9, tracker: { status: "interview" } },
   });

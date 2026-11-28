@@ -101,6 +101,7 @@ import {
 import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 import {
   buildModelRequestHeaders,
+  buildModelSessionId,
   createInstanceConversationKey,
   isOpenCodeBaseUrl,
   modelConversationKeys,
@@ -771,15 +772,18 @@ export function createOpenAiCompatibleJobFinderAiClient(
 
       try {
         const apiMode = validatedOptions.apiMode ?? "chat_completions";
+        const url = buildModelUrl(validatedOptions.baseUrl, apiMode);
         const streamingEnabled = resilience.streaming !== false;
+        const conversationKey =
+          options?.conversationKey ?? instanceConversationKey;
+        const promptCacheKey =
+          apiMode === "responses" &&
+          options?.stableLeadBreakpoints?.length &&
+          new URL(url).origin === "https://api.openai.com"
+            ? buildModelSessionId(conversationKey)
+            : undefined;
         const continuationRoute = createHash("sha256")
-          .update(
-            JSON.stringify([
-              buildModelUrl(validatedOptions.baseUrl, apiMode),
-              validatedOptions.model,
-              apiMode,
-            ]),
-          )
+          .update(JSON.stringify([url, validatedOptions.model, apiMode]))
           .digest("hex");
         const payload = await performModelRequest({
           purpose: [
@@ -787,12 +791,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
             ...tools.map((tool) => tool.function.name),
           ].join(":"),
           onUsage: options?.onRequestUsage,
-          url: buildModelUrl(validatedOptions.baseUrl, apiMode),
+          url,
           headers: buildModelRequestHeaders({
             apiKey: validatedOptions.apiKey,
             baseUrl: validatedOptions.baseUrl,
-            conversationKey:
-              options?.conversationKey ?? instanceConversationKey,
+            conversationKey,
           }),
           body: buildModelRequestBody({
             apiMode,
@@ -864,6 +867,8 @@ export function createOpenAiCompatibleJobFinderAiClient(
               },
             })),
             parallelToolCalls: options?.parallelToolCalls,
+            promptCacheKey,
+            stableLeadBreakpoints: options?.stableLeadBreakpoints,
             ...(options?.oneShot ? { oneShot: true } : {}),
             ...(options?.stableLead ? { stableLead: options.stableLead } : {}),
             ...(options?.stableLeadEnd

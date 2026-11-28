@@ -41,6 +41,8 @@ export interface LLMClient {
       stableLead?: string
       /** A later reusable block in the same conversation opening. */
       stableLeadEnd?: string
+      /** Reusable user blocks in opening order, from least to most likely to change. */
+      stableLeadBreakpoints?: readonly string[]
     }
   ) => Promise<{
     content?: string
