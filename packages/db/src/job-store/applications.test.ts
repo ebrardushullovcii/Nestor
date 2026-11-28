@@ -1481,6 +1481,82 @@ describe("applications on the job store", () => {
     expect(jobs.getJob(second.jobId)?.stage).toBe("resume");
   });
 
+  it("lets the person settle an unconfirmed press the model then handed to them (R13 AiFi)", () => {
+    const { jobs, applications } = open();
+    const ids = add(jobs, 2);
+    applications.applyJobs({ selection: { ids } });
+    const row = applications.claimNext()!;
+    const other = applications.claimNext()!;
+    const at = new Date().toISOString();
+    const own = {
+      jobId: String(row.jobId),
+      applicationRecordId: `application_${row.id}`,
+      runId: `application_run_${row.id}`,
+      resultId: `application_${row.id}_attempt_${row.attempt}`,
+    };
+    const uncertain = SubmissionOutcomeRecordSchema.parse({
+      id: "uncertain",
+      preflightId: "preflight",
+      idempotencyKey: "send",
+      authorityEnvelopeId: "permission",
+      authorityRevision: 1,
+      ...own,
+      outcome: "outcome_uncertain",
+      attemptedAt: at,
+      verifiedAt: null,
+      evidence: [],
+      retry: { eligible: false, blockReason: "outcome_uncertain" },
+    });
+    expect(
+      applications.recordUnsettledSend(row.id, row.attempt, uncertain),
+    ).toBe(true);
+    expect(
+      applications.block(
+        row.id,
+        row.attempt,
+        "The site blocked Nestor's browser.",
+      ),
+    ).toBe(true);
+    expect(applications.getApplication(row.id)?.state).toBe("blocked");
+    // A handed-off step with no unconfirmed send is not this check's to settle.
+    expect(
+      applications.block(other.id, other.attempt, "Sign in on the open page."),
+    ).toBe(true);
+    expect(
+      applications.canResolveUncertainSend(other.id, {
+        jobId: String(other.jobId),
+        applicationRecordId: `application_${other.id}`,
+        runId: `application_run_${other.id}`,
+        resultId: `application_${other.id}_attempt_${other.attempt}`,
+      }),
+    ).toBe(false);
+    expect(applications.canResolveUncertainSend(row.id, own)).toBe(true);
+    expect(
+      applications.resolveUncertainSend(row.id, {
+        ...uncertain,
+        id: "resolution",
+        outcome: "submitted",
+        verifiedAt: at,
+        evidence: [
+          {
+            id: "person",
+            kind: "operator_confirmation",
+            observedAt: at,
+            destination: {
+              origin: "https://jobs.example.test",
+              safePath: "/apply",
+            },
+            artifactRefId: null,
+            summary: "You reported that this application was sent.",
+          },
+        ],
+        retry: { eligible: false, blockReason: "submission_confirmed" },
+      }),
+    ).toBe(true);
+    expect(applications.getApplication(row.id)?.state).toBe("submitted");
+    expect(jobs.getJob(row.jobId)?.stage).toBe("applied");
+  });
+
   it("reads remembered answers only for the questions visible on the current form", () => {
     const { jobs, applications } = open();
     applications.applyJobs({ selection: { ids: add(jobs, 2) } });
