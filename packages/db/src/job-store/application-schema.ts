@@ -21,6 +21,13 @@ const NEEDS_YOU_TABLE = `CREATE TABLE IF NOT EXISTS needs_you (
   answer TEXT
 );`;
 
+// A recheck keeps its earlier open cards until the new attempt settles them.
+const NO_WAITING_APPLICATION = `NOT EXISTS (
+  SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
+  WHERE n.task_id=needs_you.id AND n.attempt<=a.attempt
+    AND a.state IN ('queued', 'running', 'needs_you', 'failed')
+)`;
+
 /** Widen the released kind constraint, retaining row IDs for links, drafts and FTS. */
 export function migrateNeedsYouKinds(db: DatabaseSync): void {
   const table = db
@@ -74,11 +81,21 @@ CREATE TABLE IF NOT EXISTS applications (
   person_send INTEGER NOT NULL DEFAULT 0,
   -- The call ID of the last send request from the sidebar, kept so the same
   -- call never starts a second send.
-  send_request TEXT
+  send_request TEXT,
+  facts_revision INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS applications_by_updated ON applications(updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS applications_by_state ON applications(state, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS applications_queue ON applications(state, queued_at, id);
+
+-- Persist the latest edit so a restart during the quiet period keeps the work.
+CREATE TABLE IF NOT EXISTS application_facts_revision (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  revision INTEGER NOT NULL,
+  changed_at INTEGER NOT NULL
+);
+-- Existing parked applications get one pass with the facts already on disk.
+INSERT OR IGNORE INTO application_facts_revision VALUES (1, 1, 0);
 
 -- Sidebar instructions are rechecked before work and sending, never model text.
 CREATE TABLE IF NOT EXISTS application_instructions (
@@ -167,16 +184,16 @@ CREATE TABLE IF NOT EXISTS application_needs_you (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS application_needs_you_by_task
   ON application_needs_you(task_id, application_id);
-CREATE TRIGGER IF NOT EXISTS application_needs_you_delete AFTER DELETE ON application_needs_you BEGIN
+DROP TRIGGER IF EXISTS application_needs_you_delete;
+CREATE TRIGGER application_needs_you_delete AFTER DELETE ON application_needs_you BEGIN
   UPDATE needs_you SET resolved_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
-  WHERE id = OLD.task_id AND resolved_at IS NULL
-    AND NOT EXISTS (SELECT 1 FROM application_needs_you WHERE task_id = OLD.task_id);
+  WHERE id = OLD.task_id AND resolved_at IS NULL AND ${NO_WAITING_APPLICATION};
 END;
-CREATE TRIGGER IF NOT EXISTS application_needs_you_replace AFTER UPDATE OF task_id ON application_needs_you
+DROP TRIGGER IF EXISTS application_needs_you_replace;
+CREATE TRIGGER application_needs_you_replace AFTER UPDATE OF task_id ON application_needs_you
 WHEN OLD.task_id <> NEW.task_id BEGIN
   UPDATE needs_you SET resolved_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
-  WHERE id = OLD.task_id AND resolved_at IS NULL
-    AND NOT EXISTS (SELECT 1 FROM application_needs_you WHERE task_id = OLD.task_id);
+  WHERE id = OLD.task_id AND resolved_at IS NULL AND ${NO_WAITING_APPLICATION};
 END;
 
 DROP TRIGGER IF EXISTS applications_stop_tasks;
@@ -185,11 +202,7 @@ WHEN NEW.state IN ('stopped', 'submitted', 'uncertain') BEGIN
   UPDATE needs_you SET resolved_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
   WHERE resolved_at IS NULL
     AND id IN (SELECT task_id FROM application_needs_you WHERE application_id = NEW.id)
-    AND NOT EXISTS (
-      SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
-      WHERE n.task_id = needs_you.id AND n.attempt = a.attempt
-        AND a.state IN ('running', 'needs_you', 'failed')
-    );
+    AND ${NO_WAITING_APPLICATION};
 END;
 
 -- The refill ends with its run; a restart that requeues it keeps it.

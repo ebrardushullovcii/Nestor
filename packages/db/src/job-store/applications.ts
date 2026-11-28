@@ -124,6 +124,31 @@ const APPLY_FILTER_STAGES: ReadonlySet<string> = new Set([
   "resume",
 ]);
 
+type FactsRecheck = { settledBy: number; activeIds: Iterable<number> };
+
+const CLAIMABLE_APPLICATION = `(a.state = 'queued' OR (a.state='needs_you' AND (
+  a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2)
+  OR (a.posting_closed=0 AND a.disposition IS NULL AND a.submitted_at IS NULL
+    AND EXISTS (SELECT 1 FROM application_facts_revision f
+      WHERE f.id=1 AND f.revision>a.facts_revision AND f.changed_at<=?)
+    AND EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+      WHERE n.application_id=a.id AND t.kind='question' AND t.input<>'file' AND t.resolved_at IS NULL))
+))) AND ${HAS_READY_RESUME}
+AND a.id NOT IN (SELECT value FROM json_each(?))
+AND (a.error IS NOT ? OR a.id NOT IN (SELECT value FROM json_each(?)))`;
+
+function claimParameters(
+  rejectedIds: ReadonlySet<number>,
+  factsRecheck?: FactsRecheck,
+) {
+  return [
+    factsRecheck?.settledBy ?? null,
+    JSON.stringify(factsRecheck ? [...factsRecheck.activeIds] : []),
+    NESTOR_REQUEST_REJECTED_MESSAGE,
+    JSON.stringify([...rejectedIds]),
+  ] as const;
+}
+
 /** An outcome names this row's own job, application, run and attempt. */
 /**
  * A send the app could not confirm waits for proof on its row: as Uncertain,
@@ -746,7 +771,7 @@ export function createApplicationStore(store: JobStore) {
         const row =
           sql(`UPDATE applications SET state='running', attempt=attempt+1,
           person_send=1, review_refill=0, send_request=COALESCE(?, send_request),
-          error=NULL, updated_at=?
+          error=NULL, updated_at=?, facts_revision=(SELECT revision FROM application_facts_revision WHERE id=1)
           WHERE id=? AND attempt=? AND submitted_at IS NULL
           AND (? IS NULL OR COALESCE(send_request,'')<>?)
           AND (state='ready' OR (state='uncertain' AND ? IS NOT NULL))
@@ -1157,25 +1182,35 @@ export function createApplicationStore(store: JobStore) {
       };
     },
 
-    /** Claims one queued row. The attempt prevents an old callback overwriting a retry. */
+    hasClaimableWork(
+      rejectedIds: ReadonlySet<number>,
+      factsRecheck: FactsRecheck,
+    ): boolean {
+      return !!sql(`SELECT 1 FROM applications a JOIN jobs j ON j.id=a.job_id
+        WHERE ${CLAIMABLE_APPLICATION} LIMIT 1`).get(
+        ...claimParameters(rejectedIds, factsRecheck),
+      );
+    },
+
+    /** Claims one queued row or a parked form due to be read again. */
     claimNext(
       excludedIds: ReadonlySet<number> = new Set(),
+      factsRecheck?: FactsRecheck,
     ): ApplicationRow | null {
       return store.transaction(() => {
         const row = sql(
           `UPDATE applications SET state = 'running', attempt = attempt + 1, updated_at = ?,
+           facts_revision = (SELECT revision FROM application_facts_revision WHERE id=1),
            error = CASE WHEN error = ? THEN NULL ELSE error END
            WHERE id = (
              SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
-             WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND ${HAS_READY_RESUME}
-             AND (a.error IS NOT ? OR a.id NOT IN (SELECT value FROM json_each(?)))
+             WHERE ${CLAIMABLE_APPLICATION}
              ORDER BY a.queued_at, a.id LIMIT 1
            ) RETURNING id, job_id`,
         ).get(
           Date.now(),
           NESTOR_REQUEST_REJECTED_MESSAGE,
-          NESTOR_REQUEST_REJECTED_MESSAGE,
-          JSON.stringify([...excludedIds]),
+          ...claimParameters(excludedIds, factsRecheck),
         ) as { id: number; job_id: number } | undefined;
         if (!row) return null;
         const application = getApplication(row.id)!;
@@ -1303,7 +1338,7 @@ export function createApplicationStore(store: JobStore) {
 
 export type ApplicationStore = ReturnType<typeof createApplicationStore>;
 
-/** The single reusable-answer bank, also used by Needs you. Writes release matching questions. */
+/** The single reusable-answer bank, also used by Needs you. */
 export function createSavedAnswersStore(store: JobStore) {
   const memory = createNeedsYouStore(store, () =>
     store.notify({

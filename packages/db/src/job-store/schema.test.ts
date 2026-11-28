@@ -22,6 +22,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   application_attempt_progress: "application_id attempt progress_json",
   application_details:
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",
+  application_facts_revision: "id revision changed_at",
   application_instructions: "application_id conversation_id mode",
   application_needs_you: "application_id attempt field_key task_id",
   answer_approvals: "id profile_id revision value",

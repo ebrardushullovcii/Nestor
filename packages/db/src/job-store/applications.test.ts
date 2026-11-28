@@ -12,7 +12,7 @@ import type {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createApplicationStore,
@@ -23,6 +23,7 @@ import {
 } from "./applications";
 import {
   approveOriginalResumesForTests,
+  createProfileStore,
   createResumeStore,
   openJobStore,
   type JobStore,
@@ -1025,6 +1026,146 @@ function question(
     ...overrides,
   };
 }
+
+it("claims a parked fact question once per settled edit, across a restart, without claiming file or access handoffs", () => {
+  const folder = mkdtempSync(path.join(tmpdir(), "nestor-fact-recheck-"));
+  folders.push(folder);
+  const file = path.join(folder, "job-store.sqlite");
+  const first = open(file);
+  const ids = add(first.jobs, 3);
+  first.applications.applyJobs({ selection: { ids } });
+  const fact = first.applications.claimNext()!;
+  const fileWait = first.applications.claimNext()!;
+  const access = first.applications.claimNext()!;
+  first.applications.needsYou.request(question(fact.id, fact.attempt));
+  first.applications.needsYou.request(
+    question(fileWait.id, fileWait.attempt, {
+      key: "attachment",
+      prompt: "Upload a file",
+      input: "file",
+    }),
+  );
+  first.applications.needsYou.request(
+    question(access.id, access.attempt, {
+      kind: "sign_in",
+      scope: { siteOrigin: "https://jobs.example.test" },
+    }),
+  );
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  try {
+    createProfileStore(first.jobs).patch({ fields: { postalCode: "01234" } });
+    clock.mockReturnValue(now + 500);
+    createProfileStore(first.jobs).patch({
+      fields: { streetAddress: "1 Test Street" },
+    });
+  } finally {
+    clock.mockRestore();
+    first.jobs.close();
+    stores.splice(stores.indexOf(first.jobs), 1);
+  }
+  const { applications } = open(file);
+  const eligible = { settledBy: now + 500, activeIds: [] };
+  expect(
+    applications.claimNext(new Set(), { ...eligible, settledBy: now }),
+  ).toBeNull();
+  expect(applications.hasClaimableWork(new Set(), eligible)).toBe(true);
+  expect(
+    applications.claimNext(new Set(), { ...eligible, activeIds: [fact.id] }),
+  ).toBeNull();
+  const resumed = applications.claimNext(new Set(), eligible)!;
+  expect(resumed).toMatchObject({ id: fact.id, attempt: 2, mode: fact.mode });
+  applications.needsYou.retainOpenFactQuestions(resumed.id, resumed.attempt);
+  expect(applications.getApplication(fact.id)?.state).toBe("needs_you");
+  expect(applications.claimNext(new Set(), eligible)).toBeNull();
+});
+
+it("keeps a saved answer with an identical key for the model to apply, and settles only its selected application's link", () => {
+  const { jobs, applications } = open();
+  const memory = applications.needsYou;
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const first = applications.claimNext()!;
+  const second = applications.claimNext()!;
+  const request = question(first.id, first.attempt, {
+    reusePrompt: false,
+    askReason: { kind: "no_source", detail: "Profile does not answer this." },
+  });
+  const opened = memory.request(request, { reuseAnswers: false });
+  if (opened.status !== "needs_you") throw new Error("Expected an open card");
+  memory.request(
+    { ...request, applicationId: second.id },
+    { reuseAnswers: false },
+  );
+  memory.remember({
+    key: request.key,
+    prompt: request.prompt,
+    scope: request.scope,
+    input: request.input,
+    options: request.options,
+    answer: "No",
+  });
+  expect(memory.details(opened.task.id)?.applications).toHaveLength(2);
+  const eligible = { settledBy: Date.now(), activeIds: [] };
+  const resumed = applications.claimNext(new Set(), eligible)!;
+  memory.settleFactQuestions(resumed.id, resumed.attempt - 1, [opened.task.id]);
+  expect(memory.openFactQuestions(resumed.id)).toHaveLength(1);
+  memory.settleFactQuestions(resumed.id, resumed.attempt, [opened.task.id]);
+  applications.finishPreparation({
+    id: resumed.id,
+    attempt: resumed.attempt,
+    state: "ready",
+  });
+  expect(
+    memory.details(opened.task.id)?.applications.map(({ id }) => id),
+  ).toEqual([second.id]);
+  const other = applications.claimNext(new Set(), eligible)!;
+  memory.request(
+    {
+      ...request,
+      applicationId: other.id,
+      attempt: other.attempt,
+      fieldKey: "new-group-ref",
+    },
+    { reuseAnswers: false },
+  );
+  memory.retainOpenFactQuestions(other.id, other.attempt);
+  expect(memory.forApplication(other.id).map(({ id }) => id)).toEqual([
+    opened.task.id,
+  ]);
+  expect(
+    memory.openFactQuestions(other.id).map(({ fieldKey }) => fieldKey),
+  ).toEqual(["new-group-ref"]);
+  applications.finishPreparation({
+    id: other.id,
+    attempt: other.attempt,
+    state: "failed",
+  });
+  expect(applications.retryPreparation(other.id, other.attempt)).toBe(true);
+  const afterReask = applications.claimNext()!;
+  memory.settleFactQuestions(afterReask.id, afterReask.attempt, [
+    opened.task.id,
+  ]);
+  expect(memory.details(opened.task.id)).toBeNull();
+});
+
+it("keeps a shared card open when one application stops while the other is rechecking", () => {
+  const { jobs, applications } = open();
+  const memory = applications.needsYou;
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const first = applications.claimNext()!;
+  const second = applications.claimNext()!;
+  for (const row of [first, second])
+    memory.request(question(row.id, row.attempt));
+  createProfileStore(jobs).patch({ fields: { postalCode: "01234" } });
+  const eligible = { settledBy: Date.now(), activeIds: [] };
+  const rechecking = applications.claimNext(new Set(), eligible)!;
+  expect(rechecking.id).toBe(first.id);
+  expect(applications.stop(second.id)).toBe(true);
+  const [card] = memory.openFactQuestions(first.id);
+  expect(card).toBeDefined();
+  memory.settleFactQuestions(first.id, rechecking.attempt, [card!.task.id]);
+  expect(memory.list().total).toBe(0);
+});
 
 it("does not infer a boolean answer from other text on the same question", () => {
   const { jobs, applications } = open();

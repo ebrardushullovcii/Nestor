@@ -2,6 +2,7 @@ import {
   ApplyPersonRequestSchema,
   ApplyFinishSendOutcomeSchema,
 } from "@nestor/contracts";
+import { z } from "zod";
 import type { ApplyProposal } from "./types";
 import { VISUAL_PAGE_TOOL_DEFINITIONS } from "../visual-page-tools";
 import { KEYBOARD_TOOL_DEFINITIONS } from "../keyboard-tools";
@@ -11,6 +12,7 @@ const STORED_FACT_PARAMETER = {
   description:
     "Optional provenance: the id from the stored-fact catalog that informed this answer. You may format, calculate, combine and write answers without an exact source binding.",
 };
+const SettledQuestionIdsSchema = z.array(z.number().int().positive());
 
 /**
  * What the apply agent can do.
@@ -345,6 +347,12 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
               description:
                 "true when the person has to do something on the site before this can go further. Needs at least one forPerson item.",
             },
+            settledQuestionIds: {
+              type: "array",
+              items: { type: "integer", minimum: 1 },
+              description:
+                "IDs from pendingQuestions whose facts you handled or whose cards are no longer needed on this application. Leave cards open when you have not established that they can be closed.",
+            },
             forPerson: {
               type: "array",
               items: {
@@ -588,6 +596,10 @@ export function parseApplyProposal(
           error: "duplicateOfApplication must be an application id.",
         };
       const reason = asString(args.reason) ?? "Finished without saying why.";
+      const settled = SettledQuestionIdsSchema.optional().safeParse(
+        args.settledQuestionIds,
+      );
+      if (!settled.success) return { ok: false, error: settled.error.message };
       const rawItems = Array.isArray(args.forPerson) ? args.forPerson : [];
       const requests = rawItems.map((item) =>
         ApplyPersonRequestSchema.safeParse(item),
@@ -612,6 +624,7 @@ export function parseApplyProposal(
           // A named item is something waiting on the person.
           needsPerson: args.needsPerson === true || forPerson.length > 0,
           forPerson,
+          ...(settled.data ? { settledQuestionIds: settled.data } : {}),
         },
       };
     }

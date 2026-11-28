@@ -28,6 +28,7 @@ import { createApplicationStore } from "@nestor/db/applications";
 import {
   createJobSitesStore,
   createActivityStore,
+  createProfileStore,
   createResumeStore,
   createSendGuards,
   openJobStore,
@@ -73,6 +74,9 @@ const preparation = vi.hoisted(() => ({
   givenAnswers: [] as NonNullable<
     ApplicationPreparation.AgentApplicationPreparationInput["reusableAnswers"]
   >[],
+  pendingQuestions:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["pendingQuestions"],
+  settledQuestionIds: [] as number[],
   /** The file field the run saw accepted on the form, if any. */
   attachedField: "Resume" as string | null,
   finalUrl: null as string | null,
@@ -100,6 +104,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       preparation.recordSendOutcome = input.recordSendOutcome;
       preparation.submitApplication = input.submitApplication;
       preparation.givenAnswers.push(input.reusableAnswers ?? []);
+      preparation.pendingQuestions = input.pendingQuestions;
       preparation.replays.push(input.replay ?? null);
       preparation.activities.push(input.earlierActivity ?? []);
       preparation.previousProgress = input.earlierAttemptProgress;
@@ -133,6 +138,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
               }
             : {}),
           reason: "Ready",
+          settledQuestionIds: preparation.settledQuestionIds,
           steps: 1,
           finalUrl:
             preparation.finalUrl ?? input.executionInput.job.canonicalUrl,
@@ -681,6 +687,7 @@ afterEach(async () => {
   preparation.notReadyToSend = false;
   preparation.technicalFailure = false;
   preparation.answers = [];
+  preparation.settledQuestionIds = [];
   preparation.attachedField = "Resume";
   vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
@@ -2379,6 +2386,72 @@ it("brings back a form waiting on a question after a restart, still waiting with
   ]);
   expect(f.applications.getApplication(row.id)?.mode).toBe(row.mode);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("coalesces profile edits and keeps an unvisited card available after the model settles another", async () => {
+  const f = await setup(1);
+  const profiles = createProfileStore(f.jobs);
+  const asks = (fields: string[]) =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: fields.map((field) => ({
+        id: field,
+        prompt: field,
+        kind: "other",
+        answerControlType: "text",
+        detectedAt: new Date().toISOString(),
+      })),
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(asks(["Postal code", "Contact time"]));
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(2));
+  const [postal, contact] = f.applications.needsYou.list().rows;
+  const row = f.applications.listApplications().rows[0]!;
+  const firstEdit = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(firstEdit);
+  try {
+    profiles.patch({ fields: { streetAddress: "1 Test Street" } });
+    clock.mockReturnValue(firstEdit + 1_000);
+    profiles.patch({ fields: { postalCode: "01234" } });
+    f.seed.profile.postalCode = "01234";
+    clock.mockReturnValue(firstEdit + 10_999);
+    f.service.wake();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
+    preparation.settledQuestionIds = [postal!.id];
+    clock.mockReturnValue(firstEdit + 11_000);
+    f.service.wake();
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    expect(f.execute.mock.calls[1]![1].profile.postalCode).toBe("01234");
+    expect(preparation.pendingQuestions?.map(({ id }) => id)).toEqual([
+      postal!.id,
+      contact!.id,
+    ]);
+    f.releases.shift()!(asks(["Preferred language"]));
+    await vi.waitFor(() =>
+      expect(
+        f.applications.needsYou.list().rows.map(({ prompt }) => prompt),
+      ).toEqual(["Contact time", "Preferred language"]),
+    );
+    expect(
+      f.applications.needsYou.details(contact!.id)?.applications,
+    ).toMatchObject([{ id: row.id }]);
+    clock.mockReturnValue(firstEdit + 60_000);
+    f.service.wake();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(f.execute).toHaveBeenCalledTimes(2);
+    expect(f.applications.getApplication(row.id)).toMatchObject({
+      attempt: 2,
+      state: "needs_you",
+      mode: row.mode,
+    });
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it("a refill of a closed form gets what the attempt before left, to bring it back without the model", async () => {

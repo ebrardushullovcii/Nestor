@@ -15,6 +15,7 @@ export function applicationResumeFactsMessage(
     | "earlierAttachments"
     | "initialPickerAttempts"
     | "earlierAttemptProgress"
+    | "pendingQuestions"
   >,
   opening: string,
 ): string {
@@ -24,10 +25,18 @@ export function applicationResumeFactsMessage(
     earlierAttachments: input.earlierAttachments,
     pickerAttempts: input.initialPickerAttempts,
     earlierAttemptProgress: input.earlierAttemptProgress,
+    pendingQuestions: input.pendingQuestions?.length
+      ? input.pendingQuestions
+      : undefined,
   });
   return [
     "Earlier application state and actions (history only; choose any restoration yourself). An earlierActivity detail with sameAs uses the exact text at that JSON Pointer in this object:",
     history,
+    ...(input.pendingQuestions?.length
+      ? [
+          "Revisit pendingQuestions using the current form and the latest profile and saved answers. In finish, return settledQuestionIds for earlier cards the person no longer needs to answer, including cards replaced by a new handoff. Keep still-needed or unvisited questions open. Use forPerson for the unresolved questions you see on the current form.",
+        ]
+      : []),
     ...(input.earlierAttemptProgress?.length || input.replay?.formUrl
       ? [
           "Earlier attempts may have left an unsent draft on the site, even if the browser now opens the posting. The earlier page, step, filled fields and uploaded files are historical observations. Use the current page and any draft the site offers (such as in a candidate home or via Continue application) to decide where to resume. Check what already exists before adding rows or uploading files again.",
