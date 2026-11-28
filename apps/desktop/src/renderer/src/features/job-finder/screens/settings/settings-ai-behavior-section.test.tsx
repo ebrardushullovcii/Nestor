@@ -230,6 +230,19 @@ describe("SettingsAiBehaviorSection", () => {
     });
   });
 
+  it("says the agent picks among the signed-in Google accounts (ADR 0079)", () => {
+    renderSection(vi.fn(() => Promise.resolve(true)));
+
+    const group = within(screen.getByTestId("settings-ai-browser"));
+    // No rule picks the Google account by the Profile email any more.
+    expect(group.queryByText(/matches your Profile email/)).toBeNull();
+    expect(
+      group.getByText(
+        /sees which Google accounts are signed in here and picks the one that fits the site/,
+      ),
+    ).toBeTruthy();
+  });
+
   it("shows saved browser permissions as they are", () => {
     renderSection(
       vi.fn(() => Promise.resolve(true)),

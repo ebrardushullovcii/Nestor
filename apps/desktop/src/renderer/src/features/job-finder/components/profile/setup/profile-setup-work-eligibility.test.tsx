@@ -54,7 +54,7 @@ const preferences = JobSearchPreferencesSchema.parse({
 
 let latestProfileValues: ProfileEditorValues | null = null;
 
-function Harness() {
+function Harness(props: { suggestedWorkCountry?: string } = {}) {
   const profileForm = useForm<ProfileEditorValues>({
     defaultValues: createProfileEditorValues(profile),
   });
@@ -70,7 +70,7 @@ function Harness() {
       preferencesForm={preferencesForm}
       profileForm={profileForm}
       renderFooter={() => null}
-      suggestedWorkCountry="Germany"
+      suggestedWorkCountry={props.suggestedWorkCountry ?? "Germany"}
     />
   );
 }
@@ -149,6 +149,29 @@ describe("Job targets asks the two questions every application form asks", () =>
     expect(latestProfileValues?.eligibility.workAuthorizationInOwnWords).toBe(
       "Remote from Germany I need no sponsorship; to work in the US I would.",
     );
+  });
+
+  it("names the country in full when the resume abbreviated it (W131)", () => {
+    // "London, UK" left "UK" in the profile's country; the answer read
+    // "I'm allowed to work in UK" and would have saved "UK".
+    render(<Harness suggestedWorkCountry="UK" />);
+
+    expect(
+      screen.queryByRole("button", { name: "I'm allowed to work in UK" }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "I'm allowed to work in United Kingdom",
+      }),
+    );
+    expect(latestProfileValues?.eligibility.authorizedWorkCountries).toBe(
+      "United Kingdom",
+    );
+    expect(
+      screen
+        .getByLabelText(/Anything else about where and how you can work\?/)
+        .getAttribute("placeholder"),
+    ).toContain("Remote from United Kingdom I need no sponsorship");
   });
 
   it("reads several countries from one entry", () => {

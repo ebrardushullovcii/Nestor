@@ -1,3 +1,5 @@
+import { fullCountryName } from "../../lib/country-name";
+
 /**
  * Plain-language labels shared by guided setup and the full Profile editor.
  *
@@ -58,6 +60,8 @@ export const PROFILE_WORK_CONSTRAINT_COPY = {
 export function workAuthorizationInOwnWordsExample(
   homeCountry: string | null | undefined,
 ): string {
-  const home = homeCountry?.trim() || "where I live";
+  const home = homeCountry?.trim()
+    ? fullCountryName(homeCountry)
+    : "where I live";
   return `Example: Remote from ${home} I need no sponsorship for any employer. To work in another country I would need sponsorship, and I'm open to it.`;
 }

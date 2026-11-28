@@ -348,6 +348,13 @@ export function ProfileSetupPathCard(props: {
    * after the draft already filled the flagged field.
    */
   reviewItems?: ProfileSetupState["reviewItems"];
+  /**
+   * Steps whose section of the last resume read never finished. They say
+   * so instead of "Ready to review" until the person takes the step over.
+   */
+  unreadImportSteps?: readonly ProfileSetupStep[];
+  /** What an unread step says: not read yet, or what the read waits on. */
+  unreadImportLabel?: string;
 }) {
   // One compact horizontal stepper row: step name plus a small state badge.
   // Every step stays a real button (clickable, keyboard reachable) and the
@@ -389,7 +396,16 @@ export function ProfileSetupPathCard(props: {
             props.profileSetupState.status !== "completed" &&
             ["essentials", "background"].includes(step.id) &&
             !props.profileSetupState.reviewedSteps?.includes(step.id);
+          // The read never reached this step's section, so it holds only
+          // what the built-in reader found, or nothing. A step the person
+          // already saved, or is editing, is theirs again.
+          const awaitingUnreadImport =
+            (props.unreadImportSteps?.includes(step.id) ?? false) &&
+            props.profileSetupState.status !== "completed" &&
+            !hasUnsavedChanges &&
+            !props.profileSetupState.reviewedSteps?.includes(step.id);
           const isComplete =
+            !awaitingUnreadImport &&
             !awaitingImportedReview &&
             !hasUnsavedChanges &&
             ((props.profileSetupState.reviewedSteps?.includes(step.id) &&
@@ -409,6 +425,8 @@ export function ProfileSetupPathCard(props: {
           const isSkippedImport =
             step.id === "import" &&
             !props.hasImportedResume &&
+            // A read that failed is not a skipped import: a file was chosen.
+            !(props.unreadImportSteps?.includes("import") ?? false) &&
             !isActive &&
             (props.profileSetupState.status === "completed" ||
               profileSetupStepDefinitions.findIndex(
@@ -416,40 +434,45 @@ export function ProfileSetupPathCard(props: {
               ) > index);
           const stateBadge = isSkippedImport
             ? { label: "Skipped", variant: "outline" as const }
-            : awaitingImportedReview &&
-                !hasUnsavedChanges &&
-                requiredSetupItemCount === 0
-              ? { label: "Ready to review", variant: "outline" as const }
-              : hasUnsavedChanges
-                ? { label: "Unsaved changes", variant: "outline" as const }
-                : requiredSetupItemCount > 0
-                  ? {
-                      label: formatProfileSetupRequiredItemCount(
-                        requiredSetupItemCount,
-                      ),
-                      variant: "status" as const,
-                    }
-                  : importedReviewCount > 0
+            : awaitingUnreadImport
+              ? {
+                  label: props.unreadImportLabel ?? "Not read yet",
+                  variant: "outline" as const,
+                }
+              : awaitingImportedReview &&
+                  !hasUnsavedChanges &&
+                  requiredSetupItemCount === 0
+                ? { label: "Ready to review", variant: "outline" as const }
+                : hasUnsavedChanges
+                  ? { label: "Unsaved changes", variant: "outline" as const }
+                  : requiredSetupItemCount > 0
                     ? {
-                        // F30: imported suggestions do not gate finishing setup,
-                        // so the chip must not use the attention tone or the words
-                        // "to review" - that is what let the stepper say
-                        // "Basics 2 TO REVIEW" in the same viewport as
-                        // "Everything required is in. You can finish setup."
-                        label: `${importedReviewCount} suggested`,
-                        variant: "outline" as const,
+                        label: formatProfileSetupRequiredItemCount(
+                          requiredSetupItemCount,
+                        ),
+                        variant: "status" as const,
                       }
-                    : optionalReviewCount > 0
+                    : importedReviewCount > 0
                       ? {
-                          label: `${optionalReviewCount} optional`,
+                          // F30: imported suggestions do not gate finishing setup,
+                          // so the chip must not use the attention tone or the words
+                          // "to review" - that is what let the stepper say
+                          // "Basics 2 TO REVIEW" in the same viewport as
+                          // "Everything required is in. You can finish setup."
+                          label: `${importedReviewCount} suggested`,
                           variant: "outline" as const,
                         }
-                      : // A step nothing depends on must keep saying so even when
-                        // it has no pending suggestions left; otherwise it reads
-                        // as mandatory in the stepper.
-                        step.optional && !isComplete
-                        ? { label: "Optional", variant: "outline" as const }
-                        : null;
+                      : optionalReviewCount > 0
+                        ? {
+                            label: `${optionalReviewCount} optional`,
+                            variant: "outline" as const,
+                          }
+                        : // A step nothing depends on must keep saying so even when
+                          // it has no pending suggestions left; otherwise it reads
+                          // as mandatory in the stepper.
+                          step.optional && !isComplete
+                          ? { label: "Optional", variant: "outline" as const }
+                          : null;
 
           return (
             <li className="min-w-0" key={step.id}>

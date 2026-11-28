@@ -569,7 +569,9 @@ function firstRunPath(
     {
       id: "apply",
       text: "Apply",
-      detail: "Apply fills in the form; you send it.",
+      // Fill in for me is the default; Send for me is a Settings choice.
+      detail:
+        "Apply fills in the form, and sends it only if you let it in Settings.",
       done: false,
     },
   ];

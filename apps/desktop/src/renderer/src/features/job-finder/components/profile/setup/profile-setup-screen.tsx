@@ -59,6 +59,11 @@ import {
   isInterruptedResumeImport,
 } from "./profile-setup-import-notice";
 import { formatProfileSetupStepLabel } from "./profile-setup-steps";
+import {
+  formatUnreadImportStepLabel,
+  getUnreadImportSetupSteps,
+} from "./profile-setup-import-sections";
+import { useAiAccountRefusals } from "@renderer/features/needs-you/use-ai-account-needs";
 
 // Guided setup is always one column: the step editor owns the full width and
 // the review queue renders full-width beneath it. A second column used to
@@ -336,6 +341,14 @@ export function ProfileSetupScreen(props: {
     pendingCurrentStepReviewItems,
   );
   const hasImportedResume = profile.baseResume.extractionStatus === "ready";
+  // A section the last read never reached is said as such on its step,
+  // with what the read waits on when an AI account is refusing calls.
+  const aiAccountRefusal = useAiAccountRefusals()[0] ?? null;
+  const unreadImportSteps = isImportResumePending
+    ? []
+    : getUnreadImportSetupSteps(latestResumeImportRun, {
+        aiAccountRefusing: aiAccountRefusal !== null,
+      });
   const isPristineSetup =
     profileSetupState.status === "not_started" && !hasImportedResume;
   const profileSetupLayoutClassNames = getProfileSetupLayoutClassNames({
@@ -568,6 +581,8 @@ export function ProfileSetupScreen(props: {
               ]}
               readiness={pathReadiness}
               reviewItems={draftAwareReviewItems}
+              unreadImportLabel={formatUnreadImportStepLabel(aiAccountRefusal)}
+              unreadImportSteps={unreadImportSteps}
             />
           )}
 

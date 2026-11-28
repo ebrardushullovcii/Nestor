@@ -246,9 +246,13 @@ describe("Home", () => {
     const week = screen.getByRole("group", { name: "This week" });
     expect(week.textContent).not.toMatch(/(^|[^\d])0%?(?!\d)/);
     expect(week.textContent?.match(/–/g)).toHaveLength(4);
-    expect(
-      screen.getByRole("region", { name: "Your first application" }),
-    ).toBeTruthy();
+    const path = screen.getByRole("region", { name: "Your first application" });
+    // Send for me is a Settings choice, so the path never says the person
+    // always presses Send themselves.
+    expect(path.textContent).toContain(
+      "Apply fills in the form, and sends it only if you let it in Settings.",
+    );
+    expect(path.textContent).not.toContain("you send it");
   });
 
   it("offers Try again when the numbers cannot be read", async () => {
