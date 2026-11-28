@@ -19,6 +19,7 @@ import {
 import { createSearchResultCache } from "./search-result-cache";
 import { createJobSearchPrompts } from "./job-search-prompts";
 import { describeSearchGoal } from "./move-reviewer";
+import { workEligibilityForModel } from "./listing-fit-person";
 
 test.each([
   {},
@@ -3306,7 +3307,10 @@ test("browser collection is told where the person lives, may work and would move
       currentCity: "Prishtina",
       currentRegion: null,
       currentCountry: "Kosovo",
-      workEligibility: person("x", inventoryOnly).userProfile.workEligibility,
+      // An empty own-words rule is left out of the shared prefix.
+      workEligibility: workEligibilityForModel(
+        person("x", inventoryOnly).userProfile.workEligibility,
+      ),
     });
     expect(first.system).toContain(facts);
     expect(facts).toContain(

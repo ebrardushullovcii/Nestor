@@ -350,6 +350,7 @@ function createTestProfile() {
       noticePeriodDays: null,
       availableStartDate: null,
       securityClearance: null,
+      workAuthorizationInOwnWords: null,
     },
     professionalSummary: {
       shortValueProposition: null,
@@ -1535,6 +1536,7 @@ describe("playwright browser runtime", () => {
             noticePeriodDays: null,
             availableStartDate: null,
             securityClearance: null,
+            workAuthorizationInOwnWords: null,
           },
           professionalSummary: {
             shortValueProposition: null,

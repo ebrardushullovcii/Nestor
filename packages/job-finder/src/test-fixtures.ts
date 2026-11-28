@@ -214,6 +214,7 @@ export function createSeed(): TestSeed {
         noticePeriodDays: null,
         availableStartDate: null,
         securityClearance: null,
+        workAuthorizationInOwnWords: null,
       },
       professionalSummary: {
         shortValueProposition: null,

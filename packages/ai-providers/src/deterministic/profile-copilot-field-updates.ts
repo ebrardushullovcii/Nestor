@@ -87,7 +87,10 @@ export const specialistOwnedReplacementFields = {
 // Structured limits and pay intent are model-owned. The deterministic
 // fallback must not guess them from wording or add keyword rules.
 const modelOwnedPreferenceFields = {
-  replace_work_eligibility_fields: ["limitedWorkPermissions"],
+  replace_work_eligibility_fields: [
+    "limitedWorkPermissions",
+    "workAuthorizationInOwnWords",
+  ],
   replace_search_preferences_fields: [
     "shiftPreference",
     "weeklyHours",

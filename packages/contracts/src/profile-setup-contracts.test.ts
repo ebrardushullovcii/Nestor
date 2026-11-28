@@ -259,6 +259,7 @@ describe("contracts profile setup schemas", () => {
           noticePeriodDays: null,
           availableStartDate: null,
           securityClearance: null,
+          workAuthorizationInOwnWords: null,
         },
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
@@ -431,6 +432,7 @@ describe("contracts profile setup schemas", () => {
           noticePeriodDays: null,
           availableStartDate: null,
           securityClearance: null,
+          workAuthorizationInOwnWords: null,
         },
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
@@ -579,6 +581,7 @@ describe("contracts profile setup schemas", () => {
           noticePeriodDays: null,
           availableStartDate: null,
           securityClearance: null,
+          workAuthorizationInOwnWords: null,
         },
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
@@ -731,6 +734,7 @@ describe("contracts profile setup schemas", () => {
           noticePeriodDays: null,
           availableStartDate: null,
           securityClearance: null,
+          workAuthorizationInOwnWords: null,
         },
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
@@ -852,6 +856,7 @@ describe("contracts profile setup schemas", () => {
           noticePeriodDays: null,
           availableStartDate: null,
           securityClearance: null,
+          workAuthorizationInOwnWords: null,
         },
         professionalSummary: emptyProfessionalSummary,
         narrative: emptyNarrative,
@@ -1160,6 +1165,20 @@ describe("contracts profile setup schemas", () => {
         requiresVisaSponsorship: false,
       }),
     ).toBe(true);
+    // A rule in the person's own words says where they can work as well.
+    expect(
+      withAnswers({
+        workAuthorizationInOwnWords:
+          "Remote from Kosovo I need no sponsorship; in the UK I would.",
+        requiresVisaSponsorship: false,
+      }),
+    ).toBe(true);
+    expect(
+      withAnswers({
+        workAuthorizationInOwnWords:
+          "Remote from Kosovo I need no sponsorship; in the UK I would.",
+      }),
+    ).toBe(false);
     // "Needs sponsorship: yes" is an answer too.
     expect(
       withAnswers({

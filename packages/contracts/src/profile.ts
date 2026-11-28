@@ -148,6 +148,14 @@ export const CandidateWorkEligibilitySchema = z.object({
   noticePeriodDays: z.number().int().min(0).nullable().default(null),
   availableStartDate: NonEmptyStringSchema.nullable().default(null),
   securityClearance: NonEmptyStringSchema.nullable().default(null),
+  /**
+   * The person's own statement of where and how they may work, for rules the
+   * country list and the sponsorship answer cannot hold, e.g. "Remote from
+   * Kosovo I need no sponsorship anywhere; to work in the UK or the EU I
+   * would need sponsorship, which I'm open to." Models read it as the
+   * country-specific condition for every country or arrangement it names.
+   */
+  workAuthorizationInOwnWords: NonEmptyStringSchema.nullable().default(null),
 });
 export type CandidateWorkEligibility = z.infer<
   typeof CandidateWorkEligibilitySchema

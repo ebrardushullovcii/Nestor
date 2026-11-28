@@ -12,7 +12,10 @@ import {
   ProfileTextarea,
   profileSelectTriggerClassName,
 } from "./profile-form-primitives";
-import { PROFILE_WORK_CONSTRAINT_COPY } from "./profile-work-constraints-copy";
+import {
+  PROFILE_WORK_CONSTRAINT_COPY,
+  workAuthorizationInOwnWordsExample,
+} from "./profile-work-constraints-copy";
 import { ProfileSectionHeader } from "./profile-section-header";
 import { PreferredApplicationLinksField } from "./preferred-application-links-field";
 import type { ProfileBackgroundArrays } from "./profile-field-array-types";
@@ -83,6 +86,8 @@ export function ProfilePreferencesEligibilitySection(props: {
   const preferredRelocationRegionsId =
     "profile-setup-field-eligibility-preferred-relocation-regions";
   const securityClearanceId = useId();
+  const ownWordsId =
+    "profile-setup-field-eligibility-work-authorization-in-own-words";
   const noticePeriodId = useId();
   const availableStartDateId =
     "profile-setup-field-eligibility-available-start-date";
@@ -145,6 +150,30 @@ export function ProfilePreferencesEligibilitySection(props: {
             label={PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}
             name="eligibility.remoteEligible"
           />
+          <div className="grid min-w-0 content-start gap-(--gap-field) h-full">
+            <FieldLabel htmlFor={ownWordsId}>
+              {PROFILE_WORK_CONSTRAINT_COPY.workAuthorizationInOwnWords.label}
+            </FieldLabel>
+            <ProfileTextarea
+              aria-describedby={`${ownWordsId}-help`}
+              className="min-h-(--textarea-tall) max-h-(--textarea-tall)"
+              id={ownWordsId}
+              placeholder={workAuthorizationInOwnWordsExample(
+                getValues("identity.currentCountry") || null,
+              )}
+              rows={4}
+              {...register("eligibility.workAuthorizationInOwnWords")}
+            />
+            <p
+              className="text-xs leading-5 text-foreground-muted"
+              id={`${ownWordsId}-help`}
+            >
+              {
+                PROFILE_WORK_CONSTRAINT_COPY.workAuthorizationInOwnWords
+                  .description
+              }
+            </p>
+          </div>
         </div>
         <div className="grid gap-3">
           <h4 className="text-sm font-medium">Limited work permission</h4>

@@ -49,7 +49,10 @@ import {
   parseProfileLocationDraft,
   ProfileListEditor,
 } from "../profile-list-editor";
-import { PROFILE_WORK_CONSTRAINT_COPY } from "../profile-work-constraints-copy";
+import {
+  PROFILE_WORK_CONSTRAINT_COPY,
+  workAuthorizationInOwnWordsExample,
+} from "../profile-work-constraints-copy";
 import { ResumeImportProgress } from "../resume-import-progress";
 import { SetupAgentPermissions } from "./setup-agent-permissions";
 
@@ -497,6 +500,13 @@ const SPONSORSHIP_OPTIONS = [
   { value: "yes", label: "Yes" },
 ] as const;
 
+// Optional, so "Not sure" stays a choice the person can go back to.
+const REMOTE_ELIGIBLE_OPTIONS = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+  { value: "", label: "Not sure" },
+] as const;
+
 /**
  * The two answers almost every application form asks. They used to sit among
  * six optional "facts" below the fold, so setup finished without them and the
@@ -504,6 +514,11 @@ const SPONSORSHIP_OPTIONS = [
  * the person to Profile › Preferences to answer what setup never asked.
  * Setup now asks them plainly and cannot finish without them; each takes one
  * press when the resume did not already say.
+ *
+ * Remote work from home and a rule in the person's own words sit beside them
+ * (R10): a list and one Yes/No could not hold "remote from Kosovo I need no
+ * sponsorship; to work in the UK I would", and a sent application claimed
+ * UK work authorization.
  */
 export function SetupWorkEligibilityQuestions(props: {
   profileForm: UseFormReturn<ProfileEditorValues>;
@@ -512,11 +527,18 @@ export function SetupWorkEligibilityQuestions(props: {
 }) {
   const headingId = useId();
   const sponsorshipLabelId = useId();
+  const remoteEligibleLabelId = useId();
+  const ownWordsId =
+    "profile-setup-field-eligibility-work-authorization-in-own-words";
   const countries = parseListInput(
     props.profileForm.watch("eligibility.authorizedWorkCountries"),
   );
   const sponsorship =
     props.profileForm.watch("eligibility.requiresVisaSponsorship") ?? "";
+  const remoteEligible =
+    props.profileForm.watch("eligibility.remoteEligible") ?? "";
+  const ownWords =
+    props.profileForm.watch("eligibility.workAuthorizationInOwnWords") ?? "";
   const limitedPermissions =
     props.profileForm.watch("eligibility.limitedWorkPermissions") ?? [];
   const setCountries = (values: readonly string[]) =>
@@ -528,6 +550,7 @@ export function SetupWorkEligibilityQuestions(props: {
   const suggestedCountry = props.suggestedCountry?.trim() || null;
   const answered =
     (countries.length > 0 ||
+      ownWords.trim() !== "" ||
       limitedPermissions.some(
         (permission) =>
           permission.country.trim() && permission.conditions.trim(),
@@ -546,7 +569,7 @@ export function SetupWorkEligibilityQuestions(props: {
           className="flex items-center gap-2 text-sm font-semibold text-foreground"
           id={headingId}
         >
-          Two answers every application asks
+          Where you can work
           <span
             className={cn(
               "rounded-full border px-2 py-0.5 text-(length:--text-small) font-medium",
@@ -559,8 +582,9 @@ export function SetupWorkEligibilityQuestions(props: {
           </span>
         </h3>
         <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
-          Job Finder checks each job against these countries and any limited
-          permissions.
+          Almost every application asks. Job Finder answers from these and
+          checks each job against them; your own words win for the countries
+          they name.
         </p>
       </div>
       <div className="grid gap-2">
@@ -631,6 +655,59 @@ export function SetupWorkEligibilityQuestions(props: {
           value={sponsorship as "" | "yes" | "no"}
         />
       </div>
+      <div className="grid gap-2">
+        <p
+          className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground"
+          id={remoteEligibleLabelId}
+        >
+          {PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}{" "}
+          <span className="font-normal text-foreground-soft">(optional)</span>
+        </p>
+        <SegmentedControl
+          aria-labelledby={remoteEligibleLabelId}
+          data-profile-setup-remote-eligible
+          // A review item about remote work scrolls here.
+          id="profile-setup-field-eligibility-remote-eligible"
+          label={PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}
+          onValueChange={(value) =>
+            props.profileForm.setValue(
+              "eligibility.remoteEligible",
+              value as BooleanSelectValue,
+              { shouldDirty: true, shouldTouch: true, shouldValidate: true },
+            )
+          }
+          options={REMOTE_ELIGIBLE_OPTIONS}
+          size="field"
+          value={remoteEligible as "" | "yes" | "no"}
+        />
+        <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
+          {PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.description}
+        </p>
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor={ownWordsId}>
+          {PROFILE_WORK_CONSTRAINT_COPY.workAuthorizationInOwnWords.label}
+          <span className="font-normal text-foreground-soft">(optional)</span>
+        </FieldLabel>
+        <ProfileTextarea
+          aria-describedby={`${ownWordsId}-help`}
+          data-profile-setup-work-rule
+          id={ownWordsId}
+          placeholder={workAuthorizationInOwnWordsExample(
+            props.suggestedCountry,
+          )}
+          rows={3}
+          {...props.profileForm.register(
+            "eligibility.workAuthorizationInOwnWords",
+          )}
+        />
+        <p
+          className="max-w-2xl text-sm leading-6 text-foreground-soft"
+          id={`${ownWordsId}-help`}
+        >
+          {PROFILE_WORK_CONSTRAINT_COPY.workAuthorizationInOwnWords.description}
+        </p>
+      </div>
     </section>
   );
 }
@@ -656,7 +733,6 @@ export function ProfileSetupTargetingStep(props: {
   const locationsId = "profile-setup-field-search-preferences-locations";
   const workModesGroupId = "profile-setup-field-search-preferences-work-modes";
   const workModesGuidanceId = `${workModesGroupId}-guidance`;
-  const remoteEligibleId = "profile-setup-field-eligibility-remote-eligible";
   const willingToRelocateId =
     "profile-setup-field-eligibility-willing-to-relocate";
   const willingToTravelId = "profile-setup-field-eligibility-willing-to-travel";
@@ -781,8 +857,8 @@ export function ProfileSetupTargetingStep(props: {
                 className="text-sm leading-6 text-foreground-muted"
                 id={workModesGuidanceId}
               >
-                Remote is what you want; whether you can work remotely is under
-                More about you.
+                Remote is what you want; whether you may legally work remotely
+                is asked under Where you can work.
               </p>
             ) : null}
           </fieldset>
@@ -828,8 +904,7 @@ export function ProfileSetupTargetingStep(props: {
                 className="text-sm font-normal leading-6 text-foreground-soft"
                 data-profile-setup-work-details-intro
               >
-                Relocation, remote work and travel. Leave Not set if you
-                don&apos;t know.
+                Relocation and travel. Leave Not set if you don&apos;t know.
               </span>
             </span>
           }
@@ -851,15 +926,6 @@ export function ProfileSetupTargetingStep(props: {
                 )}
               />
             </div>
-            <SetupBooleanField
-              control={props.profileForm.control}
-              description={
-                PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.description
-              }
-              id={remoteEligibleId}
-              label={PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}
-              name="eligibility.remoteEligible"
-            />
             <SetupBooleanField
               control={props.profileForm.control}
               description={

@@ -28,6 +28,14 @@ export const PROFILE_WORK_CONSTRAINT_COPY = {
       "Whether the law lets you do a remote job from the country you live in, for an employer elsewhere. Not whether you prefer remote work.",
     label: "Can you legally work remotely from where you live?",
   },
+  workAuthorizationInOwnWords: {
+    // R10: a country list and one Yes/No could not say "remote from Kosovo I
+    // need no sponsorship; to work in the UK I would", so a sent application
+    // claimed UK work authorization and another asked about US sponsorship.
+    description:
+      "In your own words: remote work from where you live, working in another country, and when you would need sponsorship. Applications and job matching use this for each country it names.",
+    label: "Anything else about where and how you can work?",
+  },
   willingToRelocate: {
     description: "Whether you would move for a role.",
     label: "Would you relocate?",
@@ -45,3 +53,11 @@ export const PROFILE_WORK_CONSTRAINT_COPY = {
     label: "Where you want to work",
   },
 } as const;
+
+/** An example in the person's own situation, from the country they live in. */
+export function workAuthorizationInOwnWordsExample(
+  homeCountry: string | null | undefined,
+): string {
+  const home = homeCountry?.trim() || "where I live";
+  return `Example: Remote from ${home} I need no sponsorship for any employer. To work in another country I would need sponsorship, and I'm open to it.`;
+}

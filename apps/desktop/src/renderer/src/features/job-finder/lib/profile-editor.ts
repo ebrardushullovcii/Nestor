@@ -234,6 +234,8 @@ export function createProfileEditorValues(
         profile.workEligibility.willingToRelocate,
       ),
       willingToTravel: booleanToSelect(profile.workEligibility.willingToTravel),
+      workAuthorizationInOwnWords:
+        profile.workEligibility.workAuthorizationInOwnWords ?? "",
     },
     applicationIdentity: {
       preferredEmail: profile.applicationIdentity.preferredEmail ?? "",
@@ -646,6 +648,8 @@ export function buildProfilePayload(
       noticePeriodDays: parsedNoticePeriodDays,
       availableStartDate: values.eligibility.availableStartDate.trim() || null,
       securityClearance: values.eligibility.securityClearance.trim() || null,
+      workAuthorizationInOwnWords:
+        values.eligibility.workAuthorizationInOwnWords.trim() || null,
     },
     applicationIdentity: {
       preferredEmail: values.applicationIdentity.preferredEmail.trim() || null,

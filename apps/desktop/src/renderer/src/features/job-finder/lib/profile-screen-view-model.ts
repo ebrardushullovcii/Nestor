@@ -258,6 +258,7 @@ function buildProfileSectionProgress(
       input.eligibilityValues?.requiresVisaSponsorship,
       input.eligibilityValues?.remoteEligible,
       input.eligibilityValues?.securityClearance,
+      input.eligibilityValues?.workAuthorizationInOwnWords,
       input.eligibilityValues?.willingToRelocate,
       input.eligibilityValues?.willingToTravel,
       input.eligibilityValues?.preferredRelocationRegions,

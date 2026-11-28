@@ -317,6 +317,33 @@ describe("batch fit judging", () => {
       "ambiguous month without a year",
     );
   });
+  test("sends the person's own work rule as the country-specific condition, and nothing when empty (R10)", () => {
+    const profile = createProfile();
+    const empty = buildJobFitJudgingPayload({
+      assessmentDate: "2026-10-04",
+      profile,
+      searchPreferences: createPreferences(),
+      jobs: [],
+    });
+    expect(JSON.stringify(empty.person.workEligibility)).not.toContain(
+      "own words",
+    );
+    profile.workEligibility.workAuthorizationInOwnWords =
+      "Remote from Kosovo I need no sponsorship. To work in the UK I would.";
+    const payload = buildJobFitJudgingPayload({
+      assessmentDate: "2026-10-04",
+      profile,
+      searchPreferences: createPreferences(),
+      jobs: [],
+    });
+    expect(Object.entries(payload.person.workEligibility)).toContainEqual([
+      "The person's rule in their own words (country-specific; wins for each country or arrangement it names)",
+      "Remote from Kosovo I need no sponsorship. To work in the UK I would.",
+    ]);
+    expect(buildFitEvidenceInstructions()).toContain(
+      "wins over the general country list and sponsorship answer there",
+    );
+  });
   test("does not infer a junior level from missing seniority (R3-204)", () => {
     expect(buildFitEvidenceInstructions()).toContain(
       "Missing seniority means level not confirmed",

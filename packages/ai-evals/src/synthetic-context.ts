@@ -68,6 +68,7 @@ export function createSyntheticCandidateProfile() {
       noticePeriodDays: 14,
       availableStartDate: null,
       securityClearance: null,
+      workAuthorizationInOwnWords: null,
     },
     professionalSummary: {
       shortValueProposition:
