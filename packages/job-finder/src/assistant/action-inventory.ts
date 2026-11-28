@@ -494,7 +494,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   {
     id: "browser.import_signins",
     screen: "Browser",
-    action: "Bring sign-ins over from another browser on this device",
+    action: "Import cookies from another browser on this device",
     channels: ["browser:list-import-sources", "browser:import-from-browser"],
     coverage: tools(
       "action_browser_list_import_sources",

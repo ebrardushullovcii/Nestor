@@ -114,12 +114,41 @@ export type DesktopBrowserViewport = z.infer<
   typeof DesktopBrowserViewportSchema
 >;
 
+const ImportCount = z.number().int().nonnegative();
+
+/**
+ * Every cookie the browser profile held, by what happened to it: the ones
+ * not copied each count under their own reason, so an expired cookie (no
+ * loss) is never lumped with one that may have been a live sign-in.
+ */
+export const DesktopBrowserImportCountsSchema = z
+  .object({
+    found: ImportCount,
+    /** Past their expiry in the other browser: nothing is lost. */
+    expired: ImportCount,
+    /** Set for a site embedded in another site; Nestor does not copy these. */
+    partitioned: ImportCount,
+    /** A site address or path Nestor's browser cannot use. */
+    invalid: ImportCount,
+    /** Locked to the other browser by its app-bound encryption. */
+    lockedToBrowser: ImportCount,
+    unsupportedEncryption: ImportCount,
+    couldNotDecrypt: ImportCount,
+    /** Read correctly but refused when written to Nestor's browser. */
+    refused: ImportCount,
+  })
+  .strict();
+export type DesktopBrowserImportCounts = z.infer<
+  typeof DesktopBrowserImportCountsSchema
+>;
+
 export const DesktopBrowserImportResultSchema = z.object({
   status: z.enum(["imported", "cancelled", "unsupported", "failed"]),
   cookieCount: z.number().int().nonnegative(),
   siteCount: z.number().int().nonnegative(),
   message: z.string(),
   googleSignInNotice: z.string().optional(),
+  counts: DesktopBrowserImportCountsSchema.optional(),
 });
 export type DesktopBrowserImportResult = z.infer<
   typeof DesktopBrowserImportResultSchema

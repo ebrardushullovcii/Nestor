@@ -19,6 +19,7 @@ import type {
   BrowserSignInSources,
   DesktopBrowserImportBrowser,
   DesktopBrowserImportInput,
+  DesktopBrowserImportCounts,
   DesktopBrowserImportResult,
   DesktopBrowserImportSource,
   DesktopBrowserImportSources,
@@ -621,7 +622,7 @@ export async function readBrowserPasswords(
           diagnostics.found++;
           const encrypted = row.password_value;
           if (!(encrypted instanceof Uint8Array) || !encrypted.length) {
-            diagnostics.filtered++;
+            diagnostics.invalid++;
             continue;
           }
           const prefix = Buffer.from(encrypted.subarray(0, 3)).toString(
@@ -661,7 +662,7 @@ export async function readBrowserPasswords(
             row.username_value.length > 1000 ||
             password.length > 10000
           ) {
-            diagnostics.filtered++;
+            diagnostics.invalid++;
             continue;
           }
           values.push({ origin, username: row.username_value, password });
@@ -684,13 +685,19 @@ export async function readBrowserPasswords(
   }
 }
 
-/** Counts only; never include origins, account identifiers or secret material. */
+/**
+ * Counts only; never include origins, account identifiers or secret material.
+ * Each reason a row is left out has its own count: an expired cookie costs
+ * nothing, while a partitioned or unreadable one can be a live sign-in.
+ */
 interface ImportDiagnostics {
   found: number;
   appBound: number;
   unsupportedEncryption: number;
   decryptFailed: number;
-  filtered: number;
+  expired: number;
+  partitioned: number;
+  invalid: number;
 }
 
 function emptyDiagnostics(): ImportDiagnostics {
@@ -699,9 +706,13 @@ function emptyDiagnostics(): ImportDiagnostics {
     appBound: 0,
     unsupportedEncryption: 0,
     decryptFailed: 0,
-    filtered: 0,
+    expired: 0,
+    partitioned: 0,
+    invalid: 0,
   };
 }
+
+type CookieSkipReason = "expired" | "partitioned" | "invalid";
 
 interface ChromiumCookieRow {
   host_key: string;
@@ -750,20 +761,34 @@ function cookieUrl(hostKey: string, cookiePath: string, secure: boolean) {
   }
 }
 
+function chromiumExpiry(row: ChromiumCookieRow): number | null {
+  return row.has_expires === 1 && row.expires_utc > 0
+    ? row.expires_utc / 1_000_000 - CHROMIUM_EPOCH_OFFSET_SECONDS
+    : null;
+}
+
+/** Why a Chromium row cannot be written to Nestor's session, if it cannot. */
+export function chromiumCookieSkipReason(
+  row: ChromiumCookieRow,
+  now = Date.now() / 1000,
+): CookieSkipReason | null {
+  if (row.top_frame_site_key) return "partitioned";
+  if (!cookieUrl(row.host_key, row.path || "/", row.is_secure === 1))
+    return "invalid";
+  const expires = chromiumExpiry(row);
+  return expires !== null && expires <= now ? "expired" : null;
+}
+
 export function chromiumCookieToDetails(
   row: ChromiumCookieRow,
   value: string,
   now = Date.now() / 1000,
 ): CookiesSetDetails | null {
-  if (row.top_frame_site_key) return null;
+  if (chromiumCookieSkipReason(row, now)) return null;
   const secure = row.is_secure === 1;
   const url = cookieUrl(row.host_key, row.path || "/", secure);
   if (!url) return null;
-  const expires =
-    row.has_expires === 1 && row.expires_utc > 0
-      ? row.expires_utc / 1_000_000 - CHROMIUM_EPOCH_OFFSET_SECONDS
-      : null;
-  if (expires !== null && expires <= now) return null;
+  const expires = chromiumExpiry(row);
   return {
     url,
     name: row.name,
@@ -789,16 +814,26 @@ interface FirefoxCookieRow {
   originAttributes?: string | null;
 }
 
+/** Why a Firefox row cannot be written to Nestor's session, if it cannot. */
+export function firefoxCookieSkipReason(
+  row: FirefoxCookieRow,
+  now = Date.now() / 1000,
+): CookieSkipReason | null {
+  if (row.originAttributes && row.originAttributes.includes("partitionKey"))
+    return "partitioned";
+  if (!cookieUrl(row.host, row.path || "/", row.isSecure === 1))
+    return "invalid";
+  return row.expiry > 0 && row.expiry <= now ? "expired" : null;
+}
+
 export function firefoxCookieToDetails(
   row: FirefoxCookieRow,
   now = Date.now() / 1000,
 ): CookiesSetDetails | null {
-  if (row.originAttributes && row.originAttributes.includes("partitionKey"))
-    return null;
+  if (firefoxCookieSkipReason(row, now)) return null;
   const secure = row.isSecure === 1;
   const url = cookieUrl(row.host, row.path || "/", secure);
   if (!url) return null;
-  if (row.expiry > 0 && row.expiry <= now) return null;
   return {
     url,
     name: row.name,
@@ -894,8 +929,9 @@ export function readChromiumCookieStore(
     const diagnostics = emptyDiagnostics();
     for (const row of rows) {
       diagnostics.found++;
-      if (!chromiumCookieToDetails(row, "")) {
-        diagnostics.filtered++;
+      const skip = chromiumCookieSkipReason(row);
+      if (skip) {
+        diagnostics[skip]++;
         continue;
       }
       const encrypted = row.encrypted_value;
@@ -940,6 +976,13 @@ export function readChromiumCookieStore(
 }
 
 export function readFirefoxCookies(file: string): CookiesSetDetails[] {
+  return readFirefoxCookieStore(file).cookies;
+}
+
+export function readFirefoxCookieStore(file: string): {
+  cookies: CookiesSetDetails[];
+  diagnostics: ImportDiagnostics;
+} {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const statement = db.prepare(
@@ -949,7 +992,19 @@ export function readFirefoxCookies(file: string): CookiesSetDetails[] {
     const rows = statement
       .all()
       .map(numericRow) as unknown as FirefoxCookieRow[];
-    return rows.flatMap((row) => firefoxCookieToDetails(row) ?? []);
+    const cookies: CookiesSetDetails[] = [];
+    const diagnostics = emptyDiagnostics();
+    for (const row of rows) {
+      diagnostics.found++;
+      const skip = firefoxCookieSkipReason(row);
+      if (skip) {
+        diagnostics[skip]++;
+        continue;
+      }
+      const details = firefoxCookieToDetails(row);
+      if (details) cookies.push(details);
+    }
+    return { cookies, diagnostics };
   } finally {
     db.close();
   }
@@ -979,6 +1034,7 @@ export async function importSignInsFromBrowser(
     cookieCount = 0,
     siteCount = 0,
     googleSignInNotice?: string,
+    counts?: DesktopBrowserImportCounts,
   ): DesktopBrowserImportResult => {
     const output = {
       status,
@@ -986,6 +1042,7 @@ export async function importSignInsFromBrowser(
       cookieCount,
       siteCount,
       googleSignInNotice,
+      counts,
     };
     traceEvent("browser_import_result", output);
     return output;
@@ -1016,7 +1073,7 @@ export async function importSignInsFromBrowser(
     );
   try {
     if (source.family.browser === "firefox")
-      cookies = readFirefoxCookies(snapshot.path);
+      ({ cookies, diagnostics } = readFirefoxCookieStore(snapshot.path));
     else {
       let key: Buffer | null = null;
       try {
@@ -1066,9 +1123,22 @@ export async function importSignInsFromBrowser(
     eligibleCookieCount: cookies.length,
     eligibleHosts: [...new Set(cookies.map((c) => new URL(c.url).hostname))],
   });
-  const skippedMessage = diagnostics
-    ? `Found ${diagnostics.found} cookies. ${diagnostics.appBound} blocked by app-bound encryption; ${diagnostics.unsupportedEncryption} use unsupported encryption; ${diagnostics.decryptFailed} could not be decrypted; ${diagnostics.filtered} expired, partitioned or invalid.`
-    : "";
+  // Every cookie found is counted once: copied, or left out for one named
+  // reason. The dialog lists them under what came over; the model gets the
+  // same numbers in the result.
+  const counts = (refused: number): DesktopBrowserImportCounts | undefined =>
+    diagnostics
+      ? {
+          found: diagnostics.found,
+          expired: diagnostics.expired,
+          partitioned: diagnostics.partitioned,
+          invalid: diagnostics.invalid,
+          lockedToBrowser: diagnostics.appBound,
+          unsupportedEncryption: diagnostics.unsupportedEncryption,
+          couldNotDecrypt: diagnostics.decryptFailed,
+          refused,
+        }
+      : undefined;
   // Google ties a sign-in to the browser it was made in, so its cookies come
   // over but Gmail and "Sign in with Google" still ask again. Said plainly
   // whenever the browser had Google cookies; the dialog offers the sign-in.
@@ -1076,12 +1146,16 @@ export async function importSignInsFromBrowser(
     isGoogleAccountHost(new URL(cookie.url).hostname),
   );
   const googleSignInNotice = hadGoogle
-    ? "Your Google sign-in stays in your other browser. Sign in once in Nestor to use Google here."
+    ? `Google keeps your sign-in in ${source.browserLabel}, so Gmail and “Sign in with Google” ask again here. Sign in once and Nestor keeps it.`
     : undefined;
   if (!cookies.length)
     return result(
       "unsupported",
-      `No cookies were imported from ${source.browserLabel}. You can sign in directly in Nestor. ${skippedMessage}`.trim(),
+      `No cookies could be copied from ${source.browserLabel}. Sign in to the sites you need here once and Nestor keeps those sign-ins.`,
+      0,
+      0,
+      undefined,
+      counts(0),
     );
   let imported = 0;
   const sites = new Set<string>();
@@ -1100,32 +1174,28 @@ export async function importSignInsFromBrowser(
     importedHosts: [...sites],
     signInVerified: false,
   });
+  const refused = cookies.length - imported;
   try {
     await cookieStore.flushStore();
   } catch {
     return result(
       "failed",
-      "The imported cookies could not be saved. Sign in here directly in Nestor instead.",
+      "The copied cookies could not be saved. Sign in to the sites you need here instead.",
       imported,
       sites.size,
       googleSignInNotice,
+      counts(refused),
     );
   }
   return result(
     imported ? "imported" : "failed",
     imported
-      ? [
-          `Imported ${imported} ${imported === 1 ? "cookie" : "cookies"} for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}.`,
-          "If a site still asks you to sign in, sign in directly in Nestor.",
-          skippedMessage,
-          `${cookies.length - imported} rejected by Nestor's browser.`,
-        ]
-          .filter(Boolean)
-          .join(" ")
-      : `Nestor rejected all ${cookies.length} cookies from ${source.browserLabel}. You can sign in directly in Nestor. ${skippedMessage}`.trim(),
+      ? `Copied ${imported.toLocaleString("en-US")} ${imported === 1 ? "cookie" : "cookies"} for ${sites.size.toLocaleString("en-US")} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}. Sites that use them may keep you signed in. If one asks you to sign in, sign in here once.`
+      : `Nestor's browser refused all ${cookies.length.toLocaleString("en-US")} cookies from ${source.browserLabel}. Sign in to the sites you need here instead.`,
     imported,
     sites.size,
     googleSignInNotice,
+    counts(refused),
   );
 }
 

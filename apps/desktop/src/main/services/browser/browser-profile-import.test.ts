@@ -26,6 +26,8 @@ import {
   readChromiumCookies,
   readChromiumCookieStore,
   readFirefoxCookies,
+  readFirefoxCookieStore,
+  chromiumCookieSkipReason,
   readBrowserPasswords,
   snapshotDatabase,
   type ImportEnvironment,
@@ -160,7 +162,9 @@ describe("Windows profile passwords", () => {
       diagnostics: {
         found: 4,
         appBound: 2,
-        filtered: 2,
+        invalid: 2,
+        expired: 0,
+        partitioned: 0,
         decryptFailed: 0,
         unsupportedEncryption: 0,
       },
@@ -241,7 +245,9 @@ describe("Windows profile passwords", () => {
         found: 5,
         appBound: 1,
         decryptFailed: 2,
-        filtered: 0,
+        expired: 0,
+        partitioned: 0,
+        invalid: 0,
         unsupportedEncryption: 1,
       },
     });
@@ -373,7 +379,9 @@ describe("Windows cookie import accounting", () => {
       appBound: 1,
       unsupportedEncryption: 1,
       decryptFailed: 1,
-      filtered: 3,
+      expired: 1,
+      partitioned: 1,
+      invalid: 1,
     });
     expect(JSON.stringify(diagnostics)).not.toMatch(/synthetic|example|legacy/);
     const encrypted = encryptWindows(
@@ -421,10 +429,20 @@ describe("Windows cookie import accounting", () => {
       cookieCount: 1,
       siteCount: 1,
     });
-    expect(result.message).toMatch(
-      /^Imported 1 cookie for 1 site.*Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*1 rejected/,
+    expect(result.message).toBe(
+      "Copied 1 cookie for 1 site from Microsoft Edge. Sites that use them may keep you signed in. If one asks you to sign in, sign in here once.",
     );
-    expect(result.message).toContain("If a site still asks you to sign in");
+    // Every cookie found is accounted for once, each reason on its own.
+    expect(result.counts).toEqual({
+      found: 8,
+      expired: 1,
+      partitioned: 1,
+      invalid: 1,
+      lockedToBrowser: 1,
+      unsupportedEncryption: 1,
+      couldNotDecrypt: 1,
+      refused: 1,
+    });
     // Running searches and applications are left alone during an import.
     expect(takeControl).not.toHaveBeenCalled();
     // No Google cookies in this profile, so no Google sentence.
@@ -466,10 +484,10 @@ describe("Windows cookie import accounting", () => {
       cookieCount: 1,
       siteCount: 1,
     });
-    expect(result.googleSignInNotice).toContain(
-      "Your Google sign-in stays in your other browser.",
+    expect(result.googleSignInNotice).toBe(
+      "Google keeps your sign-in in Microsoft Edge, so Gmail and “Sign in with Google” ask again here. Sign in once and Nestor keeps it.",
     );
-    expect(result.message).toMatch(/^Imported 1 cookie for 1 site/);
+    expect(result.message).toMatch(/^Copied 1 cookie for 1 site/);
   });
 
   test("does not attempt app-bound decryption and explains a protected-only profile", async () => {
@@ -504,7 +522,7 @@ describe("Windows cookie import accounting", () => {
       env,
     );
     expect(result).toMatchObject({ status: "imported", cookieCount: 1 });
-    expect(result.message).toContain("2 could not be decrypted");
+    expect(result.counts?.couldNotDecrypt).toBe(2);
     expect(set).toHaveBeenCalledOnce();
     expect(dpapi).not.toHaveBeenCalled();
   });
@@ -703,6 +721,20 @@ describe("browser profile import", () => {
         now,
       ),
     ).toBeNull();
+    // Each skipped row names its own reason.
+    expect(chromiumCookieSkipReason(row, now)).toBeNull();
+    expect(chromiumCookieSkipReason({ ...row, expires_utc: 1 }, now)).toBe(
+      "expired",
+    );
+    expect(
+      chromiumCookieSkipReason(
+        { ...row, top_frame_site_key: "https://embedder.test" },
+        now,
+      ),
+    ).toBe("partitioned");
+    expect(
+      chromiumCookieSkipReason({ ...row, host_key: "bad host" }, now),
+    ).toBe("invalid");
     const hostOnly = chromiumCookieToDetails(
       { ...row, host_key: "app.example.test", has_expires: 0 },
       "abc",
@@ -870,10 +902,32 @@ describe("browser profile import", () => {
     db.prepare(
       "INSERT INTO moz_cookies (name, value, host, path, expiry, isSecure, isHttpOnly, sameSite) VALUES ('sid', 'abc', '.example.test', '/', ?, 1, 1, 1)",
     ).run(Math.floor(Date.now() / 1000) + 60);
+    const insert = db.prepare(
+      "INSERT INTO moz_cookies (name, value, host, path, expiry, isSecure, isHttpOnly, sameSite, originAttributes) VALUES (?, 'x', ?, '/', ?, 1, 0, 1, ?)",
+    );
+    const later = Math.floor(Date.now() / 1000) + 60;
+    insert.run("old", ".example.test", 1, "");
+    insert.run(
+      "embedded",
+      ".example.test",
+      later,
+      "^partitionKey=(https,other.test)",
+    );
+    insert.run("bad", "bad host", later, "");
     db.close();
     expect(readFirefoxCookies(file)).toEqual([
       expect.objectContaining({ name: "sid", value: "abc", sameSite: "lax" }),
     ]);
+    // Firefox imports count what they leave out the same way Chromium does.
+    expect(readFirefoxCookieStore(file).diagnostics).toEqual({
+      found: 4,
+      appBound: 0,
+      unsupportedEncryption: 0,
+      decryptFailed: 0,
+      expired: 1,
+      partitioned: 1,
+      invalid: 1,
+    });
   });
 
   test("reports an empty device honestly", async () => {

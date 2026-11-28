@@ -781,7 +781,7 @@ function recordingPorts(
           cookieCount: 12,
           siteCount: 3,
           message:
-            "Brought over sign-ins for 3 sites from Firefox. Some sites may still ask you to sign in again.",
+            "Copied 12 cookies for 3 sites from Firefox. Sites that use them may keep you signed in. If one asks you to sign in, sign in here once.",
         });
       }
       if (actionId !== "write-clipboard-text")

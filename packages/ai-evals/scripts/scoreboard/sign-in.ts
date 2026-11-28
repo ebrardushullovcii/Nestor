@@ -422,7 +422,7 @@ export async function browserImport(app: App, r: Result) {
     await p
       .getByRole("button", { name: "More browser actions", exact: true })
       .click();
-    await p.getByRole("menuitem", { name: /Bring sign-ins from/ }).click();
+    await p.getByRole("menuitem", { name: /Import cookies from/ }).click();
     const source = p
       .getByRole("listitem")
       .filter({ hasText: "Scoreboard synthetic" });
@@ -486,11 +486,12 @@ export async function browserImport(app: App, r: Result) {
     r.metrics.summary = `cookies=${cookies.count}/${fixture.expected.cookies}; sites=${cookies.sites}/${fixture.expected.sites}; logins=${saved.credentials.length}/${fixture.expected.logins}; excluded=4 with reasons; session reused=${signIns === 0}`;
     assert.equal(cookies.count, fixture.expected.cookies);
     assert.equal(cookies.sites, fixture.expected.sites);
-    assert.match(message, /Found 7 cookies/);
-    assert.match(message, /Imported 3 cookies for 3 sites/);
-    assert.match(message, /1 use unsupported encryption/);
-    assert.match(message, /1 could not be decrypted/);
-    assert.match(message, /2 expired, partitioned or invalid/);
+    assert.match(message, /Copied 3 cookies for 3 sites/);
+    assert.match(message, /Not copied: 4 of 7/);
+    assert.match(message, /1\s+had already expired/);
+    assert.match(message, /1\s+belongs to a site shown inside another site/);
+    assert.match(message, /1\s+uses encryption Nestor can’t read/);
+    assert.match(message, /1\s+couldn’t be unlocked/);
     assert.equal(saved.credentials.length, fixture.expected.logins);
     assert.equal(
       signIns,

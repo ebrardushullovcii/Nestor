@@ -22,6 +22,7 @@ import {
 } from "@nestor/db/job-store";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
+import { createTrackerCommandRunner } from "../../../../main/services/tracker-commands";
 import { NeedsYouScreen } from "./needs-you-screen";
 import { SourceNeedPane } from "./source-need-pane";
 import { workThrough } from "./work-through";
@@ -1327,6 +1328,12 @@ it("lists filled forms under their own group, and says so when nothing is blocke
       openApplication,
       getApplicationDetails: () =>
         Promise.resolve({ application: { state: "ready" } }),
+      applicationsForJobs: () => Promise.resolve([]),
+      onApplicationsChange: () => () => undefined,
+    },
+    tracker: {
+      run: () => Promise.reject(new Error("Not in this test")),
+      exportCsv: vi.fn(),
     },
   });
   show();
@@ -1351,10 +1358,74 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   expect(screen.getByText("Ready to send · 1")).toBeTruthy();
   expect(screen.getByText("1 item needs you · 1 ready to send")).toBeTruthy();
   expect(screen.queryByText(/Nothing is blocked/)).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: /Backend Engineer.*Lantern Services/ }),
+});
+
+it("shows the Ready form it picks in the details, never the item picked before it", async () => {
+  // R10: picking a Ready form opened the browser but left Task details on
+  // another application's CAPTCHA item.
+  ask(0, "notice", "What is your notice period?");
+  const readyApplication = claimed[2]!;
+  jobs
+    .sql("UPDATE applications SET state = 'ready' WHERE id = ?")
+    .run(readyApplication.id);
+  const openApplication = vi.fn(() =>
+    Promise.resolve({ opened: true, retained: true }),
   );
-  await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
+  const tracker = createTrackerCommandRunner(jobs);
+  Object.assign(window.nestor, {
+    tracker: { run: tracker, exportCsv: vi.fn() },
+    jobFinder: {
+      listApplications: (input: { state?: "ready" }) =>
+        Promise.resolve(applications.listApplications(input)),
+      applicationsForJobs: ({ jobIds }: { jobIds: number[] }) =>
+        Promise.resolve(applications.forJobs(jobIds)),
+      getApplicationDetails: ({ id }: { id: number }) =>
+        Promise.resolve({
+          application: applications.getApplication(id)!,
+          summary: null,
+          detail: null,
+          resumeFileName: null,
+          reviewCard: null,
+          receipt: null,
+        } satisfies ApplicationDetails),
+      openApplication,
+      onApplicationsChange: () => () => undefined,
+    },
+  });
+  show();
+  // The question is picked first, as the list's first item.
+  const pane = () => document.getElementById("list-detail")!;
+  await waitFor(() =>
+    expect(pane().textContent).toContain("What is your notice period?"),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Engineer 2.*Employer 2/ }),
+  );
+  // The details are the Ready form's, with its own Send and Open.
+  await waitFor(() => expect(pane().textContent).toContain("Engineer 2"));
+  expect(pane().textContent).not.toContain("What is your notice period?");
+  expect(
+    within(pane()).getByRole("button", { name: /Open application/ }),
+  ).toBeTruthy();
+  expect(
+    document
+      .querySelector(`[data-ready-application-id="${readyApplication.id}"]`)
+      ?.getAttribute("data-selected"),
+  ).toBe("true");
+  // Picking it only shows it; opening the form is the person's next step.
+  expect(openApplication).not.toHaveBeenCalled();
+  // Picking the question again brings its details back.
+  fireEvent.click(
+    screen.getByRole("button", { name: /What is your notice period\?/ }),
+  );
+  await waitFor(() =>
+    expect(pane().textContent).toContain("What is your notice period?"),
+  );
+  expect(
+    document
+      .querySelector(`[data-ready-application-id="${readyApplication.id}"]`)
+      ?.getAttribute("data-selected"),
+  ).toBe("false");
 });
 
 it("says why a Send for me form waits for the person's Send", async () => {
