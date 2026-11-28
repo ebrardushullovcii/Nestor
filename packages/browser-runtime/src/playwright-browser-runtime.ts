@@ -2350,9 +2350,9 @@ export function createBrowserAgentRuntime(
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).closeAuxiliaryTabs!(),
         ),
-      readMailboxAccounts: () =>
+      readMailboxSession: () =>
         onReadyPage((page) =>
-          createPlaywrightApplyPageMechanics(page).readMailboxAccounts!(),
+          createPlaywrightApplyPageMechanics(page).readMailboxSession!(),
         ),
       readAccountFlowEntry: (origins) =>
         onReadyPage((page) =>

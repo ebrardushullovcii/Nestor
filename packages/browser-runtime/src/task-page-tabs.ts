@@ -81,7 +81,7 @@ export function withTaskPageTabs(
     | "switchTab"
     | "closeTab"
     | "closeAuxiliaryTabs"
-    | "readMailboxAccounts"
+    | "readMailboxSession"
     | "readPage"
   > = {
     readPage: async () => ({
@@ -143,7 +143,7 @@ export function withTaskPageTabs(
       return { ok: true, url: active.url() };
     },
     closeAuxiliaryTabs,
-    readMailboxAccounts: async () => {
+    readMailboxSession: async () => {
       // The account label is non-secret. Never read or retain inbox messages
       // during this factual probe, and never infer sign-in from a cookie.
       const existing = primary
@@ -163,7 +163,7 @@ export function withTaskPageTabs(
               ])
           ).length
         )
-          return [];
+          return { status: "unknown" };
         if (!probe) {
           probe = await primary.context().newPage();
           markPrivateTracePage(probe);
@@ -175,7 +175,10 @@ export function withTaskPageTabs(
             }),
           );
         }
-        if (new URL(probe.url()).hostname !== "mail.google.com") return [];
+        const origin = new URL(probe.url()).origin;
+        if (origin === "https://accounts.google.com")
+          return { status: "google_accounts_redirect" };
+        if (origin !== "https://mail.google.com") return { status: "unknown" };
         await withNavigationLiveness(probe, () =>
           probe!
             .locator(
@@ -197,10 +200,13 @@ export function withTaskPageTabs(
           );
         });
         return email
-          ? [{ email, url: "https://mail.google.com/mail/u/0/" }]
-          : [];
+          ? {
+              status: "signed_in",
+              accounts: [{ email, url: "https://mail.google.com/mail/u/0/" }],
+            }
+          : { status: "unknown" };
       } catch {
-        return [];
+        return { status: "unknown" };
       } finally {
         if (probe && probe !== existing)
           await probe.close().catch(() => undefined);

@@ -35,8 +35,8 @@ import { passwordImportOrigin } from "./password-origin";
  * way browsers import from each other. The user picks the browser and
  * profile; cookie values are read, decrypted and written only in main, and
  * never logged or sent to the renderer. This sign-in import does not copy
- * passwords, bookmarks, history or partitioned cookies (ADR 0017). Explicit
- * password import below uses the separate encrypted local vault.
+ * passwords, bookmarks, history, partitioned cookies or Google account cookies
+ * (ADR 0017). Password import uses the separate encrypted local vault.
  */
 const execFileAsync = promisify(execFile);
 
@@ -695,6 +695,7 @@ interface ImportDiagnostics {
   expired: number;
   partitioned: number;
   invalid: number;
+  googleCookies: number;
 }
 
 function emptyDiagnostics(): ImportDiagnostics {
@@ -706,6 +707,7 @@ function emptyDiagnostics(): ImportDiagnostics {
     expired: 0,
     partitioned: 0,
     invalid: 0,
+    googleCookies: 0,
   };
 }
 
@@ -931,6 +933,11 @@ export function readChromiumCookieStore(
         diagnostics[skip]++;
         continue;
       }
+      // Importing Google cookies can overwrite a sign-in made in Nestor.
+      if (isGoogleAccountHost(row.host_key)) {
+        diagnostics.googleCookies++;
+        continue;
+      }
       const encrypted = row.encrypted_value;
       const prefix = encrypted?.length
         ? Buffer.from(encrypted.subarray(0, 3)).toString("latin1")
@@ -996,6 +1003,10 @@ export function readFirefoxCookieStore(file: string): {
       const skip = firefoxCookieSkipReason(row);
       if (skip) {
         diagnostics[skip]++;
+        continue;
+      }
+      if (isGoogleAccountHost(row.host)) {
+        diagnostics.googleCookies++;
         continue;
       }
       const details = firefoxCookieToDetails(row);
@@ -1133,25 +1144,20 @@ export async function importSignInsFromBrowser(
           lockedToBrowser: diagnostics.appBound,
           unsupportedEncryption: diagnostics.unsupportedEncryption,
           couldNotDecrypt: diagnostics.decryptFailed,
+          googleCookies: diagnostics.googleCookies,
           refused,
         }
       : undefined;
-  // Google ties a sign-in to the browser it was made in, so its cookies come
-  // over but Gmail and "Sign in with Google" still ask again. Said plainly
-  // whenever the browser had Google cookies; the dialog offers the sign-in.
-  const hadGoogle = cookies.some((cookie) =>
-    isGoogleAccountHost(new URL(cookie.url).hostname),
-  );
-  const googleSignInNotice = hadGoogle
-    ? `Google keeps your sign-in in ${source.browserLabel}, so Gmail and “Sign in with Google” ask again here. Sign in once and Nestor keeps it.`
+  const googleSignInNotice = diagnostics?.googleCookies
+    ? `Google cookies stay in ${source.browserLabel} to protect any Google sign-in you’ve already made in Nestor. If Google asks you to sign in again, do it in Nestor’s browser.`
     : undefined;
   if (!cookies.length)
     return result(
       "unsupported",
-      `No cookies could be copied from ${source.browserLabel}. Sign in to the sites you need here once and Nestor keeps those sign-ins.`,
+      `No cookies were copied from ${source.browserLabel}. Sign in to the sites you need in Nestor’s browser.`,
       0,
       0,
-      undefined,
+      googleSignInNotice,
       counts(0),
     );
   let imported = 0;
@@ -1187,7 +1193,7 @@ export async function importSignInsFromBrowser(
   return result(
     imported ? "imported" : "failed",
     imported
-      ? `Copied ${imported.toLocaleString("en-US")} ${imported === 1 ? "cookie" : "cookies"} for ${sites.size.toLocaleString("en-US")} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}. Sites that use them may keep you signed in. If one asks you to sign in, sign in here once.`
+      ? `Copied ${imported.toLocaleString("en-US")} ${imported === 1 ? "cookie" : "cookies"} for ${sites.size.toLocaleString("en-US")} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}. Sites that use them may keep you signed in. If one asks you to sign in, sign in here.`
       : `Nestor's browser refused all ${cookies.length.toLocaleString("en-US")} cookies from ${source.browserLabel}. Sign in to the sites you need here instead.`,
     imported,
     sites.size,

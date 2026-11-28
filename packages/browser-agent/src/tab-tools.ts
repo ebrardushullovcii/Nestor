@@ -5,16 +5,18 @@ import { markVerificationPrivate } from "@nestor/core/run-trace";
 import { z } from "zod";
 
 export const MAILBOX_INSTRUCTIONS =
-  "Keep the application's form open. Use open_tab to read emailed verification codes in Gmail in this same browser session, switch_tab with the form tab's id to type the code, then close_tab for the mailbox when finished. These tabs use the same signed-in session. Emailed codes may be used transiently for the step that needs them; never put a code in saved answers, the profile, reports, evidence or tool reasons. Passwords, cookies, tokens and non-email MFA secrets stay outside model context. If a real mailbox attempt cannot retrieve the code, hand off the step on the open form through Needs you.";
+  "Keep the application's form open. Use open_tab to read emailed verification codes in Gmail in this same browser session, switch_tab with the form tab's id to type the code, then close_tab for the mailbox when finished. Emailed codes may be used transiently for the step that needs them; never put a code in saved answers, the profile, reports, evidence or tool reasons. Passwords, cookies, tokens and non-email MFA secrets stay outside model context. If a real mailbox attempt cannot retrieve the code, hand off the step on the open form through Needs you.";
 
 export async function mailboxAccountFacts(
   hands: ApplyPageHands,
 ): Promise<string> {
   try {
-    const accounts = (await hands.readMailboxAccounts?.()) ?? [];
-    return accounts.length
-      ? `Mailbox state read from the browser's own account UI: ${JSON.stringify(accounts)}. These Google accounts are signed in in this browser. When the site offers Google sign-in/sign-up and the person has enabled it, use their existing Google session if it fits the site. ${MAILBOX_INSTRUCTIONS}`
-      : `No signed-in mailbox account was established by the run-start read; this is a fact, not a refusal. You can inspect Gmail yourself in a second tab. ${MAILBOX_INSTRUCTIONS}`;
+    const mailbox = await hands.readMailboxSession?.();
+    if (mailbox?.status === "signed_in")
+      return `Mailbox state read from the browser's own account UI: ${JSON.stringify(mailbox.accounts)}. These Google accounts are signed in in this browser. When the site offers Google sign-in/sign-up and the person has enabled it, use their existing Google session if it fits the site. ${MAILBOX_INSTRUCTIONS}`;
+    if (mailbox?.status === "google_accounts_redirect")
+      return `At run start Gmail redirected to Google Accounts in this browser. The Gmail inbox was unavailable and there is no confirmed Google session to reuse. If Google asks for a sign-in or verification step only the person can complete, tell them Google needs them to sign in again in Nestor’s browser. ${MAILBOX_INSTRUCTIONS}`;
+    return `The run-start read could not establish a signed-in mailbox account. You can inspect Gmail yourself in a second tab. ${MAILBOX_INSTRUCTIONS}`;
   } catch {
     return `The run-start mailbox read was unavailable. You can inspect it yourself. ${MAILBOX_INSTRUCTIONS}`;
   }

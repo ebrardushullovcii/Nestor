@@ -101,6 +101,11 @@ export function importLeftOutLines(
     ],
     [counts.couldNotDecrypt, "couldn’t be unlocked", "couldn’t be unlocked"],
     [
+      counts.googleCookies,
+      "is a Google cookie kept in the other browser",
+      "are Google cookies kept in the other browser",
+    ],
+    [
       counts.refused,
       "was refused by Nestor’s browser",
       "were refused by Nestor’s browser",
@@ -1292,12 +1297,10 @@ export function BrowserPeek(props: {
                       )}
                       {importPanel.step === "done" && (
                         <>
-                          {/* Google first: it is the one sign-in that never
-                              comes over, and the button is the way on. */}
                           {importPanel.googleSignInNotice && (
                             <div className="browser-import-google-step">
                               <div>
-                                <h4>Google needs one sign-in here</h4>
+                                <h4>Google sign-in in Nestor</h4>
                                 <p>{importPanel.googleSignInNotice}</p>
                               </div>
                               <button
