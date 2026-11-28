@@ -1,7 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-option-result.json";
-import { choosePageOption } from "./choose-page-option";
+import { choosePageOption, readPageOptions } from "./choose-page-option";
 
 let browser: Browser;
 beforeAll(async () => {
@@ -227,6 +227,92 @@ test.each([
   },
   15_000,
 );
+
+/** The input can take focus before the widget mounts and names its menu. */
+const keyboardOpeningPicker = (readOnly = false) => `
+<div class="select-shell">
+  <label>Country<input role="combobox" aria-expanded="false" ${readOnly ? "readonly" : ""}></label>
+  <button type="button" aria-label="Open countries">↓</button>
+  <span class="select__single-value"></span>
+</div>
+<script>
+  const input = document.querySelector('input');
+  const selected = document.querySelector('.select__single-value');
+  const options = ['Austria', 'Croatia'];
+  let list;
+  function close() {
+    list?.remove();
+    list = undefined;
+    input.removeAttribute('aria-controls');
+    input.setAttribute('aria-expanded', 'false');
+    input.value = '';
+  }
+  function draw() {
+    list.replaceChildren();
+    for (const text of options) {
+      if (!text.toLowerCase().includes(input.value.toLowerCase())) continue;
+      const row = document.createElement('div');
+      row.setAttribute('role', 'option');
+      row.textContent = text;
+      row.onclick = () => { selected.textContent = text; close(); };
+      list.appendChild(row);
+    }
+  }
+  function open() {
+    if (list) return;
+    list = document.createElement('div');
+    list.id = 'country-options';
+    list.setAttribute('role', 'listbox');
+    document.body.appendChild(list);
+    input.setAttribute('aria-controls', list.id);
+    input.setAttribute('aria-expanded', 'true');
+    draw();
+  }
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); open(); }
+  });
+  input.addEventListener('input', () => { if (list) draw(); });
+  input.addEventListener('blur', close);
+  document.querySelector('button').addEventListener('click', () => {
+    input.focus();
+    if (list) close();
+    else open();
+  });
+</script>`;
+
+test.each([false, true])(
+  "a closed keyboard-opening picker selects the requested country (read-only: %s)",
+  async (readOnly) => {
+    await withPage(async (page) => {
+      await page.setContent(keyboardOpeningPicker(readOnly));
+      const control = page.getByRole("combobox", { name: "Country" });
+      const result = await choosePageOption(page, control, "Croatia");
+      expect(result).toMatchObject({
+        ok: true,
+        observedValue: "Croatia",
+        optionList: { open: false },
+      });
+      expect(result.optionList?.options).toContain("Croatia");
+      expect(await page.locator(".select__single-value").innerText()).toBe(
+        "Croatia",
+      );
+    });
+  },
+  15_000,
+);
+
+test("reading a closed keyboard-opening picker returns its options and closes it", async () => {
+  await withPage(async (page) => {
+    await page.setContent(keyboardOpeningPicker());
+    const control = page.getByRole("combobox", { name: "Country" });
+    expect(await readPageOptions(page, control)).toEqual([
+      "Austria",
+      "Croatia",
+    ]);
+    expect(await control.getAttribute("aria-expanded")).toBe("false");
+    expect(await page.getByRole("listbox").count()).toBe(0);
+  });
+}, 15_000);
 
 test("custom handover excludes placeholder and disabled rows from real choices", async () => {
   await withPage(async (page) => {
