@@ -73,7 +73,7 @@ export function buildJobsExtractionPrompt(input: {
 }): { shared: string; page: string } {
   const evidenceInstructions = [
     "Employer identity must come from the named hiring organization in the posting or employer board heading. Keep the employer separate from the job title and job-board/ATS brand; a board URL token or logo abbreviation is not its display name. Never use part of the title as company. If the employer cannot be established, leave company empty rather than invent it.",
-    "On a job_detail page, set needsRenderedPage to true when the body is only a loading shell or a card and the listing text still needs the browser to render. Do not describe a partial card as a full listing. Read the full page body, including duties, qualifications, hours, start date and application restrictions. Preserve this vacancy's complete text in description, without summarizing. Page chrome, a login screen, a blog or other jobs on a redirected board are not this vacancy's description. The requested listing in selectionContext is its identity; the landed page is evidence about it, including closure. Keep its real canonicalUrl through a login redirect and never use the login URL as applicationUrl. Extract explicit remote country limits and hybrid/onsite arrangements into location and workMode, including when they appear only in the description. Preserve named pay scales such as MPS/UPS verbatim in salaryText. Include start dates, variable hours and no-CV/application-form-only restrictions in description and relevant qualifications.",
+    "On a job_detail page, set needsRenderedPage to true when the body is only a loading shell or a card and the listing text still needs the browser to render. Do not describe a partial card as a full listing. Read the full page body, including duties, qualifications, hours, start date and application restrictions. Page chrome, a login screen, a blog or other jobs on a redirected board are not this vacancy's description. The requested listing in selectionContext is its identity; the landed page is evidence about it, including closure. Keep its real canonicalUrl through a login redirect and never use the login URL as applicationUrl. Extract explicit remote country limits and hybrid/onsite arrangements into location and workMode, including when they appear only in the description. Preserve named pay scales such as MPS/UPS verbatim in salaryText. Include start dates, variable hours and no-CV/application-form-only restrictions in the selected posting text and relevant qualifications.",
     "Select applicationUrl only when a link or published record is an application destination for this exact vacancy. Match it with this listing's title/employer and link context. Articles, advice, citizenship guides, navigation, other jobs and generic account links are not application routes, even when labelled with the word apply. If the route cannot be proved, return null and keep canonicalUrl as the original listing.",
     "When selectionContext is provided, use the person's request, saved goals, work eligibility and source notes to decide which postings to retain. Explicit exclusions always apply, including in a wide search. Wide includes plausible related roles and requested location variants; it does not mean every occupation on the page. Return clearly unrelated or explicitly excluded listings too, with searchRejection containing category (role, place, preferences, closed, or not_a_listing) and a short plain reason. Set searchRejection to null for plausible matches. Every inspected listing belongs in the jobs array so counts can explain exclusions. Unknown detail is provisional, not proof of a mismatch. Without selectionContext, read the posting without filtering it for fit.",
   ].join(" ");
@@ -100,8 +100,9 @@ export function buildJobsExtractionPrompt(input: {
           'Return JSON with a "jobs" array containing one job object.',
           'Jobs may appear in any language. Preserve the original language of titles, companies, locations, and descriptions. In location, write the country\'s name instead of a two-letter code when the page or its site makes the country clear ("Berlin, Germany", not "Berlin, DE"); a code can name both a country and a US state.',
           "canonicalUrl is this vacancy's permanent listing URL: use the requestedListing identity in selectionContext and the page's job-specific permanent link, preserving the actual destination through login redirects. The landed URL may be a login page, board or application form rather than the listing. applicationUrl is the actual apply or application-form link when observed, otherwise null. An apply link belongs in applicationUrl, not canonicalUrl. Never use a sign-in or share link as either URL.",
-          "Each job should include canonicalUrl, applicationUrl, title, company, location, salaryText (or null), description, summary when confidently available, workMode, keySkills, responsibilities, minimumQualifications, preferredQualifications, seniority, employmentType, department, team, postedAt or postedAtText when visible, employerWebsiteUrl when proven, applyPath, and easyApplyEligible.",
-          "description is the complete posting text in its own words: retain all duties, requirements and benefits, with paragraphs on separate lines; never summarize or omit sections. Leave out site menus, cookie notices, sign-in prompts and other jobs. Put places in location; when none is stated, write \"Location not stated\". company is the actual hirer named for this vacancy. Site brands, ATS names, page titles and og:site_name do not prove who is hiring. Keep the result card's employer unless the listing explicitly corrects it; never replace it with the board's brand.",
+          "Each job should include canonicalUrl, applicationUrl, title, company, location, salaryText (or null), descriptionLineRange or description, summary when confidently available, workMode, keySkills, responsibilities, minimumQualifications, preferredQualifications, seniority, employmentType, department, team, postedAt or postedAtText when visible, employerWebsiteUrl when proven, applyPath, and easyApplyEligible.",
+          'The description is the complete posting text in its own words, including all duties, requirements and benefits. When pageTextHasLineNumbers is true and the description occupies consecutive whole lines of pageText, return "descriptionLineRange": {"start": 12, "end": 34} using its first and last printed line numbers, both inclusive. Blank lines between them are copied too. Omit description when returning a range. Leave out site menus, cookie notices, sign-in prompts and other jobs. If the complete description cannot be selected by whole numbered lines, return its text in description with paragraphs on separate lines, without summarizing or omitting sections.',
+          "Put places in location; when none is stated, write \"Location not stated\". company is the actual hirer named for this vacancy. Site brands, ATS names, page titles and og:site_name do not prove who is hiring. Keep the result card's employer unless the listing explicitly corrects it; never replace it with the board's brand.",
           "When the page identifies a vacancy but hides its description, return the observed vacancy with an empty description and its applicationUrl if visible.",
           'Use only these applyPath values: "easy_apply", "external_redirect", or "unknown". Use "unknown" when the page does not prove the path.',
           "Set easyApplyEligible to true only when the page clearly shows an inline easy-apply path; otherwise return false.",
@@ -119,12 +120,33 @@ export function buildJobsExtractionPrompt(input: {
   return { shared, page };
 }
 
+function readDescriptionLineRange(
+  lines: readonly string[] | undefined,
+  range: unknown,
+): string | null {
+  if (!lines || !range || typeof range !== "object") return null;
+  const { start, end } = range as Record<string, unknown>;
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 1 ||
+    end < start ||
+    end > lines.length
+  ) {
+    return null;
+  }
+  return lines.slice(start - 1, end).join("\n");
+}
+
 export function normalizeExtractedJobs(input: {
   payload: unknown;
   pageHostLabel: string;
   pageUrl: string;
   pageType: "search_results" | "job_detail";
   effectiveMaxJobs: number;
+  descriptionSourceLines?: readonly string[] | undefined;
 }): JobPosting[] {
   const toStr = (value: unknown): string => {
     if (typeof value === "string") return value;
@@ -217,8 +239,8 @@ export function normalizeExtractedJobs(input: {
       continue;
     }
 
-    // The model read the page; its fields stand as returned. Nothing here
-    // splits, guesses or writes job text on its behalf (ADR 0041).
+    // The model reads the page and chooses the description. Resolve its
+    // line numbers against the same text sent in the request.
     const rawCompany = trimToNull(raw.company);
     const responsibilities = toStringArray(raw.responsibilities);
     const minimumQualifications = toStringArray(
@@ -227,7 +249,12 @@ export function normalizeExtractedJobs(input: {
     const preferredQualifications = toStringArray(
       raw.preferredQualifications ?? raw.preferredRequirements,
     );
-    const rawDescription = trimToNull(toStr(raw.description));
+    const referencedDescription = readDescriptionLineRange(
+      input.descriptionSourceLines,
+      raw.descriptionLineRange,
+    );
+    const rawDescription =
+      trimToNull(referencedDescription) ?? trimToNull(toStr(raw.description));
     const employerWebsiteUrl = toUrlOrNull(raw.employerWebsiteUrl);
     const applicationUrl =
       buildGenericCanonicalUrl(
