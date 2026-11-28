@@ -287,7 +287,7 @@ test("fit gets where the person lives, may work and would move, and the remote s
   expect(prompts[1]).toBe(prompts[0]);
 });
 
-test("fit gets the person's saved eligibility answers as facts and reads preferences as preferences", async () => {
+test("fit gets saved eligibility facts and is told to weigh location evidence by source", async () => {
   const savedAnswers = [
     {
       question: "Are you legally authorized to work in the United States?*",
@@ -325,18 +325,34 @@ test("fit gets the person's saved eligibility answers as facts and reads prefere
   await fitJobs({
     client: { chatWithTools },
     profile,
-    jobs: [job],
+    jobs: [{ ...job, location: "Anywhere in the World" }],
     savedAnswers,
     goals: { targetRoles: [], locations: [] },
   });
   const [messages] = chatWithTools.mock.calls[0];
-  const data = JSON.parse(messages[1].content) as {
-    savedAnswers: typeof savedAnswers;
-  };
-  expect(data.savedAnswers).toEqual(savedAnswers);
+  expect(JSON.parse(messages[1].content)).toMatchObject({
+    savedAnswers,
+    listings: [
+      {
+        id: job.id,
+        location: "Anywhere in the World",
+        description: job.description,
+      },
+    ],
+  });
   expect(messages[0].content).toContain(
     "Their answers about work authorization, citizenship, permanent residence, visas, sponsorship, clearance and similar eligibility are established facts for e and h",
   );
+  expect(messages[0].content).toContain(
+    "Attribute material location evidence in why to the employer's text or the job board's label.",
+  );
+  expect(messages[0].content).toContain(
+    "An explicit employer hiring or residence rule for this role takes precedence over a conflicting board label.",
+  );
+  expect(messages[0].content).toContain(
+    "say that the hiring scope is unverified and weigh that uncertainty in the score",
+  );
+  expect(messages[0].content).toContain("Treat unverified scope as review");
   expect(messages[0].content).toContain(
     "A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them",
   );
@@ -514,7 +530,8 @@ test.each(["advertised window", "provider rejection"])(
     const fits = await fitJobs({
       profile,
       jobs,
-      contextWindowTokens: limit === "advertised window" ? 7_200 : 64_000,
+      // Leave room for the prompt and either listing, but not both together.
+      contextWindowTokens: limit === "advertised window" ? 7_500 : 64_000,
       goals: { targetRoles: [], locations: [] },
       client: {
         chatWithTools: (messages) => {

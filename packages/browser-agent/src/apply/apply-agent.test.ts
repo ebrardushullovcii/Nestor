@@ -298,6 +298,21 @@ test.each([
     );
     expect(prompt).toContain("use each fact's saved date where provided");
     expect(prompt).toContain(
+      "Answer for exactly the countries it names. If it refers to where the job is posted, use the locations in the employer's posting or form.",
+    );
+    expect(prompt).toContain(
+      "For a question that covers several countries, evaluate each country using its own facts.",
+    );
+    expect(prompt).toContain(
+      "any offered location, every location, or a selected location",
+    );
+    expect(prompt).toContain(
+      "Answer questions about where the person currently lives from residence facts",
+    );
+    expect(prompt).toContain(
+      "Permission to work in a country does not establish residence there.",
+    );
+    expect(prompt).toContain(
       "Leave an optional field you have no fact for empty",
     );
     expect(prompt).toContain(
