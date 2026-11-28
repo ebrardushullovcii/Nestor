@@ -36,7 +36,7 @@ export async function evaluatePresent<Arg, Result>(
 type Point = { x: number; y: number };
 type ClickTarget =
   | { offset: Point; position: Point; framed: boolean }
-  | { error: string };
+  | { error: string; covered?: true };
 
 /** Find a point for the press, or describe the element receiving it. */
 function readClickTarget(target: Node, offset?: Point): ClickTarget {
@@ -76,7 +76,9 @@ function readClickTarget(target: Node, offset?: Point): ClickTarget {
       expected.getRootNode() as Document | ShadowRoot
     ).elementFromPoint(point.x, point.y);
     if (!hit) return noPoint;
-    if (hit !== expected && !expected.contains(hit)) {
+    // Light-DOM text slotted into the control is drawn inside it but
+    // hit-tests as its shadow host, which the outer pass already checked.
+    if (hit !== expected && !expected.contains(hit) && !scopes.includes(hit)) {
       const covering =
         hit.closest("dialog, [role='dialog'], [aria-label], [id]") ?? hit;
       const label = covering.getAttribute("aria-label")?.trim();
@@ -85,7 +87,7 @@ function readClickTarget(target: Node, offset?: Point): ClickTarget {
         : covering.id
           ? `<${covering.localName} id="${covering.id}">`
           : `<${covering.localName}>`;
-      return { error: `The click point is covered by ${name}.` };
+      return { error: `The click point is covered by ${name}.`, covered: true };
     }
   }
   const relative = { x: point.x - box.left, y: point.y - box.top };
@@ -139,26 +141,30 @@ async function inspectClickTarget(
 }
 
 /**
- * Presses the observed element once. If its click point is covered, centre
- * the element and check again. Report any remaining obstruction without
- * waiting for it to clear.
+ * Presses the observed element once. If it is off-screen, scroll it into
+ * view; if its click point is covered, centre it. Then check again and
+ * report any remaining obstruction without waiting for it to clear.
  */
 export async function clickPresent(locator: Locator): Promise<void> {
   let element = await presentControl(locator);
   try {
     let target = await inspectClickTarget(element);
     if ("error" in target) {
-      // Centre it inside its scrolling list as well as the page: a sticky
-      // header or footer can cover an element that is already in the viewport.
-      // A list that redraws on scroll gets a moment to draw the row again.
-      await element.evaluate(async (node) => {
-        (node as Element).scrollIntoView({
-          block: "center",
-          inline: "center",
-          behavior: "instant",
-        });
-        await new Promise((resolve) => setTimeout(resolve, 120));
-      });
+      // Bring it into view inside its scrolling list as well as the page. A
+      // covered control is centred: a sticky header or footer can cover one
+      // that is already in the viewport. A list that redraws on scroll gets a
+      // moment to draw the row again.
+      await element.evaluate(
+        async (node, block: ScrollLogicalPosition) => {
+          (node as Element).scrollIntoView({
+            block,
+            inline: block,
+            behavior: "instant",
+          });
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        },
+        "covered" in target ? "center" : "nearest",
+      );
       await element.dispose();
       element = await presentControl(locator);
       target = await inspectClickTarget(element);
