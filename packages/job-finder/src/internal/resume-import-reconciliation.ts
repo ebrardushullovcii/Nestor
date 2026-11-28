@@ -132,6 +132,14 @@ function existingScalarValueForCandidate(
     case "location.timeZone":
     case "identity.timeZone":
       return profile.timeZone;
+    case "location.streetAddress":
+      return profile.streetAddress;
+    case "location.postalCode":
+      return profile.postalCode;
+    case "identity.dateOfBirth":
+      return profile.dateOfBirth;
+    case "identity.citizenshipCountries":
+      return profile.citizenshipCountries;
     case "contact.email":
       return profile.email;
     case "contact.phone":
@@ -264,7 +272,8 @@ function scalarValueConflictsWithWorkspace(
   }
 
   if (
-    candidate.target.key === "employmentTypes" &&
+    (candidate.target.key === "employmentTypes" ||
+      candidate.target.key === "citizenshipCountries") &&
     Array.isArray(currentValue) &&
     currentValue.length > 0
   ) {
@@ -308,7 +317,8 @@ function scalarValueMatchesWorkspace(
 
   if (
     (candidate.target.section === "work_eligibility" ||
-      candidate.target.key === "employmentTypes") &&
+      candidate.target.key === "employmentTypes" ||
+      candidate.target.key === "citizenshipCountries") &&
     Array.isArray(currentValue) &&
     currentValue.length > 0
   ) {

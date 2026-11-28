@@ -84,9 +84,16 @@ export const specialistOwnedReplacementFields = {
   >
 >;
 
-// Structured limits and pay intent are model-owned. The deterministic
-// fallback must not guess them from wording or add keyword rules.
+// Structured limits, pay intent and the personal facts forms ask for are
+// model-owned. The deterministic fallback must not guess them from wording or
+// add keyword rules.
 const modelOwnedPreferenceFields = {
+  replace_identity_fields: [
+    "citizenshipCountries",
+    "dateOfBirth",
+    "postalCode",
+    "streetAddress",
+  ],
   replace_work_eligibility_fields: [
     "limitedWorkPermissions",
     "workAuthorizationInOwnWords",

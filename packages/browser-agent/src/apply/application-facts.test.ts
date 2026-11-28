@@ -2,6 +2,7 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import {
+  applicationOwnerFacts,
   relevantSavedAnswers,
   savedAnswerForQuestion,
   serializeApplicationData,
@@ -200,5 +201,52 @@ test("all saved records reach the model, including draft status and pay context"
   ).toBe(false);
   expect(
     facts.some((fact) => fact.sourceId.includes("workAuthorization")),
+  ).toBe(false);
+});
+
+test("date of birth, postal address and citizenship reach the model as stored facts", () => {
+  const personal: ApplyAnswerSources = {
+    ...sources,
+    profile: {
+      ...sources.profile,
+      currentCity: "Exampleville",
+      currentRegion: "Sample Region",
+      currentCountry: "Examplestan",
+      streetAddress: "1 Synthetic Way, Apt 2",
+      postalCode: "00000",
+      dateOfBirth: "1990-01-31",
+      citizenshipCountries: ["Examplestan", "Samplia"],
+    },
+  };
+  const facts = storedFacts(personal, { payDisclosed: false });
+  const byId = new Map(facts.map((fact) => [fact.sourceId, fact]));
+  expect(byId.get("profile.streetAddress")?.value).toBe(
+    "1 Synthetic Way, Apt 2",
+  );
+  expect(byId.get("profile.postalCode")?.value).toBe("00000");
+  expect(byId.get("profile.dateOfBirth")?.value).toBe("1990-01-31");
+  expect(byId.get("profile.citizenshipCountries.0")).toMatchObject({
+    value: "Examplestan",
+    provenanceLabel: "your citizenship (passport country)",
+  });
+  expect(byId.get("profile.citizenshipCountries.1")?.value).toBe("Samplia");
+
+  const owner = applicationOwnerFacts(personal);
+  expect(owner.postalAddress).toEqual({
+    street: "1 Synthetic Way, Apt 2",
+    city: "Exampleville",
+    region: "Sample Region",
+    postalCode: "00000",
+    country: "Examplestan",
+  });
+  expect(owner.dateOfBirth).toBe("1990-01-31");
+  expect(owner.citizenshipCountries).toEqual(["Examplestan", "Samplia"]);
+
+  // Unsaved facts stay out: omitted facts are unknown to the model.
+  const empty = storedFacts(sources, { payDisclosed: false });
+  expect(
+    empty.some((fact) =>
+      /streetAddress|postalCode|dateOfBirth|citizenship/u.test(fact.sourceId),
+    ),
   ).toBe(false);
 });

@@ -12,10 +12,12 @@ import type {
 
 export interface ProfileEditorValues {
   identity: {
+    citizenshipCountries: string;
     currentCity: string;
     currentCountry: string;
     currentLocation: string;
     currentRegion: string;
+    dateOfBirth: string;
     email: string;
     firstName: string;
     githubUrl: string;
@@ -26,9 +28,11 @@ export interface ProfileEditorValues {
     personalWebsiteUrl: string;
     phone: string;
     portfolioUrl: string;
+    postalCode: string;
     preferredDisplayName: string;
     resumeText: string;
     secondaryEmail: string;
+    streetAddress: string;
     summary: string;
     timeZone: string;
     yearsExperience: string;

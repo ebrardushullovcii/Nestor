@@ -97,10 +97,12 @@ function requireAtLeastOneField<TSchema extends z.ZodRawShape>(
 
 export const ProfileIdentityPatchFieldsSchema = requireAtLeastOneField(
   CandidateProfileSchema.pick({
+    citizenshipCountries: true,
     currentCity: true,
     currentCountry: true,
     currentLocation: true,
     currentRegion: true,
+    dateOfBirth: true,
     email: true,
     firstName: true,
     fullName: true,
@@ -112,8 +114,10 @@ export const ProfileIdentityPatchFieldsSchema = requireAtLeastOneField(
     personalWebsiteUrl: true,
     phone: true,
     portfolioUrl: true,
+    postalCode: true,
     preferredDisplayName: true,
     secondaryEmail: true,
+    streetAddress: true,
     summary: true,
     timeZone: true,
     yearsExperience: true,

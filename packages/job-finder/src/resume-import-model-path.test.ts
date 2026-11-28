@@ -264,6 +264,53 @@ describe("resume import with a model (ADR 0041)", () => {
     );
   });
 
+  test("a stated date of birth, postal address and citizenship fill the profile", async () => {
+    const seed = freshSeed();
+    const text = `${TEXT}\nAddress: 1 Synthetic Way, 00000 Exampleville, Examplestan\nDate of birth: 31 January 1990\nNationality: Examplestan, Samplia`;
+    const { profileWork } = createProfileServiceHarness({
+      seed,
+      aiClient: modelClient({
+        identity_summary: [
+          ...IDENTITY,
+          {
+            section: "location",
+            key: "streetAddress",
+            value: "1 Synthetic Way",
+            line: "Address: 1 Synthetic Way",
+          },
+          {
+            section: "location",
+            key: "postalCode",
+            value: "00000",
+            line: "Address: 1 Synthetic Way",
+          },
+          {
+            section: "identity",
+            key: "dateOfBirth",
+            value: "1990-01-31",
+            line: "Date of birth: 31 January 1990",
+          },
+          {
+            section: "identity",
+            key: "citizenshipCountries",
+            value: ["Examplestan", "Samplia"],
+            line: "Nationality: Examplestan, Samplia",
+          },
+        ],
+        experience: [ROLE],
+      }),
+    });
+
+    const snapshot = await profileWork.runResumeImport(importInput(seed, text));
+
+    expect(snapshot.profile).toMatchObject({
+      streetAddress: "1 Synthetic Way",
+      postalCode: "00000",
+      dateOfBirth: "1990-01-31",
+      citizenshipCountries: ["Examplestan", "Samplia"],
+    });
+  });
+
   test("a section the model could not read is named, and nothing is guessed for it", async () => {
     const seed = freshSeed();
     const unread = new ResumeImportStageUnreadError(

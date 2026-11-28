@@ -186,10 +186,13 @@ export function createProfileEditorValues(
 ): ProfileEditorValues {
   const values: ProfileEditorValues = {
     identity: {
+      // One line, "Kosovo, Albania": a country name has no comma in it.
+      citizenshipCountries: profile.citizenshipCountries.join(", "),
       currentCity: profile.currentCity ?? "",
       currentCountry: profile.currentCountry ?? "",
       currentLocation: profile.currentLocation ?? "",
       currentRegion: profile.currentRegion ?? "",
+      dateOfBirth: profile.dateOfBirth ?? "",
       email: profile.email ?? "",
       firstName: profile.firstName ?? "",
       githubUrl: profile.githubUrl ?? "",
@@ -200,9 +203,11 @@ export function createProfileEditorValues(
       personalWebsiteUrl: profile.personalWebsiteUrl ?? "",
       phone: profile.phone ?? "",
       portfolioUrl: profile.portfolioUrl ?? "",
+      postalCode: profile.postalCode ?? "",
       preferredDisplayName: profile.preferredDisplayName ?? "",
       resumeText: profile.baseResume.textContent ?? "",
       secondaryEmail: profile.secondaryEmail ?? "",
+      streetAddress: profile.streetAddress ?? "",
       summary: profile.summary ?? "",
       timeZone: profile.timeZone ?? "",
       yearsExperience: profile.yearsExperience?.toString() ?? "",
@@ -607,6 +612,12 @@ export function buildProfilePayload(
     currentCity: values.identity.currentCity.trim() || null,
     currentRegion: values.identity.currentRegion.trim() || null,
     currentCountry: values.identity.currentCountry.trim() || null,
+    streetAddress: values.identity.streetAddress.trim() || null,
+    postalCode: values.identity.postalCode.trim() || null,
+    dateOfBirth: values.identity.dateOfBirth.trim() || null,
+    citizenshipCountries: [
+      ...new Set(parseTokenListInput(values.identity.citizenshipCountries)),
+    ],
     timeZone: values.identity.timeZone.trim() || null,
     yearsExperience: parsedYearsExperience,
     email: values.identity.email.trim() || null,

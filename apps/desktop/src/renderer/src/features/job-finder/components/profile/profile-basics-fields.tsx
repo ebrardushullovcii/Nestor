@@ -18,9 +18,16 @@ import {
  *
  * Deliberately absent: a separate "Displayed location" input. The location
  * shown on resumes is derived from city, region, and country, and is printed
- * back as read-only text rather than being a fourth editable field holding the
- * same address (with a postal code nobody asked for).
+ * back as read-only text rather than being another editable field holding the
+ * same address. Street and postal code complete the postal address that
+ * application forms ask for; resumes never show them.
  */
+const PROFILE_BASICS_PERSONAL_HINT =
+  "Optional. Applications use these when a form asks for them. They never appear on your resumes.";
+const PROFILE_BASICS_CITIZENSHIP_HINT =
+  "Every country you hold citizenship of, separated by commas. Put your passport country first.";
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
+
 const PROFILE_BASICS_SUMMARY_HINT =
   "This is the summary generated resumes use. Edit it here and every tailored resume starts from it.";
 
@@ -90,6 +97,15 @@ export function ProfileBasicsFields(props: {
   const emailValidationMessage = getProfileEmailValidationMessage(emailValue);
   const emailErrorId = `${fieldId("email")}-error`;
   const summaryHintId = `${fieldId("professional-summary")}-hint`;
+  const personalHintId = `${fieldId("personal")}-hint`;
+  const citizenshipHintId = `${fieldId("citizenship")}-hint`;
+  // The picker holds YYYY-MM-DD; a date imported as the resume wrote it
+  // stays readable and editable as text instead of showing an empty picker.
+  const dateOfBirth = (
+    useWatch({ control, name: "identity.dateOfBirth" }) ?? ""
+  ).trim();
+  const dateOfBirthType =
+    !dateOfBirth || ISO_DATE.test(dateOfBirth) ? "date" : "text";
   const city = useWatch({ control, name: "identity.currentCity" }) ?? "";
   const region = useWatch({ control, name: "identity.currentRegion" }) ?? "";
   const country = useWatch({ control, name: "identity.currentCountry" }) ?? "";
@@ -210,8 +226,61 @@ export function ProfileBasicsFields(props: {
         </div>
       </BasicsGroup>
 
-      <BasicsGroup title="Location">
+      <BasicsGroup title="Date of birth and citizenship">
+        <div className="grid gap-(--gap-content) md:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor={fieldId("date-of-birth")}>
+              Date of birth
+            </FieldLabel>
+            <ProfileInput
+              aria-describedby={personalHintId}
+              id={fieldId("date-of-birth")}
+              placeholder="YYYY-MM-DD"
+              type={dateOfBirthType}
+              {...register("identity.dateOfBirth")}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={fieldId("citizenship")}>
+              Citizenship
+            </FieldLabel>
+            <ProfileInput
+              aria-describedby={`${citizenshipHintId} ${personalHintId}`}
+              id={fieldId("citizenship")}
+              placeholder="Passport country first, e.g. Portugal, Brazil"
+              {...register("identity.citizenshipCountries")}
+            />
+            <ProfileFieldHint id={citizenshipHintId}>
+              {PROFILE_BASICS_CITIZENSHIP_HINT}
+            </ProfileFieldHint>
+          </Field>
+        </div>
+        <ProfileFieldHint id={personalHintId}>
+          {PROFILE_BASICS_PERSONAL_HINT}
+        </ProfileFieldHint>
+      </BasicsGroup>
+
+      <BasicsGroup title="Address">
         <div className="grid gap-(--gap-content) md:grid-cols-3">
+          <Field className="md:col-span-2">
+            <FieldLabel htmlFor={fieldId("street-address")}>
+              Street address
+            </FieldLabel>
+            <ProfileInput
+              id={fieldId("street-address")}
+              placeholder="Street and number, apartment"
+              {...register("identity.streetAddress")}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={fieldId("postal-code")}>
+              Postal code
+            </FieldLabel>
+            <ProfileInput
+              id={fieldId("postal-code")}
+              {...register("identity.postalCode")}
+            />
+          </Field>
           <Field>
             <FieldLabel htmlFor={fieldId("city")}>City</FieldLabel>
             <ProfileInput
@@ -236,8 +305,8 @@ export function ProfileBasicsFields(props: {
         </div>
         <ProfileFieldHint>
           {displayedLocation
-            ? `Shown on your profile and resumes as “${displayedLocation}”. Job Finder does not use it as a preferred search location unless you add it in Job targets.`
-            : "Shown on your profile and resumes. Job Finder does not use it as a preferred search location unless you add it in Job targets."}
+            ? `City, region and country are shown on your profile and resumes as “${displayedLocation}”. Street and postal code are optional and only go into application forms that ask for your address. Job Finder does not use your address as a preferred search location unless you add it in Job targets.`
+            : "City, region and country are shown on your profile and resumes. Street and postal code are optional and only go into application forms that ask for your address. Job Finder does not use your address as a preferred search location unless you add it in Job targets."}
         </ProfileFieldHint>
       </BasicsGroup>
 

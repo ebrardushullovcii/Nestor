@@ -589,6 +589,8 @@ export function createOpenAiCompatibleResumeVisionProvider(
                         "headline",
                         "summary",
                         "yearsExperience",
+                        "dateOfBirth (YYYY-MM-DD when the full date is written)",
+                        "citizenshipCountries (array, passport country first)",
                       ],
                       contact: [
                         "email",
@@ -598,7 +600,12 @@ export function createOpenAiCompatibleResumeVisionProvider(
                         "githubUrl",
                         "personalWebsiteUrl",
                       ],
-                      location: ["currentLocation", "timeZone"],
+                      location: [
+                        "currentLocation",
+                        "streetAddress",
+                        "postalCode",
+                        "timeZone",
+                      ],
                       // Stated availability: "no notice period" is 0 days;
                       // "Available now" is the start date as written.
                       work_eligibility: [
