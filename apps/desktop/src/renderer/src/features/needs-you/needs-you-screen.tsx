@@ -1125,8 +1125,16 @@ export function NeedsYouScreen() {
                     label: "See applications",
                     onClick: () => void navigateTo("/job-finder/applications"),
                   }}
-                  detail="When a form asks something your profile cannot answer, or a site needs you to sign in, it waits here. Applications keep running meanwhile."
-                  title="You're all caught up"
+                  detail={
+                    accountNeeds.length > 0
+                      ? "Your AI account, above, is the only thing waiting on you. Questions from forms and site sign-ins also wait here when they come up."
+                      : "When a form asks something your profile cannot answer, or a site needs you to sign in, it waits here. Applications keep running meanwhile."
+                  }
+                  title={
+                    accountNeeds.length > 0
+                      ? "Nothing else needs you"
+                      : "You're all caught up"
+                  }
                 />
               ) : (
                 <ListEmpty

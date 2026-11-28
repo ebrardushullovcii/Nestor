@@ -31,6 +31,8 @@ import { ProfileTextarea } from "./profile-form-primitives";
 import { ProfileTimelineRepairList } from "./profile-timeline-repair-list";
 import { getResumeImportStageFallbackSummary } from "./resume-import-quality-note";
 import { ResumeImportProgress } from "./resume-import-progress";
+import { resumeReadRefusedMessage } from "@renderer/features/needs-you/ai-account-import-message";
+import { useAiAccountRefusals } from "@renderer/features/needs-you/use-ai-account-needs";
 
 const PROFILE_PLACEHOLDER_HEADLINE = PROFILE_SETUP_PLACEHOLDER_HEADLINE;
 const PROFILE_PLACEHOLDER_SUMMARY = PROFILE_SETUP_PLACEHOLDER_SUMMARY;
@@ -348,6 +350,7 @@ export function ProfileResumePanel({
   profileForm,
   profile,
 }: ProfileResumePanelProps) {
+  const aiAccount = useAiAccountRefusals()[0] ?? null;
   const resumeAnalysisSummary = formatResumeAnalysisSummary(profile);
   const resumeTextReadyToAnalyze =
     sourceInfo?.hasResumeText ??
@@ -434,7 +437,7 @@ export function ProfileResumePanel({
     : null;
   // Run warnings are secondary: they never change the strip's status, they
   // only explain it in a quieter sentence underneath.
-  const latestRunWarning =
+  const runWarning =
     latestResumeImportRun && latestResumeImportRun.status !== "failed"
       ? (latestResumeImportRun.warnings.find(
           (warning) =>
@@ -444,6 +447,16 @@ export function ProfileResumePanel({
             ),
         ) ?? null)
       : null;
+  // Sections the AI account refused to read are the account's step, not a
+  // resume or connection problem.
+  const latestRunWarning =
+    runWarning &&
+    aiAccount &&
+    latestResumeImportRun?.timing?.textStages.some(
+      (stage) => stage.status !== "completed",
+    )
+      ? resumeReadRefusedMessage(aiAccount)
+      : runWarning;
   const pendingReviewLabels = new Set(
     latestResumeImportReviewCandidates.map((candidate) =>
       candidate.label.trim().toLowerCase(),

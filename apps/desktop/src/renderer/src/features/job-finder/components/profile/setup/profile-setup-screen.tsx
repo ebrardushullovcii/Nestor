@@ -578,6 +578,7 @@ export function ProfileSetupScreen(props: {
           profileSetupState.currentStep === "import" ? null : (
             <ProfileSetupImportNotice
               onImportResume={onImportResume}
+              onOpenNeedsYou={() => void navigate("/job-finder/actions")}
               resumeImportProgress={resumeImportProgress}
               importDisabledReason={importResumeGuardMessage}
               isAnalyzeProfilePending={isAnalyzeProfilePending}

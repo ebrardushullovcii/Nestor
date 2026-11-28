@@ -67,7 +67,7 @@ function bridge(needs: AiAccountNeed[]) {
     aiAccount,
     change: () => {
       for (const listener of listeners)
-        listener({ cause: "application", stages: [], ids: [], searchId: null });
+        listener({ cause: "ai_account", stages: [], ids: [], searchId: null });
     },
   };
 }

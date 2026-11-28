@@ -36,6 +36,7 @@ export type FailureKind =
   | "unusable_resume"
   | "file_missing"
   | "paused"
+  | "ai_refused"
   | "unknown";
 
 /**
@@ -61,6 +62,8 @@ export const FAILURE_SENTENCES = {
     "Some details were missing or did not fit, so nothing was saved. Check the fields you just changed and try again.",
   paused:
     "All work is paused, so nothing new can start. Press Continue on Home, then try again.",
+  ai_refused:
+    "The AI did not answer, so nothing changed. If Needs you shows a step for your AI account, finish it there and this carries on by itself; otherwise try again in a few minutes.",
   unknown: "Something went wrong and this did not finish. Try again.",
   unusable_resume:
     "No resume details were found in this file. Choose another file.",
@@ -226,6 +229,18 @@ const PAUSED_PATTERNS: readonly RegExp[] = [
   /resume background work/i,
 ];
 
+/**
+ * The AI refused or could not be reached: the account's own sentences (see
+ * `AI_ACCESS_MESSAGES`), Nestor's paused service, and the resume read's
+ * "AI connection failed". A new person's first re-read hit this and was told
+ * "Something went wrong".
+ */
+const AI_REFUSED_PATTERNS: readonly RegExp[] = [
+  /\bfrom Needs you\. Nestor picks this up again by itself\b/i,
+  /\bNestor's AI service is paused\b/i,
+  /\bThe AI connection failed, so your resume could not be read\b/i,
+];
+
 const KIND_PATTERNS: readonly (readonly [
   Exclude<FailureKind, "unknown">,
   readonly RegExp[],
@@ -233,6 +248,7 @@ const KIND_PATTERNS: readonly (readonly [
   // Ordered most specific first: "already executing" is busy even though the
   // same string may also contain a job id that looks like a missing record.
   ["paused", PAUSED_PATTERNS],
+  ["ai_refused", AI_REFUSED_PATTERNS],
   ["busy", BUSY_PATTERNS],
   ["changed_elsewhere", CHANGED_ELSEWHERE_PATTERNS],
   ["site_blocked", SITE_BLOCKED_PATTERNS],

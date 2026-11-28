@@ -276,6 +276,8 @@ export type MoveJobsResult = z.infer<typeof MoveJobsResultSchema>;
 /**
  * Sent after every write so a screen refreshes only when it shows one of
  * these stages. `ids` names the jobs when there are few; null means many.
+ * `ai_account` says the AI account started or stopped refusing calls: it
+ * touches no job, and Needs you, its count and Home read it again.
  */
 export const JobChangeSchema = z.object({
   cause: z.enum([
@@ -292,6 +294,7 @@ export const JobChangeSchema = z.object({
     "profile_activity",
     "saved_answers",
     "settings",
+    "ai_account",
   ]),
   stages: z.array(JobStageSchema),
   ids: z.array(JobIdSchema).nullable(),

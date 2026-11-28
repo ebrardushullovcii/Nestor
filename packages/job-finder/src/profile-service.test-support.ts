@@ -212,6 +212,7 @@ export function createProfileServiceHarness(
     onResumeEvidenceFinished?: () => void;
     sourceAccess?: ProfileServiceOptions["sourceAccess"];
     onExplicitUserStart?: ProfileServiceOptions["onExplicitUserStart"];
+    aiAccess?: ProfileServiceOptions["aiAccess"];
   } = {},
 ) {
   const seed = options.seed ?? createSeed();
@@ -239,6 +240,7 @@ export function createProfileServiceHarness(
     ...(options.onExplicitUserStart
       ? { onExplicitUserStart: options.onExplicitUserStart }
       : {}),
+    ...(options.aiAccess ? { aiAccess: options.aiAccess } : {}),
   });
   const profileWork = withProfileView(service, repository, {
     ready: seeded,

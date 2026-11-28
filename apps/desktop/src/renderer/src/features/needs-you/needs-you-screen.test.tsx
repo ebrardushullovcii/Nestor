@@ -1636,3 +1636,48 @@ it("recovers its counts with the list on Try again: no all-clear above waiting i
     ).toBeTruthy(),
   );
 });
+
+// W131 fresh install: the AI account's card is the only thing waiting. The
+// list under it said "You're all caught up" beside "1 item needs you", and
+// the card stayed after the account answered again, because the store
+// dropped the account's stage-less change before it reached the screen.
+it("keeps the AI account's card live through the store and says nothing else waits", async () => {
+  // Synthetic: no real service or account.
+  let needs = [
+    {
+      id: "0123456789abcdef",
+      provider: "https://model.example.test",
+      reason: "funding" as const,
+      owner: "person" as const,
+      providerMessage: "Insufficient balance.",
+      actionUrl: null,
+      since: "2026-11-28T16:50:12.000Z",
+    },
+  ];
+  Object.assign(window.nestor.needsYou, {
+    aiAccount: {
+      list: vi.fn(() => Promise.resolve(needs)),
+      open: vi.fn(() => Promise.resolve(true)),
+      check: vi.fn(() => Promise.resolve(true)),
+    },
+  });
+  show();
+  expect(
+    await screen.findByRole("heading", { name: "Top up your AI account" }),
+  ).toBeTruthy();
+  await screen.findByText("1 item needs you");
+  expect(screen.getByText("Nothing else needs you")).toBeTruthy();
+  expect(screen.queryByText("You're all caught up")).toBeNull();
+
+  // The account answers again: main announces it through the store.
+  needs = [];
+  act(() =>
+    jobs.notify({ cause: "ai_account", stages: [], ids: [], searchId: null }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("heading", { name: "Top up your AI account" }),
+    ).toBeNull(),
+  );
+  expect(await screen.findByText("You're all caught up")).toBeTruthy();
+});

@@ -43,6 +43,7 @@ import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import type { JobFinderRepository } from "@nestor/db";
 import type { JobSitesStore } from "@nestor/db/job-store";
 
+import { APP_AI_ACCESS, type AiAccessWatch } from "./internal/ai-access-watch";
 import type { ProfileContext } from "./internal/profile-context";
 import { normalizeProfileBeforeSave } from "./internal/profile-merge";
 import { resolvePendingReviewItemsAfterExplicitSave } from "./internal/profile-setup-review-items";
@@ -71,6 +72,8 @@ import { uniqueStrings } from "./internal/shared";
 export interface ProfileServiceOptions {
   repository: JobFinderRepository;
   aiClient: JobFinderAiClient;
+  /** The AI account's state; the app's own unless a test supplies one. */
+  aiAccess?: AiAccessWatch;
   visionProvider?: ResumeVisionProvider;
   browserRuntime: BrowserSessionRuntime;
   documentManager: JobFinderDocumentManager;
@@ -328,6 +331,52 @@ export function createProfileService(options: ProfileServiceOptions) {
     return promise;
   }
 
+  // A resume read the AI account refused waits on the account, as refused
+  // searches and resume writing do: it reads the missing sections again by
+  // itself once a call goes through, or when the person checks again from
+  // Needs you. Before this, a new person's import was the one piece of work
+  // nothing picked up, and "check now" said nothing was waiting.
+  const access = options.aiAccess ?? APP_AI_ACCESS;
+  let stopWaitingOnAccess: (() => void) | null = null;
+  function stopWaitingForAccess(): void {
+    stopWaitingOnAccess?.();
+    stopWaitingOnAccess = null;
+  }
+  async function waitForAccessIfRefused(
+    readAgain: () => Promise<void>,
+  ): Promise<void> {
+    if (access.status() !== "blocked" || importStop.signal.aborted) return;
+    const [run, profile] = await Promise.all([
+      repository.getLatestResumeImportRun(),
+      repository.getProfile(),
+    ]);
+    if (!run || !profile.baseResume.textContent) return;
+    const unread =
+      run.status === "failed"
+        ? run.failureKind === "ai_unavailable"
+        : (run.timing?.textStages ?? []).some(
+            (stage) => stage.status !== "completed",
+          );
+    if (!unread) return;
+    stopWaitingForAccess();
+    const start = (): boolean => {
+      if (importStop.signal.aborted) return false;
+      stopWaitingForAccess();
+      void readAgain().catch((error: unknown) => {
+        console.warn("[JobFinder] Reading the resume again failed.", error);
+      });
+      return true;
+    };
+    const stopHearing = access.onChange((status) => {
+      if (status === "available") start();
+    });
+    const stopChecking = access.onRecheck(start);
+    stopWaitingOnAccess = () => {
+      stopHearing();
+      stopChecking();
+    };
+  }
+
   const sourceDebugStore = createWorkspaceSourceDebugStoreMethods(ctx);
 
   function runSourceCheck(
@@ -364,7 +413,7 @@ export function createProfileService(options: ProfileServiceOptions) {
     );
   }
 
-  return {
+  const service = {
     async runResumeImport(input: {
       baseResume: ResumeSourceDocument;
       documentBundle: ResumeDocumentBundle;
@@ -372,6 +421,7 @@ export function createProfileService(options: ProfileServiceOptions) {
       visionArtifact?: ResumeImportVisionArtifact;
       signal?: AbortSignal;
     }): Promise<void> {
+      stopWaitingForAccess();
       return trackImport(input.signal, async (signal) => {
         const baseResume = ResumeSourceDocumentSchema.parse(input.baseResume);
         const documentBundle = ResumeDocumentBundleSchema.parse(
@@ -423,10 +473,16 @@ export function createProfileService(options: ProfileServiceOptions) {
             : {}),
         });
         await landProfileSetupAfterImport(ctx, { importStartedAt });
-      });
+      }).finally(() =>
+        // Also after a read that threw: every section refused is a failed run.
+        waitForAccessIfRefused(() => service.analyzeProfileFromResume()).catch(
+          () => undefined,
+        ),
+      );
     },
 
     async analyzeProfileFromResume(): Promise<void> {
+      stopWaitingForAccess();
       return trackImport(undefined, async (signal) => {
         const [atStart, searchPreferences] = await Promise.all([
           repository.getProfileWithRevision(),
@@ -467,7 +523,12 @@ export function createProfileService(options: ProfileServiceOptions) {
           expectedProfileRevision: atStart.revision,
           signal,
         });
-      });
+      }).finally(() =>
+        // Also after a read that threw: every section refused is a failed run.
+        waitForAccessIfRefused(() => service.analyzeProfileFromResume()).catch(
+          () => undefined,
+        ),
+      );
     },
 
     async getResumeImportState() {
@@ -728,6 +789,7 @@ export function createProfileService(options: ProfileServiceOptions) {
     async stop(): Promise<void> {
       activeSourceDebugAbortControllerRef.current?.abort();
       importStop.abort();
+      stopWaitingForAccess();
       await Promise.allSettled([
         activeSourceDebugPromiseRef.current,
         ...importsInFlight,
@@ -763,6 +825,7 @@ export function createProfileService(options: ProfileServiceOptions) {
       });
     },
   };
+  return service;
 }
 
 export type ProfileService = ReturnType<typeof createProfileService>;
