@@ -54,6 +54,52 @@ const job = JobDetailSchema.parse({
   summary: null,
 });
 
+test("fit gets thin card evidence even when an older record says it was fully read", async () => {
+  const description = "Software Engineer. Full posting text not yet read.";
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve({
+      content: JSON.stringify({
+        fits: [1, 2].map((id) => ({
+          id,
+          s: 32,
+          why: "The card does not establish which duties match your experience.",
+          w: "Duties unread",
+          r: ["unknown", "Duties unread"],
+          p: ["unknown", "Work terms unread"],
+          c: ["unknown", "Requirements unread"],
+        })),
+      }),
+    }),
+  );
+  const result = await fitJobs({
+    client: { chatWithTools },
+    profile,
+    jobs: [
+      { ...job, description, facts: { ...job.facts, fullListingRead: true } },
+      {
+        ...job,
+        id: 2,
+        description,
+        facts: { ...job.facts, fullListingRead: false },
+      },
+    ],
+    goals: { targetRoles: [], locations: [] },
+  });
+  const [messages] = chatWithTools.mock.calls[0];
+  expect(messages[0]?.content).toContain(
+    "A card, title-only result or stub with no concrete duties cannot establish a strong or worth-applying match, even if an older record labels its read complete.",
+  );
+  const { listings } = JSON.parse(messages[1].content) as { listings: unknown };
+  expect(listings).toMatchObject([
+    { id: 1, description, fullListingRead: true },
+    { id: 2, description, fullListingRead: false },
+  ]);
+  expect(result.map(({ id, score }) => [id, score])).toEqual([
+    [1, 32],
+    [2, 32],
+  ]);
+});
+
 test.each(["compatible", "review", "blocked"] as const)(
   "the model's score and reason survive its %s eligibility verdict",
   async (status) => {
