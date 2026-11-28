@@ -1065,6 +1065,52 @@ describe("tool-using AI capabilities", () => {
     );
   });
 
+  test("the writer is told the person's chosen template is an instruction", async () => {
+    let systemText = "";
+    let toolText = "";
+    let templateSelection: unknown;
+    const render = vi.fn(({ templateId }: { templateId: string }) =>
+      cleanPreview(templateId),
+    );
+    const result = await runResumeGenerationAgentTask({
+      client: {
+        ...createDeterministicJobFinderAiClient(),
+        chatWithTools(messages, tools) {
+          toolText = JSON.stringify(tools);
+          systemText = messages
+            .filter((message) => message.role === "system")
+            .map((message) => String(message.content))
+            .join(" ");
+          templateSelection = (
+            readAgentTaskState(messages) as { templateSelection: unknown }
+          ).templateSelection;
+          return Promise.resolve({ toolCalls: [composeCall("compose")] });
+        },
+      },
+      substantivePrompt: "Aggressive mode substantive resume instructions.",
+      request: templateRequest(render),
+    });
+    expect(templateSelection).toMatchObject({
+      personTemplateId: "classic_ats",
+      selectedTemplateId: "classic_ats",
+      selectionLocked: false,
+    });
+    expect(systemText).toContain(
+      "templateSelection.personTemplateId is the resume template the person chose in Settings › Resume look. Treat it as their instruction",
+    );
+    expect(systemText).toContain(
+      "only when the person asks for another template",
+    );
+    expect(toolText).not.toContain("Choose the best eligible template");
+    expect(toolText).toContain(
+      "Omit it to keep templateSelection.personTemplateId, the person's chosen template.",
+    );
+    expect(result.recommendedTemplateId).toBe("classic_ats");
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: "classic_ats" }),
+    );
+  });
+
   test("the proposal call can pick the template itself, unless the person locked one", async () => {
     let offeredTemplates: unknown;
     const unlockedRender = vi.fn(({ templateId }: { templateId: string }) =>

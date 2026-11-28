@@ -599,8 +599,11 @@ export async function runResumeGenerationAgentTask(input: {
   request: CreateResumeDraftInput;
   substantivePrompt: string;
 }): Promise<TailoredResumeDraft> {
-  let selectedTemplateId =
+  // The template the person chose in Settings is an instruction to the
+  // writer, not a suggestion; it can switch only when the person asks.
+  const personTemplateId =
     input.request.selectedTemplateId ?? input.request.settings.resumeTemplateId;
+  let selectedTemplateId = personTemplateId;
   let hasComposedProposal = false;
   let hasRenderedPreview = false;
   type ToolResult = {
@@ -915,7 +918,7 @@ export async function runResumeGenerationAgentTask(input: {
       "Everything you need is in the task payload. Write the complete proposal in one compose_resume_proposal call; do not call any other tool first.",
       "Return the summary or accomplishments the resume should show, including saved wording explicitly when it already fits. An empty proposal contains no writer output and must be repaired; the app does not create a fallback resume in its place.",
       "compose_resume_proposal renders the resume, checks every line against the evidence and ends the task when the render fits targetPageCount; when it runs longer you get the page count back to tighten the proposal yourself. Write each line so the evidence backs it. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
-      "To use a different template, pass its templateId to compose_resume_proposal when templateSelection.selectionLocked is false.",
+      "templateSelection.personTemplateId is the resume template the person chose in Settings › Resume look. Treat it as their instruction: render with it, so every application they send uses the look they picked. Pass a different templateId to compose_resume_proposal only when the person asks for another template, and only when templateSelection.selectionLocked is false; fitting the page target is done by tightening the text, not by switching templates.",
       "The runtime preserves identity, chronology, selected strategy, and the final typed resume shape. Your job is to do the actual job-targeted writing within the mode-specific instructions above.",
     ].join(" "),
     state: input.request,
@@ -991,7 +994,7 @@ export async function runResumeGenerationAgentTask(input: {
             templateId: {
               type: "string",
               description:
-                "Optional. One of templateSelection.availableTemplates, only when the selection is not locked.",
+                "Optional. Omit it to keep templateSelection.personTemplateId, the person's chosen template. Pass one of templateSelection.availableTemplates only when the person asked for another template and the selection is not locked.",
             },
           },
           ["proposal"],
@@ -1043,7 +1046,7 @@ export async function runResumeGenerationAgentTask(input: {
       {
         name: "select_resume_template",
         description:
-          "Choose the best eligible template when the person has not locked one. compose_resume_proposal also accepts templateId, which saves a call.",
+          "Switch to another eligible template when the person asked for one; templateSelection.personTemplateId is the template they chose and stays in use otherwise. compose_resume_proposal also accepts templateId, which saves a call.",
         inputSchema: z.object({ templateId: z.string().trim().min(1) }),
         parameters: jsonObject({ templateId: { type: "string" } }, [
           "templateId",
@@ -1122,6 +1125,7 @@ export async function runResumeGenerationAgentTask(input: {
             )?.density,
           }),
           templateSelection: {
+            personTemplateId,
             selectedTemplateId,
             selectionLocked: input.request.templateSelectionLocked === true,
             availableTemplates: templateOptions,

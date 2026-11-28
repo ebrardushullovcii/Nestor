@@ -161,6 +161,15 @@ test.each(["conservative", "balanced", "aggressive"] as const)(
     expect(prompt).toContain(
       "Join setup, action and result when they describe the same accomplishment.",
     );
+    // R12: three resumes turned "the systems I originally helped build" into
+    // "the systems originally helped build" by deleting the pronoun.
+    expect(prompt).toContain(
+      "A resume line leaves the candidate implied only at its opening verb.",
+    );
+    expect(prompt).toContain(
+      "recast that clause instead of deleting the pronoun, which would leave 'the tools helped build'",
+    );
+    expect(prompt).toContain("check that every verb has its subject");
     expect(prompt).toContain(
       "supply a clean summary in the corresponding experienceEntries or projectEntries proposal",
     );

@@ -1843,9 +1843,8 @@ export function renderResumeTemplateHtml(
     .meta-left { justify-content: flex-start; }
     .meta-longform { justify-content: flex-end; font-size: 0.75rem; gap: 0.12rem 0.4rem; }
     .meta-stack { display: grid; gap: 0.08rem; color: var(--muted); font-size: 0.8rem; }
-    .meta-pill-list { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.12rem 0.5rem; color: var(--muted); }
+    .meta-pill-list { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.12rem 1rem; color: var(--muted); }
     .meta-pill-list li { padding: 0; font-size: 0.76rem; line-height: 1.2; }
-    .meta-pill-list li + li::before { content: '|'; color: var(--line); margin-right: 0.5rem; }
     .meta-pill-list-left { justify-content: flex-start; }
     .meta-pill-list-warm li,
     .meta-pill-list-pivot li { background: transparent; }
@@ -1910,9 +1909,9 @@ export function renderResumeTemplateHtml(
     .skill-groups { display: grid; gap: 0.26rem; }
     .skill-group { display: grid; gap: 0.12rem; }
     .skill-group-label { font-size: 0.72rem; line-height: 1.1; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-    .skill-pill-list { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; gap: 0.08rem 0.34rem; }
+    .skill-pill-list { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; gap: 0.08rem 0.26rem; }
     .skill-pill-list li { padding: 0; font-size: 0.81rem; line-height: 1.25; }
-    .skill-pill-list li + li::before { content: '·'; color: var(--accent); margin-right: 0.34rem; }
+    .skill-pill-list li:not(:last-child)::after { content: ','; }
     .body-grid { display: grid; grid-template-columns: 1fr; }
     .body-grid-classic { gap: 0.62rem; margin-top: 0.68rem; }
     .body-grid-compact { gap: 0.5rem; margin-top: 0.58rem; }
