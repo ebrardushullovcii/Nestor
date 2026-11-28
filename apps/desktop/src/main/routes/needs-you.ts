@@ -134,14 +134,17 @@ async function runAiAccountNeed(request: unknown) {
 }
 
 /**
- * Needs you and its count read the AI account item with the store's tasks:
- * a change to it reaches them as an application change.
+ * Needs you, its count and Home read the AI account item again when the
+ * account starts or stops refusing calls. The change touches no job stage,
+ * so it goes out under its own cause: the store drops a stage-less
+ * application change, and screens then kept a closed refusal (or missed a
+ * new one) until the person navigated away and back.
  */
 let announcingAiAccess: (() => void) | null = null;
 function announceAiAccessChanges(): void {
   announcingAiAccess ??= onAiAccessChange(() => {
     getJobStore().notify({
-      cause: "application",
+      cause: "ai_account",
       stages: [],
       ids: [],
       searchId: null,

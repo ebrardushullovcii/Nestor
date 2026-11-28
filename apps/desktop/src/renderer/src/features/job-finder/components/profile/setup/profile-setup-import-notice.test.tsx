@@ -322,3 +322,120 @@ describe("what the last import left behind, on whichever step setup opens", () =
     expect(screen.queryByRole("button", { name: /again/ })).toBeNull();
   });
 });
+
+// W131 fresh install: a new person's import refused by their AI account
+// said "could not be read" and never named the account or Needs you.
+describe("an import the AI account refused", () => {
+  // Synthetic: no real service or account.
+  const outOfCredit = {
+    id: "0123456789abcdef",
+    provider: "https://model.example.test",
+    reason: "funding" as const,
+    owner: "person" as const,
+    providerMessage: "Insufficient balance.",
+    actionUrl: null,
+    since: "2026-11-28T16:50:12.000Z",
+  };
+  const refusedRun = ResumeImportRunSchema.parse({
+    ...readWithoutAiRun,
+    id: "resume_import_refused",
+    timing: {
+      totalMs: 1_000,
+      textBranchMs: 30,
+      literalExtractionMs: 1,
+      reconciliationMs: 1,
+      textStages: [
+        { stage: "identity_summary", status: "failed", durationMs: 10 },
+        { stage: "experience", status: "failed", durationMs: 10 },
+        { stage: "shared_memory", status: "completed", durationMs: 10 },
+      ],
+    },
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+    Reflect.deleteProperty(window, "nestor");
+  });
+
+  it("names the account's step and says the read waits on it", () => {
+    const notice = buildProfileSetupImportNotice({
+      latestResumeImportRun: refusedRun,
+      profile,
+      aiAccount: outOfCredit,
+    });
+    expect(notice).toMatchObject({ kind: "partial", openNeedsYou: true });
+    expect(notice?.message).toBe(
+      "Nestor's AI has not read your resume yet: your AI account has run out of credit. Top it up from Needs you, and the missing sections are read by themselves once the AI answers. What did import is saved.",
+    );
+    expect(
+      buildProfileSetupImportNotice({
+        latestResumeImportRun: refusedRun,
+        profile,
+        aiAccount: { ...outOfCredit, reason: "authentication" },
+      })?.message,
+    ).toContain("the AI service did not accept your API key. Fix the key");
+    // Without a refusal it stays the import's own notice.
+    expect(
+      buildProfileSetupImportNotice({
+        latestResumeImportRun: refusedRun,
+        profile,
+      })?.message,
+    ).toMatch(/^Your resume was only partly imported/u);
+  });
+
+  it("asks nothing of the person when Nestor's own key is paused", () => {
+    const notice = buildProfileSetupImportNotice({
+      latestResumeImportRun: refusedRun,
+      profile,
+      aiAccount: { ...outOfCredit, owner: "nestor" },
+    });
+    expect(notice?.openNeedsYou).toBe(false);
+    expect(notice?.message).toMatch(/^Nestor's AI service is paused/u);
+  });
+
+  it("leaves a file with no resume details as the file's problem", () => {
+    expect(
+      buildProfileSetupImportNotice({
+        latestResumeImportRun: ResumeImportRunSchema.parse({
+          ...interruptedRun,
+          failureKind: "invalid_document",
+          errorMessage:
+            "No resume details were found in this file. Choose another file.",
+        }),
+        profile,
+        aiAccount: outOfCredit,
+      })?.message,
+    ).toBe("No resume details were found in this file. Choose another file.");
+  });
+
+  it("opens Needs you from the notice while the account refuses", async () => {
+    Object.assign(window, {
+      nestor: {
+        needsYou: {
+          aiAccount: { list: vi.fn(() => Promise.resolve([outOfCredit])) },
+        },
+        jobs: { onChange: () => () => undefined },
+      },
+    });
+    const onOpenNeedsYou = vi.fn();
+    render(
+      <ProfileSetupImportNotice
+        latestResumeImportRun={refusedRun}
+        profile={profile}
+        isImportResumePending={false}
+        isAnalyzeProfilePending={false}
+        importDisabledReason={null}
+        onAnalyzeProfileFromResume={vi.fn()}
+        onOpenNeedsYou={onOpenNeedsYou}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Needs you" }),
+    );
+    expect(onOpenNeedsYou).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("button", { name: "Read missing sections again" }),
+    ).toBeTruthy();
+  });
+});

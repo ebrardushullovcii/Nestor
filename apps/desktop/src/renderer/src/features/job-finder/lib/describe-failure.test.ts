@@ -100,3 +100,21 @@ describe("a file that moved or was deleted", () => {
     expect(failure.technicalDetails).toContain("ENOENT");
   });
 });
+
+// W131 fresh install: reading a resume again while the AI account refused
+// said "Something went wrong and this did not finish".
+describe("the AI refusing or not answering", () => {
+  it.each([
+    "Error invoking remote method 'job-finder:profile-workflow': Error: The AI connection failed, so your resume could not be read. Your file is saved. Try again when the connection is back, or continue manually.",
+    "Your AI account has run out of credit, so the AI could not do this and nothing was changed. Top it up from Needs you. Nestor picks this up again by itself once the AI answers.",
+    "Nestor's AI service is paused, so nothing was changed. Your work continues by itself when it is back.",
+  ])("points to Needs you instead of a generic failure: %s", (message) => {
+    const description = describeFailure(new Error(message), {
+      action: "read your resume again",
+    });
+    expect(description.kind).toBe("ai_refused");
+    expect(description.userMessage).toBe(
+      "Could not read your resume again. The AI did not answer, so nothing changed. If Needs you shows a step for your AI account, finish it there and this carries on by itself; otherwise try again in a few minutes.",
+    );
+  });
+});

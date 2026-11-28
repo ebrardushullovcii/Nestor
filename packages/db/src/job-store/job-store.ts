@@ -283,6 +283,7 @@ export function openJobStore(
         "profile_activity",
         "settings",
         "saved_answers",
+        "ai_account",
       ].includes(change.cause)
     )
       return;

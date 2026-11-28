@@ -666,6 +666,17 @@ describe("job store", () => {
     ]);
   });
 
+  it("passes an AI account change to listeners though it moves no stage", () => {
+    const store = open();
+    const changes: JobChange[] = [];
+    store.onChange((change) => changes.push(change));
+    // A stage-less application change carries nothing and is dropped; the
+    // account's own change is what Needs you, its badge and Home listen to.
+    store.notify({ cause: "application", stages: [], ids: [], searchId: null });
+    store.notify({ cause: "ai_account", stages: [], ids: [], searchId: null });
+    expect(changes.map((change) => change.cause)).toEqual(["ai_account"]);
+  });
+
   it("keeps an interrupted search running with its counts for restart recovery", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "job-store-"));
     const file = path.join(dir, "jobs.sqlite");

@@ -21,7 +21,7 @@ export function useAiAccountRefusals(): AiAccountNeed[] {
     let unsubscribe = () => {};
     try {
       unsubscribe = window.nestor.jobs.onChange((change) => {
-        if (change.cause === "application") void load();
+        if (change.cause === "ai_account") void load();
       });
     } catch {
       /* No change feed here: the first read stands. */

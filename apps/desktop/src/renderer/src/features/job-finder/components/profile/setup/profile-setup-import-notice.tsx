@@ -5,6 +5,7 @@ import {
   isInterruptedResumeImportRun,
   canRetrySavedResumeImport,
   RESUME_IMPORT_INTERRUPTED_MESSAGE,
+  type AiAccountNeed,
   type CandidateProfile,
   type ResumeImportRun,
   type ResumeImportProgressEvent,
@@ -12,6 +13,8 @@ import {
 import { Button } from "@renderer/components/ui/button";
 import { getResumeImportStageFallbackNotes } from "../profile-resume-panel";
 import { getResumeImportStageFallbackSummary } from "../resume-import-quality-note";
+import { resumeReadRefusedMessage } from "@renderer/features/needs-you/ai-account-import-message";
+import { useAiAccountRefusals } from "@renderer/features/needs-you/use-ai-account-needs";
 
 const NOTICE_DISMISSED_STORAGE_KEY_PREFIX =
   "nestor.profile-setup-import-notice-dismissed-v1:";
@@ -44,19 +47,38 @@ export function isInterruptedResumeImport(
   return isInterruptedResumeImportRun(run ?? null);
 }
 
-export type ProfileSetupImportNoticeModel =
-  | {
-      kind: "interrupted" | "failed";
-      key: string;
-      message: string;
-      actionLabel: string;
-    }
-  | {
-      kind: "read_without_ai" | "partial";
-      key: string;
-      message: string;
-      actionLabel: string;
-    };
+export type ProfileSetupImportNoticeModel = {
+  kind: "interrupted" | "failed" | "read_without_ai" | "partial";
+  key: string;
+  message: string;
+  actionLabel: string;
+  /** The AI account refused the read: its step is in Needs you. */
+  openNeedsYou?: boolean;
+};
+
+/**
+ * The import's own notice, said as what it is when the AI account refused
+ * the read: the account's step, and that the read waits on it.
+ */
+function withAccountRefusal(
+  notice: ProfileSetupImportNoticeModel | null,
+  run: ResumeImportRun | null,
+  account: AiAccountNeed | null | undefined,
+): ProfileSetupImportNoticeModel | null {
+  if (!notice || !account) return notice;
+  const refusedRead =
+    notice.kind === "partial" ||
+    (notice.kind === "failed" &&
+      (run?.failureKind === "ai_unavailable" ||
+        canRetrySavedResumeImport(run)));
+  if (!refusedRead) return notice;
+  return {
+    ...notice,
+    key: `${notice.key}:account:${account.reason}`,
+    message: resumeReadRefusedMessage(account),
+    openNeedsYou: account.owner === "person",
+  };
+}
 
 /**
  * What the last import left for the person to know, whichever step setup
@@ -65,6 +87,19 @@ export type ProfileSetupImportNoticeModel =
  * both looked like a clean result.
  */
 export function buildProfileSetupImportNotice(input: {
+  latestResumeImportRun: ResumeImportRun | null;
+  profile: CandidateProfile;
+  /** An AI account refusing calls now, if any. */
+  aiAccount?: AiAccountNeed | null;
+}): ProfileSetupImportNoticeModel | null {
+  return withAccountRefusal(
+    buildImportNotice(input),
+    input.latestResumeImportRun,
+    input.aiAccount,
+  );
+}
+
+function buildImportNotice(input: {
   latestResumeImportRun: ResumeImportRun | null;
   profile: CandidateProfile;
 }): ProfileSetupImportNoticeModel | null {
@@ -134,13 +169,16 @@ export function ProfileSetupImportNotice(props: {
   onImportResume?: (() => void) | undefined;
   onRetryInterruptedImport?: (() => void) | undefined;
   onAnalyzeProfileFromResume?: (() => void) | undefined;
+  onOpenNeedsYou?: (() => void) | undefined;
 }) {
   const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const aiAccount = useAiAccountRefusals()[0] ?? null;
   const notice = buildProfileSetupImportNotice({
     latestResumeImportRun: props.latestResumeImportRun,
     profile: props.profile,
+    aiAccount,
   });
   if (props.isImportResumePending)
     return (
@@ -172,6 +210,11 @@ export function ProfileSetupImportNotice(props: {
     >
       <p className="min-w-0 flex-1 basis-80">{notice.message}</p>
       <div className="flex shrink-0 items-center gap-2">
+        {notice.openNeedsYou && props.onOpenNeedsYou ? (
+          <Button onClick={props.onOpenNeedsYou} size="compact" type="button">
+            Open Needs you
+          </Button>
+        ) : null}
         {onAction ? (
           <Button
             disabled={Boolean(props.importDisabledReason)}
