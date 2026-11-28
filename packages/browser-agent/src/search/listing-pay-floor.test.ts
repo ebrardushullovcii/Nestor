@@ -190,7 +190,9 @@ test("single-job output truncation returns a real error instead of replaying the
   expect(chatWithTools).toHaveBeenCalledOnce();
 });
 
-test("the fit model gets the saved pay's tax basis and estimates across bases itself", async () => {
+test("the fit model infers local pay currency and estimates across currencies and tax bases", async () => {
+  const localPay = "50,000-80,000 per year";
+  const foreignPay = "CAD 80,000-120,000 per year";
   const chatWithTools = vi.fn<
     NonNullable<Parameters<typeof fitJobs>[0]["client"]>["chatWithTools"]
   >((messages) => {
@@ -198,7 +200,21 @@ test("the fit model gets the saved pay's tax basis and estimates across bases it
     expect(messages[0].content).toContain(
       "estimate the saved figure on the listing's basis yourself and say so",
     );
+    expect(messages[0].content).toContain(
+      "infer the posting country's local currency when the posting makes that the natural reading, and state the assumption",
+    );
+    expect(messages[0].content).toContain(
+      "use a reasonable approximate exchange rate and state the rate and converted amount as estimates",
+    );
+    expect(messages[0].content).toContain(
+      "Keep the pay object in the listing's currency, with its original bounds and verbatim quote",
+    );
+    expect(messages[0].content).toContain(
+      "the uncertainty in the estimate could change whether the floor is met",
+    );
     expect(messages[1].content).toContain('"taxBasis":"after_tax"');
+    expect(messages[1].content).toContain(localPay);
+    expect(messages[1].content).toContain(foreignPay);
     return Promise.resolve({
       content: JSON.stringify({
         fits: [
@@ -208,7 +224,15 @@ test("the fit model gets the saved pay's tax basis and estimates across bases it
             currency: "EUR",
             interval: "year",
             basis: "base",
-            quote: "EUR 50,000-80,000 per year",
+            quote: localPay,
+          }),
+          verdict(2, {
+            minimum: 80000,
+            maximum: 120000,
+            currency: "CAD",
+            interval: "year",
+            basis: "base",
+            quote: foreignPay,
           }),
         ],
       }),
@@ -226,7 +250,13 @@ test("the fit model gets the saved pay's tax basis and estimates across bases it
         taxBasis: "after_tax" as const,
       },
     },
-    jobs: [job(1, "SQL reporting. EUR 50,000-80,000 per year.")],
+    jobs: [
+      job(1, `SQL reporting in Germany. ${localPay}.`),
+      {
+        ...job(2, `SQL reporting in Canada. ${foreignPay}.`),
+        location: "Canada",
+      },
+    ],
     client: { chatWithTools },
   });
   expect(chatWithTools).toHaveBeenCalledOnce();

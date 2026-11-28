@@ -542,7 +542,7 @@ test.each(["advertised window", "provider rejection"])(
       profile,
       jobs,
       // Leave room for the prompt and either listing, but not both together.
-      contextWindowTokens: limit === "advertised window" ? 7_800 : 64_000,
+      contextWindowTokens: limit === "advertised window" ? 8_100 : 64_000,
       goals: { targetRoles: [], locations: [] },
       client: {
         chatWithTools: (messages) => {

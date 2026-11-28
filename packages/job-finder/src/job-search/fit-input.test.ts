@@ -4,7 +4,7 @@ import {
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
 import { buildListingFitPerson } from "@nestor/browser-agent";
-import { fitContextFingerprint } from "./fit-input";
+import { fitContextFingerprint, fitContextInput } from "./fit-input";
 import type { JobSearchContext } from "./types";
 
 const profile = CandidateProfileSchema.parse({
@@ -47,6 +47,10 @@ const context: JobSearchContext = {
   sources: [],
   sourceInstructionArtifacts: [],
 };
+
+test("currency-aware fit judgments use scorer version 14", () => {
+  expect(fitContextInput(context).scorerVersion).toBe(14);
+});
 
 test("limited permission fingerprints change with permission facts, not the calendar date", () => {
   const limited = {
