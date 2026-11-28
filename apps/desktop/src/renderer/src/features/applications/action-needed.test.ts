@@ -242,6 +242,19 @@ describe("done so far and sent", () => {
     expect(doneSoFar(record())).not.toContain("campaign-synthetic-jamie.txt");
   });
 
+  it("describes the form that was sent when the resumed attempt only checked its status", () => {
+    const details = {
+      ...record({ state: "uncertain", reviewCard: { answers: [] } }),
+      earlierSendForm: {
+        filledFieldCount: 4,
+        attachedFileNames: ["synthetic-resume.pdf"],
+      },
+    };
+    expect(doneSoFar(details)).toBe(
+      "the attempt that pressed Send filled 4 fields and attached synthetic-resume.pdf.",
+    );
+  });
+
   it("claims a send only from a confirmed receipt", () => {
     expect(
       sentStatus(

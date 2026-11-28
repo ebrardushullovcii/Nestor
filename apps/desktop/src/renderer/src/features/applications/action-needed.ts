@@ -134,7 +134,23 @@ const plural = (count: number, one: string, many: string) =>
 
 /** What the run recorded putting on the form; nothing it only selected. */
 export function doneSoFar(details: ApplicationDetails): string {
-  const card = details.reviewCard;
+  const { reviewCard: card, earlierSendForm } = details;
+  if (
+    earlierSendForm &&
+    (earlierSendForm.filledFieldCount > 0 ||
+      earlierSendForm.attachedFileNames.length > 0)
+  ) {
+    const { filledFieldCount, attachedFileNames } = earlierSendForm;
+    const parts = [
+      filledFieldCount > 0
+        ? `filled ${plural(filledFieldCount, "field", "fields")}`
+        : null,
+      attachedFileNames.length > 0
+        ? `attached ${[...new Set(attachedFileNames)].join(", ")}`
+        : null,
+    ].filter(Boolean);
+    return `the attempt that pressed Send ${parts.join(" and ")}.`;
+  }
   if (!card) return "nothing is recorded on the form yet.";
   const parts: string[] = [];
   if (card.answers.length > 0)
