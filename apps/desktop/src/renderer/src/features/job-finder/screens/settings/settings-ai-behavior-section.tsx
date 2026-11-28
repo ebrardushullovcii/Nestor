@@ -107,7 +107,10 @@ export const browserPermissionChoices: readonly {
     label: "Use Google to sign in or sign up",
     description:
       "Uses an existing Google sign-in to log in or create accounts on job sites.",
-    hint: "Uses the Google account that matches your Profile email. Sign in to Google in this browser first. Passwords, verification and requests for more than your name, email and profile picture still come to you.",
+    // ADR 0079: no rule picks the account by the Profile email any more.
+    // Each run reads which Google accounts are signed in to this browser
+    // and the agent chooses among them for the site.
+    hint: "Sign in to Google in this browser first. The agent sees which Google accounts are signed in here and picks the one that fits the site. A password you haven't saved, a phone or passkey check, and making a new Google account still come to you.",
   },
   {
     key: "createAccounts",

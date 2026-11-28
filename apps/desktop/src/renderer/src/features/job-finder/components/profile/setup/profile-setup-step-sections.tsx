@@ -1,4 +1,5 @@
 import { ProfileHoursField } from "../profile-hours-field";
+import { fullCountryName } from "../../../lib/country-name";
 import { SetupSites } from "@renderer/features/job-lists/setup-sites";
 import { useId, useRef, type ReactNode } from "react";
 import { cn } from "@renderer/lib/cn";
@@ -549,7 +550,11 @@ export function SetupWorkEligibilityQuestions(props: {
       joinListInput(values),
       { shouldDirty: true, shouldTouch: true, shouldValidate: true },
     );
-  const suggestedCountry = props.suggestedCountry?.trim() || null;
+  // Said and saved by its full name: "London, UK" left "UK" in the
+  // profile, and the answer read "I'm allowed to work in UK".
+  const suggestedCountry = props.suggestedCountry?.trim()
+    ? fullCountryName(props.suggestedCountry)
+    : null;
   const answered =
     (countries.length > 0 ||
       ownWords.trim() !== "" ||
@@ -695,9 +700,7 @@ export function SetupWorkEligibilityQuestions(props: {
           aria-describedby={`${ownWordsId}-help`}
           data-profile-setup-work-rule
           id={ownWordsId}
-          placeholder={workAuthorizationInOwnWordsExample(
-            props.suggestedCountry,
-          )}
+          placeholder={workAuthorizationInOwnWordsExample(suggestedCountry)}
           rows={3}
           {...props.profileForm.register(
             "eligibility.workAuthorizationInOwnWords",
