@@ -2354,6 +2354,10 @@ export function createBrowserAgentRuntime(
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).readMailboxSession!(),
         ),
+      readProviderSessions: () =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).readProviderSessions!(),
+        ),
       readAccountFlowEntry: (origins) =>
         onReadyPage((page) =>
           Promise.resolve(readAccountFlowEntry(page, origins)),

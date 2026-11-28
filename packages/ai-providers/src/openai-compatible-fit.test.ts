@@ -123,6 +123,9 @@ test.each([
           "An explicit employer hiring or residence rule for this role takes precedence over a conflicting board label.",
         );
         expect(messages[0]!.content).toContain(
+          "If every offered country excludes both where the person can work now and where they would move, that is a confirmed non-negotiable place conflict: apply step 2.",
+        );
+        expect(messages[0]!.content).toContain(
           "say that the hiring scope is unverified and weigh that uncertainty in the score",
         );
       }
@@ -512,6 +515,10 @@ test("bounds twenty-job batch evidence while keeping eligibility facts", () => {
     })),
   });
   expect(payload.jobs).toHaveLength(20);
+  expect(payload.jobs[0]).toMatchObject({
+    canonicalUrl: posting.canonicalUrl,
+    source: posting.source,
+  });
   expect(payload.jobs[0]?.description.length).toBeLessThanOrEqual(3000);
   expect(payload.jobs[0]?.description).toContain("Java and Dutch C1");
   expect(payload.jobs[0]?.evidenceOmitted).toBe(true);
@@ -824,7 +831,7 @@ test("an oversized batch fails before sending rather than truncating column posi
       apiKey: "synthetic-key",
       baseUrl: "https://example.com/v1",
       model: "synthetic-model",
-      contextWindowTokens: 16_000,
+      contextWindowTokens: 18_000,
       streaming: false,
     });
     await expect(

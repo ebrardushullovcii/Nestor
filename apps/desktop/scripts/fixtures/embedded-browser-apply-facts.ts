@@ -40,8 +40,27 @@ async function main() {
     await host.command({ type: "open", url: replica.url });
     await host.runAutomation("Apply facts replica", undefined, async () => {
       const browser = await host.connect();
-      const page = browser.contexts()[0]!.pages()[0]!;
+      const context = browser.contexts()[0]!;
+      const page = context.pages()[0]!;
       const mechanics = createPlaywrightApplyPageMechanics(page);
+      const providerUrl = "https://www.linkedin.com/feed/";
+      const providerPage = '<button class="global-nav__me">Me</button>';
+      await context.route("https://www.linkedin.com/**", (route) =>
+        route.fulfill({ contentType: "text/html", body: providerPage }),
+      );
+      await context.addCookies([
+        { url: providerUrl, name: "theme", value: "dark" },
+      ]);
+      const beforeProviderProbe = context.pages();
+      const formUrl = page.url();
+      assert.deepEqual(await mechanics.readProviderSessions?.(), [
+        { provider: "LinkedIn", status: "signed_in" },
+      ]);
+      assert.deepEqual(context.pages(), beforeProviderProbe);
+      assert.equal(page.url(), formUrl);
+      result.checks.push(
+        "Provider session read in the embedded form's browser context",
+      );
       const fill = async () => {
         const form = await mechanics.readPage();
         const field = (label: string) =>

@@ -12,6 +12,7 @@ import type {
   ApplicationAutomationMode,
   ApplicationQuestionControlType,
   ApplicationQuestionKind,
+  ApplicationResumeArtifact,
   ApplicationSalaryDisclosureRule,
   ApplyAgentTiming,
   ApplyAnswerTags,
@@ -339,6 +340,7 @@ export interface ApplyPageHands {
   closeTab?: ApplyRawPageHands["closeTab"];
   closeAuxiliaryTabs?: ApplyRawPageHands["closeAuxiliaryTabs"];
   readMailboxSession?: ApplyRawPageHands["readMailboxSession"];
+  readProviderSessions?: ApplyRawPageHands["readProviderSessions"];
   prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
   listSavedCredentials?: ApplyRawPageHands["listSavedCredentials"];
   fillSavedCredential?: ApplyRawPageHands["fillSavedCredential"];
@@ -408,6 +410,7 @@ export interface ApplyAnswerSources {
   preferences?: JobSearchPreferences | undefined;
   /** Plain text of the resume that goes with this application, when there is one. */
   resumeText: string | null;
+  selectedResume?: Pick<ApplicationResumeArtifact, "source" | "level">;
   posting: {
     title: string;
     company: string;

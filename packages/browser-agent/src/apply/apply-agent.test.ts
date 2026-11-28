@@ -329,7 +329,7 @@ test.each([
   "confirm_before_submit",
   "autonomous_submit",
 ] as const)(
-  "%s receives mailbox facts, required agreement instructions and the vault account tool",
+  "%s receives sign-in session facts, required agreement instructions and the vault account tool",
   async (mode) => {
     const input = config(page());
     input.authority.mode = mode;
@@ -344,6 +344,13 @@ test.each([
           },
         ],
       });
+    const readProviderSessions = vi.fn(() =>
+      Promise.resolve([
+        { provider: "LinkedIn", status: "signed_in" as const },
+        { provider: "Fixture Identity", status: "unknown" as const },
+      ]),
+    );
+    input.hands.readProviderSessions = readProviderSessions;
     const client = model([done]);
     await runApplyAgent(input, client);
     const prompt = createApplySystemPrompt(input);
@@ -356,6 +363,9 @@ test.each([
       expect(prompt).not.toContain(removed);
     expect(prompt).toContain("including arbitration");
     expect(prompt).toContain(
+      "prefer using that identity over creating a separate password account",
+    );
+    expect(prompt).toContain(
       "such as an attestation you will not make yourself, use one forPerson item with onPage: other",
     );
     expect(prompt).toContain(
@@ -364,6 +374,13 @@ test.each([
     const call = vi.mocked(client.chatWithTools).mock.calls[0];
     expect(JSON.stringify(call[0])).toContain("synthetic@example.test");
     expect(JSON.stringify(call[0])).toContain("Google accounts are signed in");
+    expect(JSON.stringify(call[0])).toContain(
+      "LinkedIn is signed in in this browser.",
+    );
+    expect(JSON.stringify(call[0])).toContain(
+      "The run-start read did not confirm a Fixture Identity session in this browser.",
+    );
+    expect(readProviderSessions).toHaveBeenCalledOnce();
     expect(call[1].map((tool) => tool.function.name)).toEqual(
       expect.arrayContaining([
         "open_tab",
@@ -380,6 +397,8 @@ test("the first model turn sees a Gmail redirect without losing its browser tool
   const input = config(page());
   input.hands.readMailboxSession = () =>
     Promise.resolve({ status: "google_accounts_redirect" });
+  input.hands.readProviderSessions = () =>
+    Promise.reject(new Error("Provider probe unavailable"));
   const client = model([done]);
   await runApplyAgent(input, client);
 
@@ -390,12 +409,19 @@ test("the first model turn sees a Gmail redirect without losing its browser tool
   expect(JSON.stringify(messages)).toContain(
     "tell them Google needs them to sign in again in Nestor’s browser",
   );
+  expect(JSON.stringify(messages)).toContain(
+    "For providers with unknown or unavailable session status, use any signed-in identity shown by the site's sign-in flow.",
+  );
   expect(tools.map((tool) => tool.function.name)).toContain("open_tab");
 });
 
-test.each(["prepare_only", "autonomous_submit"] as const)(
-  "%s receives the real instruction and both labelled resume documents",
-  async (mode) => {
+test.each([
+  ["prepare_only", "aggressive"],
+  ["confirm_before_submit", "tailored"],
+  ["autonomous_submit", "light"],
+] as const)(
+  "%s receives the real instruction and both labelled resume documents (%s)",
+  async (mode, level) => {
     const input = config(page());
     input.authority.mode = mode;
     input.sources.preferences = {
@@ -404,11 +430,11 @@ test.each(["prepare_only", "autonomous_submit"] as const)(
     } as unknown as NonNullable<ApplyAgentConfig["sources"]["preferences"]>;
     input.sources.resumeText =
       "Selected tailored resume: Optimizely and A/B testing.";
+    input.sources.selectedResume = { source: "tailored_export", level };
     const client = model([done]);
     await runApplyAgent(input, client);
-    const prompt = JSON.stringify(
-      vi.mocked(client.chatWithTools).mock.calls[0][0],
-    );
+    const messages = vi.mocked(client.chatWithTools).mock.calls[0][0];
+    const prompt = messages.map((message) => message.content).join("\n");
     expect(prompt).not.toContain("approvalMode");
     expect(prompt).not.toContain("humanReviewRequired");
     expect(prompt).toContain(mode);
@@ -416,6 +442,14 @@ test.each(["prepare_only", "autonomous_submit"] as const)(
     expect(prompt).toContain("8 years of platform engineering");
     expect(prompt).toContain("Selected resume being sent");
     expect(prompt).toContain("Optimizely and A/B testing");
+    expect(prompt).toContain('"source":"tailored_export"');
+    expect(prompt).toContain(`"level":"${level}"`);
+    expect(prompt).toContain(
+      "Ground every factual claim in form answers in the applicant record.",
+    );
+    expect(prompt).toContain(
+      "A technology, rounded duration or other detail that appears only in the selected resume belongs to that document.",
+    );
   },
 );
 
