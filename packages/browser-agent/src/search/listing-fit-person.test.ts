@@ -44,6 +44,17 @@ test("fit and application models get the person's own work rule (R10)", () => {
   );
 });
 
+test("fit gets the person's citizenship, and no key when none is saved", () => {
+  expect(buildListingFitPerson(profile(null))).not.toHaveProperty(
+    "citizenshipCountries",
+  );
+  const person = buildListingFitPerson({
+    ...profile(null),
+    citizenshipCountries: ["Kosovo"],
+  });
+  expect(person).toMatchObject({ citizenshipCountries: ["Kosovo"] });
+});
+
 test("an empty rule leaves the fit key as it was, so an upgrade re-scores nothing", () => {
   const person = buildListingFitPerson(profile(null));
   expect(person.workEligibility).not.toHaveProperty(

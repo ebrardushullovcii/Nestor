@@ -356,6 +356,28 @@ describe("batch fit judging", () => {
       "wins over the general country list and sponsorship answer there",
     );
   });
+  test("sends saved citizenship with work eligibility, and nothing when none is saved", () => {
+    const profile = createProfile();
+    const empty = buildJobFitJudgingPayload({
+      assessmentDate: "2026-10-04",
+      profile,
+      searchPreferences: createPreferences(),
+      jobs: [],
+    });
+    expect(JSON.stringify(empty.person.workEligibility)).not.toContain(
+      "Citizenship",
+    );
+    const payload = buildJobFitJudgingPayload({
+      assessmentDate: "2026-10-04",
+      profile: { ...profile, citizenshipCountries: ["Kosovo", "Albania"] },
+      searchPreferences: createPreferences(),
+      jobs: [],
+    });
+    expect(Object.entries(payload.person.workEligibility)).toContainEqual([
+      "Citizenship (countries; passport country first)",
+      ["Kosovo", "Albania"],
+    ]);
+  });
   test("does not infer a junior level from missing seniority (R3-204)", () => {
     expect(buildFitEvidenceInstructions()).toContain(
       "Missing seniority means level not confirmed",
