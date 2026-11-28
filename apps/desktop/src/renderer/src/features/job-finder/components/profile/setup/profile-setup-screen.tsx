@@ -346,7 +346,9 @@ export function ProfileSetupScreen(props: {
   const aiAccountRefusal = useAiAccountRefusals()[0] ?? null;
   const unreadImportSteps = isImportResumePending
     ? []
-    : getUnreadImportSetupSteps(latestResumeImportRun);
+    : getUnreadImportSetupSteps(latestResumeImportRun, {
+        aiAccountRefusing: aiAccountRefusal !== null,
+      });
   const isPristineSetup =
     profileSetupState.status === "not_started" && !hasImportedResume;
   const profileSetupLayoutClassNames = getProfileSetupLayoutClassNames({

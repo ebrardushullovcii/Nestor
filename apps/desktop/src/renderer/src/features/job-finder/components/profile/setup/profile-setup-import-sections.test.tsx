@@ -90,6 +90,29 @@ describe("a section the resume read never reached (W131)", () => {
     expect(getUnreadImportSetupSteps(null)).toEqual([]);
   });
 
+  test("a read the account refused outright waits on it for every AI section", () => {
+    // Live (W133): "Read missing sections again" while the account still
+    // refused failed before any stage ran, and the stepper fell back to
+    // "Ready to review".
+    const refused = ResumeImportRunSchema.parse({
+      ...runWithStages({
+        identity_summary: "failed",
+        experience: "failed",
+        background: "failed",
+        shared_memory: "failed",
+      }),
+      trigger: "refresh",
+      status: "failed",
+      failureKind: "ai_unavailable",
+      timing: null,
+    });
+    expect(
+      getUnreadImportSetupSteps(refused, { aiAccountRefusing: true }),
+    ).toEqual(["essentials", "background"]);
+    // With no refusal the failed run says nothing per section.
+    expect(getUnreadImportSetupSteps(refused)).toEqual([]);
+  });
+
   test("says what the read waits on, in the import notice's terms", () => {
     expect(formatUnreadImportStepLabel(null)).toBe("Not read yet");
     expect(formatUnreadImportStepLabel({ owner: "person" })).toBe(
