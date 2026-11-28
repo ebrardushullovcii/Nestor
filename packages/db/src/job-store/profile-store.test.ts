@@ -402,3 +402,61 @@ test("the work rule in the person's own words is stored, also in a file from bef
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("date of birth, postal address and citizenship are stored, also in a file from before they existed", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-personal-facts-"));
+  const file = path.join(dir, "jobs.sqlite");
+  try {
+    const first = openJobStore(file);
+    createProfileStore(first).patch({
+      fields: { currentCity: "Exampleville" },
+    });
+    first.close();
+    // A file written before the fields: the columns are not there yet.
+    const old = new DatabaseSync(file);
+    for (const column of ["street_address", "postal_code", "date_of_birth"])
+      old.exec(`ALTER TABLE profile DROP COLUMN ${column}`);
+    old.close();
+
+    const upgraded = openJobStore(file);
+    const profile = createProfileStore(upgraded);
+    expect(profile.read()).toMatchObject({
+      currentCity: "Exampleville",
+      streetAddress: null,
+      postalCode: null,
+      dateOfBirth: null,
+      citizenshipCountries: [],
+    });
+    profile.replace({
+      ...profile.read(),
+      streetAddress: "1 Synthetic Way, Apt 2",
+      postalCode: "00000",
+      dateOfBirth: "1990-01-31",
+      citizenshipCountries: ["Examplestan", "Samplia"],
+    });
+    upgraded.close();
+
+    const reopened = openJobStore(file);
+    const saved = createProfileStore(reopened);
+    expect(saved.read()).toMatchObject({
+      currentCity: "Exampleville",
+      streetAddress: "1 Synthetic Way, Apt 2",
+      postalCode: "00000",
+      dateOfBirth: "1990-01-31",
+      citizenshipCountries: ["Examplestan", "Samplia"],
+    });
+    // The passport country leads; reordering is a change the store keeps.
+    saved.patch({
+      lists: { citizenshipCountries: ["Samplia", "Examplestan"] },
+      fields: { postalCode: null },
+    });
+    expect(saved.read().citizenshipCountries).toEqual([
+      "Samplia",
+      "Examplestan",
+    ]);
+    expect(saved.read().postalCode).toBeNull();
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -383,6 +383,17 @@ export const CandidateProfileSchema = z.object({
   currentCity: NonEmptyStringSchema.nullable().default(null),
   currentRegion: NonEmptyStringSchema.nullable().default(null),
   currentCountry: NonEmptyStringSchema.nullable().default(null),
+  /**
+   * The street line of the person's postal address. With postalCode and the
+   * city, region and country above it is the full address an application
+   * form asks for; resumes show only city, region and country.
+   */
+  streetAddress: NonEmptyStringSchema.nullable().default(null),
+  postalCode: NonEmptyStringSchema.nullable().default(null),
+  /** As the person or their resume gives it; YYYY-MM-DD when the date picker set it. */
+  dateOfBirth: NonEmptyStringSchema.nullable().default(null),
+  /** Countries the person is a citizen of, the passport country first. */
+  citizenshipCountries: z.array(NonEmptyStringSchema).default([]),
   timeZone: NonEmptyStringSchema.nullable().default(null),
   yearsExperience: z.number().int().min(0).nullable(),
   email: NonEmptyStringSchema.nullable().default(null),

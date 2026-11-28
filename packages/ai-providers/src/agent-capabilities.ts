@@ -1650,7 +1650,7 @@ export async function runProfileCopilotAgentTask(input: {
               type: "object",
               additionalProperties: true,
               description:
-                "Supported examples: headline, currentLocation, githubUrl, portfolioUrl, personalWebsiteUrl, yearsExperience. For the professional summary shown in Basics, use set_professional_summary_fields with fullSummary.",
+                "Supported examples: headline, currentLocation, streetAddress, postalCode, dateOfBirth (YYYY-MM-DD), citizenshipCountries (array, passport country first), githubUrl, portfolioUrl, personalWebsiteUrl, yearsExperience. For the professional summary shown in Basics, use set_professional_summary_fields with fullSummary.",
             },
           },
           ["summary", "fields"],

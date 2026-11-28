@@ -150,7 +150,10 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     table: "profile_goals",
     column: "compensation_tax_basis",
     definition: "TEXT",
-  },
+  }, // Postal address and date of birth for application forms; empty in older files.
+  { table: "profile", column: "street_address", definition: "TEXT" },
+  { table: "profile", column: "postal_code", definition: "TEXT" },
+  { table: "profile", column: "date_of_birth", definition: "TEXT" },
 ];
 
 const JOBS = `

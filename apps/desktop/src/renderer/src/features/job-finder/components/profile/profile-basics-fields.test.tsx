@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import {
+  buildProfilePayload,
   createProfileEditorValues,
   type ProfileEditorValues,
 } from "../../lib/profile-editor";
@@ -63,6 +64,10 @@ const SHARED_BASICS_FIELD_LABELS = [
   "Years of experience",
   "Email",
   "Phone",
+  "Date of birth",
+  "Citizenship",
+  "Street address",
+  "Postal code",
   "City",
   "State or region",
   "Country",
@@ -113,6 +118,69 @@ describe("shared profile Basics field list", () => {
     // Editing a part rebuilds the line exactly as the payload builder does.
     expect(container.textContent).toContain("Austin, TX, United States");
     expect(container.textContent).not.toContain("Cedar Park, TX 78613");
+  });
+
+  it("holds date of birth, citizenship and the postal address, and saves them", () => {
+    let form: ReturnType<typeof useForm<ProfileEditorValues>> | null = null;
+    function Harness() {
+      const profileForm = useForm<ProfileEditorValues>({
+        defaultValues: createProfileEditorValues(profile),
+      });
+      form = profileForm;
+      return (
+        <ProfileSetupEssentialsStep
+          nextStep="background"
+          onSaveAndGoToStep={vi.fn()}
+          profileForm={profileForm}
+          renderFooter={() => null}
+        />
+      );
+    }
+    const { container } = render(<Harness />);
+
+    const birth = screen.getByLabelText<HTMLInputElement>("Date of birth");
+    expect(birth.type).toBe("date");
+    fireEvent.change(birth, { target: { value: "1990-01-31" } });
+    fireEvent.change(screen.getByLabelText("Citizenship"), {
+      target: { value: "Examplestan, Samplia, Examplestan" },
+    });
+    fireEvent.change(screen.getByLabelText("Street address"), {
+      target: { value: "1 Synthetic Way" },
+    });
+    fireEvent.change(screen.getByLabelText("Postal code"), {
+      target: { value: "00000" },
+    });
+    // Street and postal code stay off resumes: the shown line is unchanged.
+    expect(container.textContent).toContain("Cedar Park, TX 78613");
+
+    const payload = buildProfilePayload(profile, form!.getValues()).payload;
+    expect(payload).toMatchObject({
+      dateOfBirth: "1990-01-31",
+      citizenshipCountries: ["Examplestan", "Samplia"],
+      streetAddress: "1 Synthetic Way",
+      postalCode: "00000",
+      currentLocation: "Cedar Park, TX 78613",
+    });
+  });
+
+  it("shows a date of birth the resume wrote in words as editable text", () => {
+    function Harness() {
+      const form = useForm<ProfileEditorValues>({
+        defaultValues: createProfileEditorValues({
+          ...profile,
+          dateOfBirth: "31 January 1990",
+          citizenshipCountries: ["Examplestan", "Samplia"],
+        }),
+      });
+      return <ProfileCoreTab profileForm={form} />;
+    }
+    render(<Harness />);
+    const birth = screen.getByLabelText<HTMLInputElement>("Date of birth");
+    expect(birth.type).toBe("text");
+    expect(birth.value).toBe("31 January 1990");
+    expect(screen.getByLabelText<HTMLInputElement>("Citizenship").value).toBe(
+      "Examplestan, Samplia",
+    );
   });
 
   it("keeps the legacy plain summary in step with the professional summary", () => {

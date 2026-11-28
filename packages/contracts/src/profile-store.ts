@@ -43,6 +43,7 @@ const identity = CandidateProfileSchema.omit({
   targetRoles: true,
   locations: true,
   skills: true,
+  citizenshipCountries: true,
   experiences: true,
   education: true,
   certifications: true,
@@ -91,6 +92,7 @@ export const ProfileListsSchema = z
     targetRoles: CandidateProfileSchema.shape.targetRoles,
     locations: CandidateProfileSchema.shape.locations,
     skills: CandidateProfileSchema.shape.skills,
+    citizenshipCountries: CandidateProfileSchema.shape.citizenshipCountries,
     ...prefixFieldShape(
       "workEligibility",
       CandidateWorkEligibilitySchema.pick({

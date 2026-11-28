@@ -46,6 +46,10 @@ type ResolvedResumeImportSelection = {
       | "currentRegion"
       | "currentCountry"
       | "currentLocation"
+      | "streetAddress"
+      | "postalCode"
+      | "dateOfBirth"
+      | "citizenshipCountries"
       | "timeZone"
       | "yearsExperience"
       | "email"
@@ -418,6 +422,23 @@ function buildResolvedSelection(
         selection.scalarFields.timeZone =
           typeof value === "string" ? value : null;
         break;
+      case "location.streetAddress":
+      case "location.postalCode":
+      case "identity.dateOfBirth":
+        if (typeof value === "string" && value.trim())
+          selection.scalarFields[
+            candidate.target.key as
+              | "streetAddress"
+              | "postalCode"
+              | "dateOfBirth"
+          ] = value.trim();
+        break;
+      case "identity.citizenshipCountries": {
+        const countries = uniqueStrings(toStringArray(value));
+        if (countries.length > 0)
+          selection.scalarFields.citizenshipCountries = countries;
+        break;
+      }
       case "contact.email":
         selection.scalarFields.email = typeof value === "string" ? value : null;
         break;
@@ -810,6 +831,14 @@ function mergeResolvedSelectionIntoWorkspace(
         selection.scalarFields.timeZone !== undefined
           ? selection.scalarFields.timeZone
           : profile.timeZone,
+      // A differing saved value reaches here only once the person chose it.
+      streetAddress:
+        selection.scalarFields.streetAddress ?? profile.streetAddress,
+      postalCode: selection.scalarFields.postalCode ?? profile.postalCode,
+      dateOfBirth: selection.scalarFields.dateOfBirth ?? profile.dateOfBirth,
+      citizenshipCountries:
+        selection.scalarFields.citizenshipCountries ??
+        profile.citizenshipCountries,
       yearsExperience:
         selection.scalarFields.yearsExperience ??
         (isFreshStartCandidateProfile(profile) && profile.yearsExperience === 0

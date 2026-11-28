@@ -484,6 +484,31 @@ test("the apply model gets the pay range's tax basis and estimates the other bas
   expect(sent).toContain('\\"taxBasis\\":\\"after_tax\\"');
 });
 
+test("the apply model gets the saved date of birth, postal address and citizenship as facts", async () => {
+  const input = config(page());
+  input.sources.profile = {
+    ...input.sources.profile,
+    streetAddress: "1 Synthetic Way",
+    postalCode: "00000",
+    dateOfBirth: "1990-01-31",
+    citizenshipCountries: ["Examplestan", "Samplia"],
+  };
+  expect(createApplySystemPrompt(input)).toContain(
+    "the saved citizenship, date of birth and postal address are the person's own facts",
+  );
+  const client = model([done]);
+  await runApplyAgent(input, client);
+  const sent = JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]);
+  expect(sent).toContain('\\"postalCode\\":\\"00000\\"');
+  expect(sent).toContain('\\"street\\":\\"1 Synthetic Way\\"');
+  expect(sent).toContain('\\"dateOfBirth\\":\\"1990-01-31\\"');
+  expect(sent).toContain(
+    '\\"citizenshipCountries\\":[\\"Examplestan\\",\\"Samplia\\"]',
+  );
+  expect(sent).toContain('\\"id\\":\\"profile.dateOfBirth\\"');
+  expect(sent).toContain('\\"id\\":\\"profile.citizenshipCountries.0\\"');
+});
+
 test("a stale planned ref names every unattempted batch entry and leaves them untouched", async () => {
   const source = page({
     controls: [0, 1, 2].map((index) => ({
