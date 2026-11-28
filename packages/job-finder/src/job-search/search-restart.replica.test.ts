@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { chromium, type BrowserContext, type Page } from "playwright";
-import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  createDeterministicJobFinderAiClient,
+  createOpenAiCompatibleJobFinderAiClient,
+  resetAiAccessForTests,
+} from "@nestor/ai-providers";
 import { createApplyPageHands, runJobSearchAgent } from "@nestor/browser-agent";
 import {
   createPlaywrightApplyPageMechanics,
@@ -15,6 +19,7 @@ import {
   DiscoveryRunResultSchema,
   JobDiscoveryTargetSchema,
   JobSearchPreferencesSchema,
+  NESTOR_REQUEST_REJECTED_MESSAGE,
   toJobSearchGoals,
 } from "@nestor/contracts";
 import {
@@ -23,6 +28,7 @@ import {
   type JobStore,
 } from "@nestor/db/job-store";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { createJobCommandRunner } from "../job-commands";
 import { createListingSearchEngine, type JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import type { JobSearchContext, JobSearchRunner } from "./types";
@@ -103,7 +109,11 @@ type ModelCall = { task: string; urls: string[]; cards?: string[] };
  */
 function scriptedModel(
   calls: ModelCall[],
-  options: { keep?: (title: string) => 0 | 1; holdReads?: boolean } = {},
+  options: {
+    keep?: (title: string) => 0 | 1;
+    holdReads?: boolean;
+    refuseScreen?: (signal?: AbortSignal) => Promise<unknown> | undefined;
+  } = {},
 ) {
   return {
     ...createDeterministicJobFinderAiClient(),
@@ -123,6 +133,11 @@ function scriptedModel(
           listings?: { id: number; title: string; url: string }[];
         };
         if (task === "listing_screen") {
+          const refused = options.refuseScreen?.(request?.signal);
+          if (refused)
+            return refused.then(() => {
+              throw new Error("Expected a provider refusal");
+            });
           const titles = data.titles ?? [];
           calls.push({
             task,
@@ -228,31 +243,64 @@ function finished(runner: JobSearchRunner, store: JobStore, id: string) {
   );
 }
 
-test("quitting while an HTTP index board is half read keeps its pages and reads, and fetches no index page again", async () => {
+test("a Thorough search finishes both replica boards across a restart and Try again after a refused request", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nestor-search-restart-"));
   const file = join(dir, "jobs.sqlite");
   const target = `${base}/longboard/jobs`;
+  const secondBoard = `${base}/lever/`;
   const context = searchContext(target);
+  context.sources = [
+    ...context.sources,
+    JobDiscoveryTargetSchema.parse({
+      id: "2",
+      label: "Copper Kite Careers",
+      startingUrl: secondBoard,
+    }),
+  ];
+  const modelBase = "https://search-model.example.test/v1";
+  const rejectingModel = createOpenAiCompatibleJobFinderAiClient({
+    baseUrl: modelBase,
+    apiKey: "synthetic-search-refusal",
+    model: "scripted",
+  });
+  let refuse = true;
+  let refusedRequests = 0;
+  const model = (calls: ModelCall[]) =>
+    scriptedModel(calls, {
+      refuseScreen: (signal) => {
+        if (!refuse) return;
+        refuse = false;
+        return rejectingModel.chatWithTools(
+          [{ role: "user", content: "Scripted screening request" }],
+          [],
+          signal ? { signal } : undefined,
+        );
+      },
+    });
   const fetched: string[] = [];
+  const answered = new Set<string>();
   const realFetch = globalThis.fetch;
-  let quit: (() => void) | null = null;
+  let beforeRestart = true;
+  let runner: JobSearchRunner | null = null;
   // Requests leave this process like the app's own; the quit happens while
   // page 4 of 6 is being fetched.
   const fetchSpy = vi
     .spyOn(globalThis, "fetch")
-    .mockImplementation((input, init) => {
+    .mockImplementation(async (input, init) => {
       const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith(`${modelBase}/`)) {
+        refusedRequests++;
+        return new Response(
+          JSON.stringify({ error: { message: "Request schema rejected" } }),
+          {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+      expect(new URL(url).origin).toBe(base);
       fetched.push(url);
-      if (quit && url.includes("page=4")) {
-        const stop = quit;
-        quit = null;
-        // Quit once pages 1 to 3 have produced some saved listing reads.
-        void vi
-          .waitFor(() => expect(store.stageCounts().found).toBeGreaterThan(5), {
-            timeout: 30_000,
-            interval: 5,
-          })
-          .then(stop);
+      if (beforeRestart && url === `${target}?page=4`) {
         return new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal;
           const interrupted = () => reject(new Error("Search interrupted"));
@@ -260,7 +308,9 @@ test("quitting while an HTTP index board is half read keeps its pages and reads,
           signal?.addEventListener("abort", interrupted, { once: true });
         });
       }
-      return realFetch(input, init);
+      const response = await realFetch(input, init);
+      if (response.ok) answered.add(url);
+      return response;
     });
   let store = openJobStore(file);
   const calls: ModelCall[] = [];
@@ -270,80 +320,156 @@ test("quitting while an HTTP index board is half read keeps its pages and reads,
       engine: engineFor(scriptedModel(calls)),
       readContext: () => Promise.resolve(context),
     });
-    let stopped!: () => void;
-    const quitting = new Promise<void>((resolve) => {
-      stopped = resolve;
-    });
-    quit = () => {
-      first.suspend();
-      stopped();
-    };
+    runner = first;
     const started = await first.start({
       depth: "thorough",
       postedWithin: "any",
     });
-    await quitting;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(store.searches.get(started.id)?.state).toBe("running");
+    await vi.waitFor(
+      () => {
+        expect(fetched).toContain(`${target}?page=4`);
+        expect(first.status().search?.sourcesDone).toBe(1);
+        expect(savedUrls(store)).toHaveLength(40);
+      },
+      { timeout: 30_000 },
+    );
+    first.suspend();
+    beforeRestart = false;
+    expect(store.searches.get(started.id)).toMatchObject({
+      state: "running",
+      sourcesDone: 1,
+    });
     store.close();
 
     const indexFetches = (urls: string[]) =>
       urls.filter((url) => /\/longboard\/jobs(?:\?|$)/u.test(url));
-    const before = {
-      index: indexFetches(fetched),
-      calls: calls.length,
-    };
-    expect(before.index.some((url) => url.includes("page=3"))).toBe(true);
+    const indexesBefore = indexFetches(fetched);
+    expect(indexesBefore).toContain(`${target}?page=3`);
 
     // The next process.
     store = openJobStore(file);
     const savedBefore = new Set(savedUrls(store));
-    expect(savedBefore.size).toBeGreaterThan(5);
+    expect(savedBefore.size).toBe(40);
+    const finishedReads = new Set(calls.flatMap((call) => call.urls));
+    const completedCards = calls.flatMap((call) => call.cards ?? []);
     fetched.length = 0;
     calls.length = 0;
     const second = createJobSearchRunner({
       store,
-      engine: engineFor(scriptedModel(calls)),
+      engine: engineFor(model(calls)),
       readContext: () => Promise.resolve(context),
     });
+    runner = second;
     await vi.waitFor(() =>
-      expect(store.searches.get(started.id)?.state).toBe("running"),
+      expect(second.status().parked).toMatchObject({ requestRejected: true }),
     );
+    expect(refusedRequests).toBe(1);
+    expect(store.searches.get(started.id)).toMatchObject({
+      error: NESTOR_REQUEST_REJECTED_MESSAGE,
+      state: "running",
+      sourcesDone: 1,
+    });
+    const sources = createSearchSourcesStore(store);
+    expect(sources.get(started.id, "1")).toMatchObject({ failedReads: 0 });
+    expect(sources.cardUrls(started.id, "1").length).toBeGreaterThan(30);
+    const commands = createJobCommandRunner({
+      store,
+      search: () => Promise.resolve(second),
+    });
+    await expect(commands("keep_reading", {})).resolves.toMatchObject({
+      search: { id: started.id, state: "running", error: null },
+      parked: null,
+    });
     await finished(second, store, started.id);
-    expect(store.searches.get(started.id)?.state).toBe("done");
 
     const after = indexFetches(fetched);
     // Pages 1 to 3 were collected before the quit: none is fetched again.
-    for (const url of before.index.filter((url) => !url.includes("page=4")))
+    for (const url of indexesBefore.filter((url) => !url.includes("page=4")))
       expect(after).not.toContain(url);
-    expect(after.some((url) => url.includes("page=4"))).toBe(true);
-    expect(after.some((url) => url.includes("page=6"))).toBe(true);
+    expect(fetched).not.toContain(secondBoard);
+    expect(after).toEqual([4, 5, 6].map((page) => `${target}?page=${page}`));
     // A listing whose read finished before the quit is not fetched or read
     // by the model again.
     for (const url of savedBefore) {
       expect(fetched).not.toContain(url);
       expect(calls.flatMap((call) => call.urls)).not.toContain(url);
     }
-    // Every public posting is saved once.
+    // Compare persisted reads against a successful fetch and a model read of
+    // that posting's address, independent of the fullListingRead flag.
+    const reads = calls.flatMap((call) => call.urls);
+    const screened = calls.flatMap((call) => call.cards ?? []);
+    expect(completedCards).toHaveLength(40);
+    expect(screened).toHaveLength(30);
+    expect(new Set(reads).size).toBe(reads.length);
+    const allRead = new Set([...finishedReads, ...reads]);
     const jobs = savedUrls(store);
     expect(new Set(jobs).size).toBe(jobs.length);
-    expect(jobs).toHaveLength(60);
-    expect(store.searches.get(started.id)).toMatchObject({ added: 60 });
+    expect(new Set(jobs)).toEqual(
+      new Set([
+        ...Array.from(
+          { length: 60 },
+          (_, i) => `${base}/longboard/job/${i + 1}`,
+        ),
+        ...Array.from({ length: 10 }, (_, i) => `${base}/lever/jobs/${i + 1}`),
+      ]),
+    );
+    expect(new Set(jobs)).toEqual(allRead);
+    expect(jobs.every((url) => answered.has(url))).toBe(true);
+    for (const row of store.listJobs({ stage: "found", limit: 100 }).rows) {
+      const job = store.getJob(row.id)!;
+      const detailText = job.url.includes("/longboard/job/")
+        ? "Build and run TypeScript services and React interfaces"
+        : "Build reliable software for a fictional collaborative planning product.";
+      expect(job.description).toContain(detailText);
+      expect(job).toMatchObject({
+        facts: { fullListingRead: true },
+        fitScore: 70,
+      });
+    }
+    for (const [sourceId, cards] of [
+      ["1", 60],
+      ["2", 10],
+    ] as const) {
+      expect(sources.get(started.id, sourceId)).toMatchObject({
+        state: "done",
+        phase: null,
+        cards,
+        related: cards,
+        found: cards,
+        added: cards,
+        failedReads: 0,
+      });
+      expect(sources.cardUrls(started.id, sourceId)).toEqual([]);
+    }
+    expect(sources.pending(started.id)).toEqual([]);
+    expect(sources.unfinishedIds(started.id)).toEqual([]);
+    expect(store.searches.get(started.id)).toMatchObject({
+      state: "done",
+      sourcesTotal: 2,
+      sourcesDone: 2,
+      found: 70,
+      added: 70,
+      scored: 70,
+    });
     console.info(
-      "[restart replica]",
+      "[Thorough restart and refusal replica]",
       JSON.stringify({
-        indexBefore: before.index.length,
-        indexAfter: after.length,
+        searchId: started.id,
+        sources: sources.list({ searchId: started.id }).rows,
+        indexBefore: indexesBefore,
+        indexAfter: after,
         savedBeforeQuit: savedBefore.size,
-        detailFetchesAfter: fetched.filter((url) =>
-          url.includes("/longboard/job/"),
-        ).length,
-        modelCallsBefore: before.calls,
-        modelCallsAfter: calls.length,
+        detailReadsAfter: reads.length,
+        detailReadsTotal: allRead.size,
+        screenedBefore: completedCards.length,
+        screenedAfter: screened.length,
+        refusedRequests,
+        pendingSources: sources.pending(started.id).length,
       }),
     );
-    second.suspend();
   } finally {
+    runner?.suspend();
+    resetAiAccessForTests();
     fetchSpy.mockRestore();
     store.close();
     rmSync(dir, { recursive: true, force: true });

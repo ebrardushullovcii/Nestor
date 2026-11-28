@@ -1930,13 +1930,14 @@ async function runJobSearchAgentPrivate(
           findings.warnings.length >
           0);
 
+    const workLeft = asStringList(finish?.data.remainingWork);
     const finishedCleanly =
       loop.ending === "finished" &&
       finish &&
       !finish.stuck &&
       !finish.needsPerson &&
-      finish.data.coverageComplete !== false;
-    const workLeft = asStringList(finish?.data.remainingWork);
+      finish.data.coverageComplete !== false &&
+      workLeft.length === 0;
     if (workLeft.length)
       notes.push(`Work left by the model: ${workLeft.join("; ")}`);
     const listingIndexUrl = finish?.data.listingIndexUrl;

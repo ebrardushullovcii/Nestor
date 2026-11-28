@@ -32,37 +32,9 @@ import type * as InterviewSessionControlsApi from "./setup/interview-session-con
 import type * as CandidateAssetLibraryApi from "./services/job-finder/candidate-asset-library-instance";
 import type * as JobFinderServicesApi from "./services/job-finder";
 import type * as LiveAssistantApi from "./services/live-assistant";
-import { runTraceEnabled, traceEvent } from "@nestor/core/run-trace";
+import { registerDesktopProcessTrace } from "./setup/desktop-process-trace";
 
-if (runTraceEnabled()) {
-  traceEvent("desktop_process_started", { pid: process.pid });
-  process.on("uncaughtExceptionMonitor", (error, origin) => {
-    traceEvent("desktop_process_exception", {
-      pid: process.pid,
-      error,
-      origin,
-    });
-  });
-  process.on("exit", (code) => {
-    traceEvent("desktop_process_exit", { pid: process.pid, code });
-  });
-  app.on("render-process-gone", (_event, contents, details) => {
-    traceEvent("desktop_renderer_gone", {
-      pid: process.pid,
-      webContentsId: contents.id,
-      reason: details.reason,
-      exitCode: details.exitCode,
-    });
-  });
-  app.on("child-process-gone", (_event, details) => {
-    traceEvent("desktop_child_process_gone", {
-      pid: process.pid,
-      type: details.type,
-      reason: details.reason,
-      exitCode: details.exitCode,
-    });
-  });
-}
+registerDesktopProcessTrace(app);
 
 function recordStartupDiagnostic(message: string, error?: unknown) {
   if (!startupDiagnosticsPath || process.env.ELECTRON_ENABLE_LOGGING !== "1") {

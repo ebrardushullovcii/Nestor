@@ -250,8 +250,8 @@ test("a search the AI account refuses stops taking cards at the first refusal, k
   expect(aiAccessBlocks()).toEqual([]);
 });
 
-test("Stop on a parked search ends it as stopped", async () => {
-  const { runner, engine } = setup();
+test("Stop settles a parked search's rows and keeps its queue until a fresh search replaces it", async () => {
+  const { store, runner, engine } = setup();
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -279,11 +279,26 @@ test("Stop on a parked search ends it as stopped", async () => {
       },
     }),
   );
-  await runner.start({ postedWithin: "any" });
+  const started = await runner.start({ postedWithin: "any" });
   await settledStatus(runner, (status) => !!status.parked);
   runner.stop();
   expect(runner.status().search?.state).toBe("stopped");
   expect(runner.status().parked ?? null).toBeNull();
+  const sources = createSearchSourcesStore(store);
+  expect(sources.get(started.id, "one")).toMatchObject({
+    state: "stopped",
+    phase: null,
+    cards: 3,
+    failedReads: 0,
+  });
+  expect(sources.unfinishedIds(started.id)).toEqual(["one"]);
+  expect(sources.cardUrls(started.id, "one")).toHaveLength(3);
+
+  const fresh = await runner.start({ postedWithin: "any" });
+  expect(fresh.id).not.toBe(started.id);
+  await settledStatus(runner, (status) => !!status.parked);
+  expect(sources.cardUrls(started.id, "one")).toEqual([]);
+  expect(sources.cardUrls(fresh.id, "one")).toHaveLength(3);
 });
 
 test.each(["startup", "keep_reading"])(

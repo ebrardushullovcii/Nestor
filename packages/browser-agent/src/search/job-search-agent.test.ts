@@ -198,30 +198,33 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   };
 }
 
-test("a clean model finish retains its report of unread source pages", async () => {
-  const reason = "Read page 1 of 53; the other pages remain unread.";
-  const result = await runJobSearchAgent({
-    hands: hands({ current: rawPage() }),
-    config: config({ inventoryOnly: true }),
-    llmClient: scripted([
-      {
-        name: "finish",
-        args: {
-          reason,
-          stuck: false,
-          needsPerson: false,
-          coverageComplete: false,
-          remainingWork: ["API pages 2–53, beginning with /api/jobs?page=2"],
+test.each([false, undefined])(
+  "a model finish with coverageComplete=%s retains its report of unread source pages",
+  async (coverageComplete) => {
+    const reason = "Read page 1 of 53; the other pages remain unread.";
+    const result = await runJobSearchAgent({
+      hands: hands({ current: rawPage() }),
+      config: config({ inventoryOnly: true }),
+      llmClient: scripted([
+        {
+          name: "finish",
+          args: {
+            reason,
+            stuck: false,
+            needsPerson: false,
+            coverageComplete,
+            remainingWork: ["API pages 2–53, beginning with /api/jobs?page=2"],
+          },
         },
-      },
-    ]),
-    jobExtractor: extractor,
-  });
-  expect(result.incomplete).toBe(true);
-  expect(result.phaseCompletionReason).toBe(reason);
-  expect(result.warning).toContain("API pages 2–53");
-  expect(result.accessBlockerReason).toBeUndefined();
-});
+      ]),
+      jobExtractor: extractor,
+    });
+    expect(result.incomplete).toBe(true);
+    expect(result.phaseCompletionReason).toBe(reason);
+    expect(result.warning).toContain("API pages 2–53");
+    expect(result.accessBlockerReason).toBeUndefined();
+  },
+);
 
 test("a supplied index can save its postings from data rather than ask for a vacancy URL", async () => {
   const index = "https://jobs.example.test/categories/engineering";
