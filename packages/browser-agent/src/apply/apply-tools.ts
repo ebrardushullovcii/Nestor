@@ -355,7 +355,14 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
                     properties: {
                       onPage: {
                         type: "string",
-                        enum: ["sign_in", "captcha", "mfa", "passkey", "other"],
+                        enum: [
+                          "sign_in",
+                          "captcha",
+                          "mfa",
+                          "passkey",
+                          "other",
+                          "own_browser",
+                        ],
                       },
                       instructions: { type: "string" },
                     },
@@ -365,7 +372,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
                 ],
               },
               description:
-                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a form field, use its observed control ref (for example c3), so any wording stays bound to that field's own question, options and saved answer. Do not restate the field as another question. For a step on the website, use {onPage: sign_in|captcha|mfa|passkey|other, instructions: what the person needs to do}. Missing passwords, passkeys and MFA belong on the website, never in a text answer. Leave it empty when the form is complete; a form that only wants looking over is complete.",
+                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a form field, use its observed control ref (for example c3), so any wording stays bound to that field's own question, options and saved answer. Do not restate the field as another question. For a step on the website, use {onPage: sign_in|captcha|mfa|passkey|other, instructions: what the person needs to do}. If the site rejects submission verification in Nestor's browser after a real attempt, use {onPage: own_browser, instructions: what happened and how to finish in their browser}. Needs you opens this posting's apply link for them. Missing passwords, passkeys and MFA belong on the website, never in a text answer. Leave it empty when the form is complete; a form that only wants looking over is complete.",
             },
           },
           required: ["reason"],

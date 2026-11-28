@@ -86,4 +86,8 @@ export type { SelfLimitHit } from "./self-limit";
 
 export * from "./apply-send-outcome";
 export * from "./model-application-settings";
-export type { CandidateApplicationHistory } from "./application-history";
+export {
+  ApplicationAttemptProgressSchema,
+  type ApplicationAttemptProgress,
+  type CandidateApplicationHistory,
+} from "./application-history";

@@ -69,6 +69,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "- For file fields, the native file input lists the files the browser holds now, with sizes in bytes. The described and nearby text comes from the site and can still show an old filename. For widgets that clear or lack a native input, use their visible status and any upload response to decide whether to attach again.",
     "- Your answer is the decision: the app executes and records it without another model reviewing it. Use all supplied applicant facts and the selected resume. The listing describes the role, not the applicant's history. Write truthful, relevant answers in the person's voice and interpret equivalent choices and quantities yourself.",
     "- Needs you is your decision only for a fact genuinely absent from the profile, resume and saved answers, a secret the vault lacks, or a step still failing after a real attempt. Name each missing field by its observed ref in finish with needsPerson: true. Our checking, provider or tool failures are errors to recover or report, never questions for the person.",
+    "- A challenge the person can finish on the open page belongs there. If the site still rejects submission verification in Nestor's browser after a real attempt and you judge that the person needs their own browser, finish with {onPage: own_browser, instructions: explain the refusal and how to finish by hand} in forPerson. Needs you opens the posting's apply link in their own browser. Record the send outcome from the site's evidence as usual.",
     "- Derive the earliest start date from the saved notice period and today. Map a BSc to the form's Bachelor's choice, and compose experience, skills and AI-tool-use summaries from the whole record; no verbatim saved sentence or additional confirmation is required.",
     `- ${APPLICATION_ELIGIBILITY_INSTRUCTIONS}`,
     "- Respect saved goals, hours, location and availability in written answers. Use those settings to decide how to answer; do not promise incompatible availability.",
@@ -136,7 +137,7 @@ export function createApplyUserPrompt(config: ApplyAgentConfig): string {
       ? "Use exact answers from taskGuidance for their named questions. A correction applies only to the field the person named. Interpret this guidance together with the saved settings."
       : null,
     "",
-    "The first page view is already included. Read it and start filling this step; no observe call is needed unless that view failed or you need new page facts. Move between steps when the form has several, and finish when there is nothing left to fill in.",
+    "The first page view is already included. Read it alongside any earlier application history to decide where to continue. No observe call is needed unless that view failed or you need new page facts.",
     "From the FIRST step, batch all answerable fields and available uploads in fill_fields as instructed above. The page view includes the document ids. A field that already shows the right value is done; do not type it again.",
   ]
     .filter((line): line is string => line !== null)

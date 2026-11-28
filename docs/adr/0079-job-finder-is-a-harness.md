@@ -26,6 +26,8 @@ Job Finder is a harness for a capable model, like an agent in full access. The i
 
 Our failures are errors to retry, fix or report, never Needs you questions. Needs you holds only what the person alone has: a fact not in their profile, resume or saved answers; a secret the vault lacks; or a step that still fails after a real attempt, handed off on the open page. CAPTCHAs, Cloudflare and sign-ins are handled the way the person would in their own Chrome, with a handoff on the open page only after a real attempt.
 
+If a site rejects submission verification in Nestor's browser after a real attempt, the model can hand off that posting's apply link to the person's own browser. Needs you also lets the person see the application in Nestor.
+
 Which jobs get sent, whether the model writes an open answer itself, and how it fills a date or pay field follow the person's settings as instructions. Where no setting exists, the model decides from the facts. A question the owner's words already answer is not another question for him. A proposed new setting needs a named real-site failure and the owner's approval.
 
 Only these mechanics stay in code, and none of them judges the model's output:

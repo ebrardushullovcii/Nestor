@@ -58,25 +58,22 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
   retry: async (id) => {
     await runJobCommand("retry_source", { id });
   },
-  open: async (id) => {
-    const blocked = getApplicationStore().needsYou.details(id)?.task.blockedUrl;
-    if (blocked) {
-      const url = new URL(blocked);
+  open: async (id, destination) => {
+    const details = getApplicationStore().needsYou.details(id);
+    if (!details) return false;
+    const { task, applications } = details;
+    if (task.blockedUrl && destination !== "nestor") {
+      const url = new URL(task.blockedUrl);
       if (!["https:", "http:"].includes(url.protocol))
         throw new Error("This job link cannot be opened.");
       await shell.openExternal(url.href);
       return true;
     }
-    const task = getApplicationStore().needsYou.list({
-      after: id - 1,
-      limit: 1,
-    }).rows[0];
-    if (task?.id === id && task.source) {
+    if (task.source) {
       return openSource(task);
     }
     const service = await applicationService();
-    for (const application of getApplicationStore().needsYou.details(id)
-      ?.applications ?? []) {
+    for (const application of applications) {
       if ((await service.open(application.id)).opened) {
         return true;
       }

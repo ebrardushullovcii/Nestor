@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   getWork: vi.fn(),
   getResumeArtifact: vi.fn(),
   getSubmissionReceipt: vi.fn(),
+  needDetails: vi.fn(),
+  openExternal: vi.fn(),
 }));
+vi.mock("electron", () => ({ shell: { openExternal: mocks.openExternal } }));
 vi.mock("../services/job-finder/application-store", () => ({
   getApplicationStore: () => ({
     listApplications: mocks.listApplications,
@@ -19,6 +22,7 @@ vi.mock("../services/job-finder/application-store", () => ({
     getWork: mocks.getWork,
     getResumeArtifact: mocks.getResumeArtifact,
     getSubmissionReceipt: mocks.getSubmissionReceipt,
+    needsYou: { details: mocks.needDetails },
   }),
 }));
 vi.mock("../services/job-store", () => ({ getJobStore: vi.fn() }));
@@ -47,8 +51,26 @@ vi.mock("../services/job-finder/runtime", () => ({
 }));
 
 import { executeApplicationStoreCommand } from "./application-store";
+import { runNeedsYouCommand } from "./needs-you";
 
 beforeEach(() => vi.clearAllMocks());
+
+it("routes a blocked posting to the system browser or to its retained application on request", async () => {
+  const blockedUrl = "https://apply.example.test/posting/apply";
+  mocks.needDetails.mockReturnValue({
+    task: { blockedUrl },
+    applications: [{ id: 9 }],
+  });
+  mocks.openApplication.mockResolvedValue({ opened: true, retained: true });
+  await expect(runNeedsYouCommand("open_need", { id: 3 })).resolves.toBe(true);
+  expect(mocks.openExternal).toHaveBeenCalledExactlyOnceWith(blockedUrl);
+  expect(mocks.openApplication).not.toHaveBeenCalled();
+  await expect(
+    runNeedsYouCommand("open_need", { id: 3, browser: "nestor" }),
+  ).resolves.toBe(true);
+  expect(mocks.openApplication).toHaveBeenCalledExactlyOnceWith(9);
+  expect(mocks.openExternal).toHaveBeenCalledOnce();
+});
 
 // The preload passes these calls through, so main is where they are checked.
 describe("application commands in main", () => {

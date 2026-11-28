@@ -17,12 +17,19 @@ export type ApplyFinishSendOutcome = z.infer<
   typeof ApplyFinishSendOutcomeSchema
 >;
 
-/** A field question or an explicit model-selected handoff on the open page. */
+/** A field question or an explicit model-selected browser handoff. */
 export const ApplyPersonRequestSchema = z.union([
   z.string(),
   z
     .object({
-      onPage: z.enum(["sign_in", "captcha", "mfa", "passkey", "other"]),
+      onPage: z.enum([
+        "sign_in",
+        "captcha",
+        "mfa",
+        "passkey",
+        "other",
+        "own_browser",
+      ]),
       instructions: z.string(),
     })
     .strict(),

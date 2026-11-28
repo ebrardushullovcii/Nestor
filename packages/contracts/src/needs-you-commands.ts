@@ -103,8 +103,10 @@ export const NEEDS_YOU_COMMANDS = {
   open_need: {
     effect: "local_write",
     description:
-      "Open the exact application tab for a sign-in, CAPTCHA or MFA step. Source tickets open their own site instead.",
-    input: ApplicationTargetSchema,
+      "Open the application handoff. A blocked posting opens in the person's browser by default. Pass browser: nestor to see the application in Nestor. Source tickets open their own site.",
+    input: ApplicationTargetSchema.extend({
+      browser: z.literal("nestor").optional(),
+    }),
     output: z.boolean(),
   },
   check_need: {

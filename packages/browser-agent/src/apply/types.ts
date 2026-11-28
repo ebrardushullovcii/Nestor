@@ -6,6 +6,7 @@ import type {
 import type {
   AiApplyingBehavior,
   ApplicationAttemptCheckpoint,
+  ApplicationAttemptProgress,
   ApplicationAttemptQuestion,
   ApplicationAttestationKind,
   ApplicationAutomationMode,
@@ -665,6 +666,13 @@ export type ApplyProposal =
 export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   /** Existing local checkpoints retained when this application is continued. */
   earlierActivity?: readonly ApplicationAttemptCheckpoint[];
+  earlierAttemptProgress?:
+    | readonly (ApplicationAttemptProgress & { attempt: number })[]
+    | undefined;
+  /** Persist the primary form's progress while the attempt is still running. */
+  saveAttemptProgress?:
+    | ((progress: ApplicationAttemptProgress) => void)
+    | undefined;
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
   /** What earlier runs of this application learned about its pickers. */
   initialPickerAttempts?: readonly StoredApplyPickerAttempt[];

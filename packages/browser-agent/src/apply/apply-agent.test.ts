@@ -1,6 +1,7 @@
 import {
   CandidateProfileSchema,
   CandidateReusableAnswerSchema,
+  type ApplicationAttemptProgress,
   type RawApplyControl,
   type RawApplyPage,
 } from "@nestor/contracts";
@@ -1488,6 +1489,112 @@ test("only an explicit model handoff creates an on-page passkey request without 
     code: "multi_factor_required",
     requiresPerson: true,
   });
+});
+
+test("the model can hand a refused submission to the person's own browser", async () => {
+  const instructions =
+    "Verification failed. Finish this posting in your browser.";
+  const result = await runApplyAgent(
+    config(page()),
+    model([
+      {
+        name: "finish",
+        args: {
+          reason: instructions,
+          forPerson: [{ onPage: "own_browser", instructions }],
+        },
+      },
+    ]),
+  );
+  expect(result.outcome).toBe("paused");
+  expect(result.pauses).toMatchObject([
+    {
+      question: null,
+      blocker: {
+        code: "browser_blocked",
+        requiresPerson: true,
+        detail: instructions,
+        nextActionLabel: "Open in my browser",
+      },
+    },
+  ]);
+});
+
+test("a restarted application request includes the previous form step, fields and attachment before the fresh view", async () => {
+  const source = page({
+    url: "https://apply.example.test/form?session=ephemeral",
+    stepLabel: "Experience, step 2 of 5",
+    controls: [
+      { ...nameControl(), value: "" },
+      {
+        ...nameControl(),
+        index: 1,
+        id: "resume",
+        inputType: "file",
+        label: "Resume",
+        value: "",
+      },
+    ],
+  });
+  let saved: ApplicationAttemptProgress | undefined;
+  const input = config(source, {
+    saveAttemptProgress: (progress) => {
+      saved = progress;
+    },
+  });
+  input.sources.documents = [
+    {
+      id: "resume",
+      label: "Resume",
+      fileName: "resume.pdf",
+      mimeType: "application/pdf",
+      kind: "resume",
+      loadBytes: () => Promise.resolve(new Uint8Array([1])),
+    },
+  ];
+  const prior = model([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [
+          { tool: "type", ref: "c0", text: "Robin Ashford" },
+          { tool: "upload", ref: "c1", documentId: "resume" },
+        ],
+      },
+    },
+    done,
+  ]);
+  let savedBeforeFinish: ApplicationAttemptProgress | undefined;
+  await runApplyAgent(input, {
+    async chatWithTools(messages, tools, options) {
+      if (messages.some((message) => message.role === "tool"))
+        savedBeforeFinish = saved;
+      return prior.chatWithTools(messages, tools, options);
+    },
+  });
+  expect(savedBeforeFinish).toEqual({
+    pageUrl: "https://apply.example.test/form",
+    step: { label: "Experience, step 2 of 5", index: 2, total: 5 },
+    filledFields: ["Full name"],
+    uploadedFiles: [
+      { field: "Resume", fileName: "resume.pdf", documentId: "resume" },
+    ],
+  });
+  const retry = model([done]);
+  await runApplyAgent(
+    config(page({ url: "https://apply.example.test/posting" }), {
+      earlierAttemptProgress: [{ attempt: 1, ...savedBeforeFinish! }],
+    }),
+    retry,
+  );
+  const messages = vi.mocked(retry.chatWithTools).mock.calls[0]?.[0];
+  const opening = String(messages?.at(-1)?.content);
+  expect(opening).toContain('"earlierAttemptProgress":[{"attempt":1');
+  expect(opening).toContain('"index":2,"total":5');
+  expect(opening).toContain('"filledFields":["Full name"]');
+  expect(opening).toContain('"fileName":"resume.pdf"');
+  expect(opening).toContain("unsent draft");
+  expect(opening).toContain("Page: https://apply.example.test/posting");
 });
 test("What was sent records the sending application page and excludes previous search and quote fields", async () => {
   const source = page({

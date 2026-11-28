@@ -1138,6 +1138,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const executeApplicationFlow: BrowserSessionRuntime["executeApplicationFlow"] =
       (...args) =>
         usageRecorder.run(() => browser.executeApplicationFlow(...args));
+    const earlierStep = previous?.execution.stepReceipts?.findLast(
+      (receipt) => receipt.kind === "final",
+    );
     const result = await executeApplicationFlow(
       "target_site",
       {
@@ -1199,21 +1202,36 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             ? (previous?.reviewCard?.attachments ?? [])
             : [],
           earlierActivity: previous?.execution.checkpoints ?? [],
+          earlierAttemptProgress: applications.earlierAttemptProgress(
+            row.id,
+            row.attempt,
+          ),
+          saveAttemptProgress: (progress) =>
+            applications.saveAttemptProgress(row.id, row.attempt, progress),
           // Earlier recorded answers, files and path are facts for the model.
           // Only its explicit tool calls may restore anything to the page.
-          ...(previous?.reviewCard &&
-          (previous.reviewCard.answers.length ||
-            previous.reviewCard.attachments.length ||
-            previous.execution.questions.some(
-              (question) =>
-                question.status === "detected" && !question.submittedAnswer,
-            ))
+          ...(previous &&
+          (previous.reviewCard || previous.execution.replay.lastUrl)
             ? {
                 replay: {
-                  answers: previous.reviewCard.answers,
-                  attachments: keptPage ? [] : previous.reviewCard.attachments,
+                  answers: previous.reviewCard?.answers ?? [],
+                  attachments: keptPage
+                    ? []
+                    : (previous.reviewCard?.attachments ?? []),
                   path: previous.execution.formPath ?? [],
-                  formUrl: previous.reviewCard.pageUrl ?? undefined,
+                  formUrl:
+                    previous.reviewCard?.pageUrl ??
+                    previous.execution.replay.lastUrl ??
+                    undefined,
+                  ...(earlierStep
+                    ? {
+                        formStep: {
+                          label: earlierStep.stepLabel,
+                          index: earlierStep.stepIndex,
+                          total: earlierStep.stepTotal,
+                        },
+                      }
+                    : {}),
                 },
               }
             : {}),
@@ -1634,25 +1652,43 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         applications.needsYou.completeAccess(task.id, row.id);
     const steps = (prepared?.pauses ?? []).flatMap((pause) => {
       const kind = accessKind(pause.blocker);
-      return kind ? [{ kind, instructions: pause.summary }] : [];
+      return kind
+        ? [
+            {
+              kind,
+              instructions: pause.summary,
+              ownBrowser: pause.blocker?.code === "browser_blocked",
+            },
+          ]
+        : [];
     });
-    if (steps[0]) {
-      applications.needsYou.request({
-        applicationId: row.id,
-        attempt: row.attempt,
-        fieldKey: "site_access",
-        kind: steps[0].kind,
-        key: "site_access",
-        scope: {
-          siteOrigin: new URL(
-            prepared?.finalUrl ?? result.replay.lastUrl ?? target,
-          ).origin,
-        },
-        prompt: steps.map((step) => step.instructions).join("\n\n"),
-        input: "text",
-        options: [],
+    const ownBrowser = steps.find((step) => step.ownBrowser);
+    const step = ownBrowser ?? steps[0];
+    if (step) {
+      jobs.transaction(() => {
+        applications.needsYou.request({
+          applicationId: row.id,
+          attempt: row.attempt,
+          fieldKey: "site_access",
+          kind: step.kind,
+          key: "site_access",
+          scope: {
+            siteOrigin: new URL(
+              prepared?.finalUrl ?? result.replay.lastUrl ?? target,
+            ).origin,
+          },
+          prompt:
+            ownBrowser?.instructions ??
+            steps.map((entry) => entry.instructions).join("\n\n"),
+          input: "text",
+          options: [],
+          ...(ownBrowser ? { blockedUrl: target } : {}),
+        });
+        if (ownBrowser)
+          applications.block(row.id, row.attempt, ownBrowser.instructions);
       });
     }
+    if (ownBrowser) return;
     if (applications.getApplication(row.id)?.state === "needs_you") {
       waiting.set(row.id, row.attempt);
       if (applications.needsYou.accessForApplication(row.id).length)
@@ -1939,7 +1975,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   function accessKind(
     blocker: ApplyBlocker | null | undefined,
   ): Exclude<NeedsYouKind, "question"> | null {
-    return blocker?.code === "security_challenge" && blocker.requiresPerson
+    return (blocker?.code === "browser_blocked" ||
+      blocker?.code === "security_challenge") &&
+      blocker.requiresPerson
       ? "captcha"
       : blocker?.code === "multi_factor_required"
         ? "mfa"
@@ -2346,7 +2384,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const job = jobs.getJob(row.jobId);
     const work = applications.getWork(id);
     const accessPage =
-      row.state === "needs_you" &&
+      (row.state === "needs_you" || row.state === "blocked") &&
       applications.needsYou.accessForApplication(id).length
         ? (work?.execution.replay.lastUrl ?? work?.execution.blocker?.url)
         : null;
