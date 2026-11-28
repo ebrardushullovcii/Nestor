@@ -1,4 +1,4 @@
-import type { Locator } from "playwright";
+import type { ElementHandle, Locator } from "playwright";
 
 /** Resolve once, without Playwright waiting for a vanished observed node to reappear. */
 export async function presentControl(locator: Locator) {
@@ -33,48 +33,143 @@ export async function evaluatePresent<Arg, Result>(
   }
 }
 
-/** Whether a click at the element's centre reaches it, in its own document or shadow root. */
-function reachable(target: Node): boolean {
+type Point = { x: number; y: number };
+type ClickTarget =
+  | { offset: Point; position: Point; framed: boolean }
+  | { error: string };
+
+/** Find a point for the press, or describe the element receiving it. */
+function readClickTarget(target: Node, offset?: Point): ClickTarget {
   const node = target as Element;
+  if (!node.isConnected)
+    return { error: "Stale or missing control; observe again." };
+  const noPoint = {
+    error: "The control has no visible click point in the viewport.",
+  };
   const box = node.getBoundingClientRect();
-  if (!box.width || !box.height) return false;
-  const x = box.left + box.width / 2;
-  const y = box.top + box.height / 2;
-  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
-  const hit = (node.getRootNode() as Document | ShadowRoot).elementFromPoint(
-    x,
-    y,
+  // An inline link may span more than one line. Use its first visible
+  // rectangle, since the centre of the union can be outside the link.
+  const rect = Array.from(node.getClientRects()).find(
+    (rect) =>
+      Math.max(rect.left, 0) < Math.min(rect.right, innerWidth) &&
+      Math.max(rect.top, 0) < Math.min(rect.bottom, innerHeight),
   );
-  return hit !== null && (hit === node || node.contains(hit));
+  const point = offset
+    ? { x: box.left + offset.x, y: box.top + offset.y }
+    : rect && {
+        x: (Math.max(rect.left, 0) + Math.min(rect.right, innerWidth)) / 2,
+        y: (Math.max(rect.top, 0) + Math.min(rect.bottom, innerHeight)) / 2,
+      };
+  if (!point) return noPoint;
+
+  // A shadow-root hit alone cannot tell us whether something covers its host.
+  const scopes = [node];
+  for (
+    let root = node.getRootNode();
+    root instanceof ShadowRoot;
+    root = root.host.getRootNode()
+  ) {
+    scopes.push(root.host);
+  }
+  for (const expected of scopes.reverse()) {
+    const hit = (
+      expected.getRootNode() as Document | ShadowRoot
+    ).elementFromPoint(point.x, point.y);
+    if (!hit) return noPoint;
+    if (hit !== expected && !expected.contains(hit)) {
+      const covering =
+        hit.closest("dialog, [role='dialog'], [aria-label], [id]") ?? hit;
+      const label = covering.getAttribute("aria-label")?.trim();
+      const name = label
+        ? `"${label}"`
+        : covering.id
+          ? `<${covering.localName} id="${covering.id}">`
+          : `<${covering.localName}>`;
+      return { error: `The click point is covered by ${name}.` };
+    }
+  }
+  const relative = { x: point.x - box.left, y: point.y - box.top };
+  const style = getComputedStyle(node);
+  // Playwright takes a padding-box offset. Preserve the point we hit-tested
+  // instead of letting it choose another point or scroll again.
+  return {
+    offset: relative,
+    position: {
+      x: relative.x - (Number.parseInt(style.borderLeftWidth, 10) || 0),
+      y: relative.y - (Number.parseInt(style.borderTopWidth, 10) || 0),
+    },
+    framed: window !== window.top,
+  };
+}
+
+async function inspectClickTarget(
+  element: ElementHandle,
+): Promise<ClickTarget> {
+  const target = await element.evaluate(readClickTarget, undefined);
+  if ("error" in target || !target.framed) return target;
+  const box = await element.boundingBox();
+  if (!box)
+    return { error: "The control has no visible click point in the viewport." };
+  const pageX = box.x + target.offset.x;
+  const pageY = box.y + target.offset.y;
+  // Playwright's boxes are relative to the main viewport, even across origins.
+  // Check that this point can also reach each iframe in its parent document.
+  for (
+    let frame = await element.ownerFrame();
+    frame?.parentFrame();
+    frame = frame.parentFrame()
+  ) {
+    const host = await frame.frameElement();
+    try {
+      const hostBox = await host.boundingBox();
+      if (!hostBox)
+        return {
+          error: "The frame has no visible click point in the viewport.",
+        };
+      const hit = await host.evaluate(readClickTarget, {
+        x: pageX - hostBox.x,
+        y: pageY - hostBox.y,
+      });
+      if ("error" in hit) return hit;
+    } finally {
+      await host.dispose();
+    }
+  }
+  return target;
 }
 
 /**
- * Presses the observed element once. An element a person can reach gets a
- * click at its centre; one that is covered, hidden or off-screen gets a click
- * aimed straight at its position (or an immediate error). Playwright's own
- * actionability retries are skipped: with no timeout they never end on a
- * page that does not repaint or keeps something drawn over the element.
+ * Presses the observed element once. If its click point is covered, centre
+ * the element and check again. Report any remaining obstruction without
+ * waiting for it to clear.
  */
 export async function clickPresent(locator: Locator): Promise<void> {
-  const first = await presentControl(locator);
+  let element = await presentControl(locator);
   try {
-    if (!(await first.evaluate(reachable))) {
-      // Bring it into view inside its own scrolling list as well as the page.
+    let target = await inspectClickTarget(element);
+    if ("error" in target) {
+      // Centre it inside its scrolling list as well as the page: a sticky
+      // header or footer can cover an element that is already in the viewport.
       // A list that redraws on scroll gets a moment to draw the row again.
-      await first.evaluate(async (node) => {
+      await element.evaluate(async (node) => {
         (node as Element).scrollIntoView({
-          block: "nearest",
-          inline: "nearest",
+          block: "center",
+          inline: "center",
+          behavior: "instant",
         });
         await new Promise((resolve) => setTimeout(resolve, 120));
       });
+      await element.dispose();
+      element = await presentControl(locator);
+      target = await inspectClickTarget(element);
     }
-  } finally {
-    await first.dispose();
-  }
-  const element = await presentControl(locator);
-  try {
-    await element.click({ timeout: 0, force: true });
+    if ("error" in target) throw new Error(target.error);
+    await element.click({
+      timeout: 0,
+      force: true,
+      scroll: "none",
+      position: target.position,
+    });
   } finally {
     await element.dispose();
   }
