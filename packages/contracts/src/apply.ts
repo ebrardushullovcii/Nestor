@@ -903,9 +903,31 @@ const ApplicationPreparationStartedLocalDateSchema = z
  * checking what is about to go out in their name deserves to see where each
  * line actually came from.
  */
+/** The kind of form control an answer went into, as the run observed it. */
+export const ApplicationReviewControlSchema = z.enum([
+  "text",
+  "long_text",
+  "select",
+  "combobox",
+  "checkbox",
+  "radio",
+  "file",
+  "date",
+  "other",
+]);
+export type ApplicationReviewControl = z.infer<
+  typeof ApplicationReviewControlSchema
+>;
+
 export const ApplicationReviewAnswerSchema = z
   .object({
     fieldKey: NonEmptyStringSchema.optional(),
+    /**
+     * The control the answer went into, so a person finishing the form by
+     * hand knows to pick the same option rather than type it. Absent on
+     * records made before it was kept.
+     */
+    control: ApplicationReviewControlSchema.optional(),
     /** The run's stored fact or saved answer; observed values use observed.*. */
     sourceId: NonEmptyStringSchema.optional(),
     question: NonEmptyStringSchema,

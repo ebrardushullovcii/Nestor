@@ -129,6 +129,11 @@ export const ApplicationDetailsSchema = z.object({
   summary: z.string().nullable(),
   detail: z.string().nullable(),
   resumeFileName: z.string().nullable(),
+  /**
+   * Where that resume file is on this computer, so the person can find and
+   * attach it when they finish the application in their own browser.
+   */
+  resumeFilePath: z.string().nullable().optional(),
   reviewCard: ApplicationReviewCardSchema.nullable(),
   receipt: SubmissionOutcomeRecordSchema.nullable(),
   /**

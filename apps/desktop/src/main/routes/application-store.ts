@@ -91,11 +91,13 @@ export async function executeApplicationStoreCommand(
       const application = store.getApplication(id);
       if (!application) return null;
       const work = store.getWork(id);
+      const resume = store.getResumeArtifact(id);
       return ApplicationDetailsSchema.parse({
         application,
         summary: work?.execution.summary ?? null,
         detail: work?.execution.detail ?? null,
-        resumeFileName: store.getResumeArtifact(id)?.fileName ?? null,
+        resumeFileName: resume?.fileName ?? null,
+        resumeFilePath: resume?.filePath ?? null,
         reviewCard: work?.reviewCard ?? null,
         receipt: store.getSubmissionReceipt(id),
         accessDetail:

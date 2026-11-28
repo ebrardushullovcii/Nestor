@@ -950,7 +950,7 @@ it("keeps each blocked posting's manual job link and offers no retry or saved-an
   }
   const open = vi.spyOn(window.nestor.needsYou, "run");
   show();
-  await screen.findByRole("heading", { name: "This site blocked the browser" });
+  await screen.findByRole("heading", { name: "Finish it in your own browser" });
   expect(applications.needsYou.list().total).toBe(2);
   expect(screen.getByText("https://jobs.example.test/0")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
