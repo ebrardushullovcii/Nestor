@@ -960,6 +960,19 @@ it("keeps each blocked posting's manual job link and offers no retry or saved-an
       id: applications.needsYou.list().rows[0]!.id,
     }),
   );
+  await waitFor(() =>
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Open in Nestor" })
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open in Nestor" }));
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith("open_need", {
+      id: applications.needsYou.list().rows[0]!.id,
+      browser: "nestor",
+    }),
+  );
   fireEvent.click(
     screen.getByText("The site refused this browser for posting 1."),
   );

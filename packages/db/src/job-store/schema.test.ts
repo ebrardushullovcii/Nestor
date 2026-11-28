@@ -19,6 +19,7 @@ const RELEASED_COLUMNS: Record<string, string> = {
   legacy_workspace_imports: "source completed_at counts_json",
   legacy_workspace_jobs: "old_id job_id",
   activity_control: "id paused paused_at reason pause_behavior",
+  application_attempt_progress: "application_id attempt progress_json",
   application_details:
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",
   application_instructions: "application_id conversation_id mode",

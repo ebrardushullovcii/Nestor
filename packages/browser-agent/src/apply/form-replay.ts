@@ -1,4 +1,7 @@
-import type { ApplyFormPathStep } from "@nestor/contracts";
+import type {
+  ApplicationAttemptProgress,
+  ApplyFormPathStep,
+} from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
 import type { ApplyFormControl, ApplyFormObservation } from "./types";
 
@@ -12,6 +15,7 @@ export interface FormReplay {
   path: readonly ApplyFormPathStep[];
   /** The page the earlier run's form was on. */
   formUrl?: string | undefined;
+  formStep?: ApplicationAttemptProgress["step"];
 }
 
 export interface FormReplayAnswer {

@@ -51,7 +51,7 @@ import { buildCoverLetterRequest, isCoverLetterControl } from "./cover-letter";
 import { reviewFieldKey, screenKey } from "./form-replay";
 import {
   applicationModelFactsMessages,
-  modelApplicationActivity,
+  applicationResumeFactsMessage,
 } from "./model-facts";
 import {
   approvedApplicationLetter,
@@ -284,9 +284,41 @@ async function runApplyAgentPrivate(
       ? formatApplyObservationView(view, full ? undefined : previous)
       : views.write(formatApplyObservationView(view), page);
   };
+  let lastSavedProgress = "";
+  const saveProgress = (observation: ApplyFormObservation) => {
+    if (
+      !input.saveAttemptProgress ||
+      verificationIsPrivate() ||
+      observation.tabs?.some((tab) => tab.active && !tab.primary)
+    )
+      return;
+    const url = URL.parse(observation.url ?? "");
+    if (!url || !["http:", "https:"].includes(url.protocol)) return;
+    const progress = {
+      pageUrl: url.origin + url.pathname,
+      step: observation.step,
+      filledFields: [
+        ...new Set(
+          [...filled, ...reviewFilled.values()].map((entry) => entry.label),
+        ),
+      ],
+      uploadedFiles: attachments.map(
+        ({ controlLabel, fileName, documentId }) => ({
+          field: controlLabel,
+          fileName,
+          documentId,
+        }),
+      ),
+    };
+    const snapshot = JSON.stringify(progress);
+    if (snapshot === lastSavedProgress) return;
+    input.saveAttemptProgress(progress);
+    lastSavedProgress = snapshot;
+  };
   const readPage = async () => {
     const next = await runConfig.hands.observe();
     observe(next);
+    saveProgress(next);
     return next;
   };
   const describeDocuments = () =>
@@ -370,11 +402,16 @@ async function runApplyAgentPrivate(
                 ? "site_login_required"
                 : kind === "mfa" || kind === "passkey"
                   ? "multi_factor_required"
-                  : "security_challenge",
+                  : kind === "own_browser"
+                    ? "browser_blocked"
+                    : "security_challenge",
             requiresPerson: true,
             summary: detail,
             detail,
-            nextActionLabel: "Open the application",
+            nextActionLabel:
+              kind === "own_browser"
+                ? "Open in my browser"
+                : "Open the application",
           },
         });
         continue;
@@ -611,6 +648,7 @@ async function runApplyAgentPrivate(
       .map((c) => ({ field: questionPrompt(c), ...c.upload }));
     if (uploadFacts.length)
       note(`Upload facts: ${JSON.stringify(uploadFacts)}`);
+    saveProgress(page ?? outcome.observation);
     return {
       kind: "ok",
       status: outcome.kind === "refused" ? "failed" : "done",
@@ -1188,7 +1226,7 @@ async function runApplyAgentPrivate(
         { role: "user", content: createApplyUserPrompt(runConfig) },
         {
           role: "user",
-          content: `Earlier application state and actions (history only; choose any restoration yourself). An earlierActivity detail with sameAs uses the exact text at that JSON Pointer in this object:\n${serializeApplicationData({ replay: input.replay, earlierActivity: modelApplicationActivity(input.earlierActivity), earlierAttachments: input.earlierAttachments, pickerAttempts: input.initialPickerAttempts })}\n\n${opening}`,
+          content: applicationResumeFactsMessage(input, opening),
         },
       ],
       model,

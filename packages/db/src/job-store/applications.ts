@@ -9,6 +9,7 @@ import {
   DEFAULT_APPLICATION_APPLY_MODE,
   NESTOR_REQUEST_REJECTED_MESSAGE,
   ApplicationPreparationUpdateSchema,
+  ApplicationAttemptProgressSchema,
   ApplicationResumeArtifactSchema,
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
@@ -29,6 +30,7 @@ import {
   type ApplicationApplyMode,
   type ApplicationAutomationMode,
   type ApplicationPreparationUpdate,
+  type ApplicationAttemptProgress,
   type ApplyJobsInput,
   type ApplyJobsQueueResult,
   type ApplyJobSkip,
@@ -473,6 +475,36 @@ export function createApplicationStore(store: JobStore) {
             JSON.parse(row.resume_artifact_json),
           )
         : null;
+    },
+
+    /** This survives crashes and is independent of a completed review card. */
+    saveAttemptProgress(
+      id: number,
+      attempt: number,
+      progress: ApplicationAttemptProgress,
+    ): void {
+      sql(`INSERT INTO application_attempt_progress (application_id, attempt, progress_json)
+        SELECT id, attempt, ? FROM applications WHERE id = ? AND attempt = ? AND state = 'running'
+        ON CONFLICT (application_id, attempt) DO UPDATE SET progress_json = excluded.progress_json`).run(
+        JSON.stringify(ApplicationAttemptProgressSchema.parse(progress)),
+        id,
+        attempt,
+      );
+    },
+
+    earlierAttemptProgress(id: number, attempt: number) {
+      const rows =
+        sql(`SELECT attempt, progress_json FROM application_attempt_progress
+        WHERE application_id = ? AND attempt < ? ORDER BY attempt`).all(
+          id,
+          attempt,
+        ) as { attempt: number; progress_json: string }[];
+      return rows.map((row) => ({
+        attempt: row.attempt,
+        ...ApplicationAttemptProgressSchema.parse(
+          JSON.parse(row.progress_json),
+        ),
+      }));
     },
 
     setResumeArtifact(

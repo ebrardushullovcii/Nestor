@@ -65,6 +65,10 @@ const preparation = vi.hoisted(() => ({
   /** What each run was given to bring a closed form back. */
   replays: [] as unknown[],
   activities: [] as unknown[],
+  previousProgress:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["earlierAttemptProgress"],
+  saveProgress:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["saveAttemptProgress"],
   histories: [] as (CandidateApplicationHistory | undefined)[],
   givenAnswers: [] as NonNullable<
     ApplicationPreparation.AgentApplicationPreparationInput["reusableAnswers"]
@@ -97,6 +101,8 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       preparation.givenAnswers.push(input.reusableAnswers ?? []);
       preparation.replays.push(input.replay ?? null);
       preparation.activities.push(input.earlierActivity ?? []);
+      preparation.previousProgress = input.earlierAttemptProgress;
+      preparation.saveProgress = input.saveAttemptProgress;
       preparation.histories.push(input.history);
       preparation.pickerTries.push(
         (input.initialPickerAttempts ?? []).flatMap((attempt) => attempt.tried),
@@ -2952,6 +2958,96 @@ it("recovers interrupted preparation, settles an interrupted send from its saved
     String(filling.jobId),
   ]);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("reads partial form progress from disk after a restart without a completed work record", async () => {
+  const f = await setup(1, undefined, { onDisk: true });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const earlier = f.applications.listApplications().rows[0]!;
+  const progress = {
+    pageUrl: "https://replica.test/jobs/0/apply",
+    step: { label: "My experience", index: 2, total: 5 },
+    filledFields: ["Telephone", "Employer"],
+    uploadedFiles: [
+      { field: "Resume", fileName: "resume.pdf", documentId: "resume" },
+    ],
+  };
+  const writeFromEarlierAttempt = preparation.saveProgress!;
+  writeFromEarlierAttempt(progress);
+  expect(f.applications.getWork(earlier.id)).toBeNull();
+  f.service.stop();
+  f.jobs.close();
+
+  const jobs = openJobStore(f.dbPath);
+  const applications = createApplicationStore(jobs);
+  f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+  const restarted = createApplicationService({ ...f.deps, jobs, applications });
+  cleanups.unshift(() => {
+    restarted.stop();
+    jobs.close();
+  });
+  await restarted.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(preparation.previousProgress).toEqual([
+    { attempt: earlier.attempt, ...progress },
+  ]);
+  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+  expect(f.execute.mock.calls[1]?.[1].startingUrl).toBeUndefined();
+});
+
+it("keeps the failed send and puts the posting's apply link in Needs you for an own-browser handoff", async () => {
+  const applyUrl = "https://apply.replica.test/posting/apply";
+  const f = await setup(1, undefined, { applyUrl });
+  f.deps.authorityRepository = createSendGuards(f.jobs);
+  preparation.notReadyToSend = true;
+  const instructions = "The site refused verification. Apply in your browser.";
+  preparation.blocker = {
+    code: "browser_blocked",
+    requiresPerson: true,
+    summary: instructions,
+    detail: instructions,
+    nextActionLabel: "Open in my browser",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  await expect(
+    preparation.recordSendOutcome!({
+      sendCallId: "refused-verification",
+      inferSendCallId: true,
+      outcome: "failed",
+      evidence: "The site rejected verification.",
+      pageUrl: "https://apply.replica.test/verify",
+    }),
+  ).resolves.toMatchObject({ recorded: true });
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      replay: { lastUrl: "https://apply.replica.test/verify" },
+    }),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("blocked"),
+  );
+  expect(f.applications.getSubmissionReceipt(row.id)?.outcome).toBe(
+    "not_submitted",
+  );
+  const task = f.applications.needsYou.list().rows[0]!;
+  expect(task).toMatchObject({ prompt: instructions, blockedUrl: applyUrl });
+  await expect(f.service.checkAccess(task.id)).resolves.toBe(false);
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.browser.focusRetainedApplicationPage).not.toHaveBeenCalled();
+  await expect(f.service.open(row.id)).resolves.toEqual({
+    opened: true,
+    retained: false,
+  });
+  expect(f.browser.openSession).toHaveBeenCalledExactlyOnceWith("target_site", {
+    targetUrl: "https://apply.replica.test/verify",
+  });
 });
 
 it.each([

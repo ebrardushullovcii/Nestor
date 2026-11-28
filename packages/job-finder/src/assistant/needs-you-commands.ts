@@ -134,7 +134,7 @@ export function needsYouCommandTools(run: RunNeedsYouCommand) {
       }),
       open_need: (value) => ({
         summary: value
-          ? "Opened in the app browser."
+          ? "Opened the browser."
           : "This application tab is unavailable.",
         data: value,
       }),

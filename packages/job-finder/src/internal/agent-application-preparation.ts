@@ -119,6 +119,12 @@ export interface AgentApplicationPreparationInput {
     typeof runApplyAgent
   >[0]["earlierAttachments"];
   earlierActivity?: Parameters<typeof runApplyAgent>[0]["earlierActivity"];
+  earlierAttemptProgress?: Parameters<
+    typeof runApplyAgent
+  >[0]["earlierAttemptProgress"];
+  saveAttemptProgress?: Parameters<
+    typeof runApplyAgent
+  >[0]["saveAttemptProgress"];
   /** What an earlier run left on this form, to bring a closed page back. */
   replay?: Parameters<typeof runApplyAgent>[0]["replay"];
   /**
@@ -644,6 +650,8 @@ export async function runAgentApplicationPreparation(
     ...(input.earlierActivity?.length
       ? { earlierActivity: input.earlierActivity }
       : {}),
+    earlierAttemptProgress: input.earlierAttemptProgress,
+    saveAttemptProgress: input.saveAttemptProgress,
     ...(input.replay ? { replay: input.replay } : {}),
     ...(input.initialUnansweredPickerQuestions
       ? {
@@ -971,6 +979,8 @@ export function createApplyFormPreparer(input: {
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: AgentApplicationPreparationInput["earlierAttachments"];
   earlierActivity?: AgentApplicationPreparationInput["earlierActivity"];
+  earlierAttemptProgress?: AgentApplicationPreparationInput["earlierAttemptProgress"];
+  saveAttemptProgress?: AgentApplicationPreparationInput["saveAttemptProgress"];
   replay?: AgentApplicationPreparationInput["replay"];
   initialUnansweredPickerQuestions?: AgentApplicationPreparationInput["initialUnansweredPickerQuestions"];
   now?: () => Date;
@@ -1071,6 +1081,8 @@ export function createApplyFormPreparer(input: {
           ...(input.earlierActivity?.length
             ? { earlierActivity: input.earlierActivity }
             : {}),
+          earlierAttemptProgress: input.earlierAttemptProgress,
+          saveAttemptProgress: input.saveAttemptProgress,
           ...(input.initialUnansweredPickerQuestions
             ? {
                 initialUnansweredPickerQuestions:

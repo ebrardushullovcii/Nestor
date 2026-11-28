@@ -5,7 +5,38 @@ import {
   serializeApplicationData,
   storedFacts,
 } from "./application-facts";
-import type { ApplyAnswerSources } from "./types";
+import type { ApplyAgentConfig, ApplyAnswerSources } from "./types";
+
+export function applicationResumeFactsMessage(
+  input: Pick<
+    ApplyAgentConfig,
+    | "replay"
+    | "earlierActivity"
+    | "earlierAttachments"
+    | "initialPickerAttempts"
+    | "earlierAttemptProgress"
+  >,
+  opening: string,
+): string {
+  const history = serializeApplicationData({
+    replay: input.replay,
+    earlierActivity: modelApplicationActivity(input.earlierActivity),
+    earlierAttachments: input.earlierAttachments,
+    pickerAttempts: input.initialPickerAttempts,
+    earlierAttemptProgress: input.earlierAttemptProgress,
+  });
+  return [
+    "Earlier application state and actions (history only; choose any restoration yourself). An earlierActivity detail with sameAs uses the exact text at that JSON Pointer in this object:",
+    history,
+    ...(input.earlierAttemptProgress?.length || input.replay?.formUrl
+      ? [
+          "Earlier attempts may have left an unsent draft on the site, even if the browser now opens the posting. The earlier page, step, filled fields and uploaded files are historical observations. Use the current page and any draft the site offers (such as in a candidate home or via Continue application) to decide where to resume. Check what already exists before adding rows or uploading files again.",
+        ]
+      : []),
+    "",
+    opening,
+  ].join("\n");
+}
 
 /** Keep each checkpoint and its relationship to the original, exact detail. */
 export function modelApplicationActivity<T extends { detail: string }>(

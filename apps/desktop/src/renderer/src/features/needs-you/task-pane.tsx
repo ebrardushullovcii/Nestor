@@ -614,18 +614,37 @@ export function TaskPane(props: {
               </p>
               <p className="text-sm text-foreground-muted">
                 {task.blockedUrl
-                  ? "Open the job in your own browser to apply by hand. These applications stay blocked; Job Finder will not retry this site."
+                  ? "Open this posting in your browser to finish the application by hand."
                   : "Finish this step in the browser. Waiting applications continue automatically once their pages are accessible."}
               </p>
               {task.scope.siteOrigin ? (
                 <p className="break-all text-sm">{task.scope.siteOrigin}</p>
               ) : null}
+              {task.blockedUrl ? (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    void act(async () => {
+                      if (
+                        !(await window.nestor.needsYou.run("open_need", { id }))
+                      )
+                        throw new Error("This job link could not be opened.");
+                    })
+                  }
+                >
+                  Open in my browser
+                </Button>
+              ) : null}
               <Button
                 disabled={busy}
+                variant={task.blockedUrl ? "outline" : undefined}
                 onClick={() =>
                   void act(async () => {
                     if (
-                      !(await window.nestor.needsYou.run("open_need", { id }))
+                      !(await window.nestor.needsYou.run(
+                        "open_need",
+                        task.blockedUrl ? { id, browser: "nestor" } : { id },
+                      ))
                     ) {
                       // A run already under way owns its page; it comes back
                       // here only if the site still needs the person.
@@ -654,7 +673,7 @@ export function TaskPane(props: {
                   })
                 }
               >
-                {task.blockedUrl ? "Open in my browser" : "Open in browser"}
+                {task.blockedUrl ? "Open in Nestor" : "Open in browser"}
               </Button>
               {task.blockedUrl ? (
                 <p className="text-sm break-all">{task.blockedUrl}</p>

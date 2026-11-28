@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS application_details (
 );
 -- 1: session changed; 2: watcher confirmed this page is not held by the person.
 CREATE INDEX IF NOT EXISTS application_access_ready ON application_details(application_id) WHERE access_recheck=2;
+CREATE TABLE IF NOT EXISTS application_attempt_progress (
+  application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  attempt INTEGER NOT NULL,
+  progress_json TEXT NOT NULL,
+  PRIMARY KEY (application_id, attempt)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS application_origins (
   application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
   origin TEXT NOT NULL,

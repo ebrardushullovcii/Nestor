@@ -13,7 +13,10 @@ import { traceEvent } from "@nestor/core/run-trace";
 export function createNeedsYouCommandRunner(
   getStore: () => ApplicationStore,
   browser: {
-    open: (id: number) => Promise<boolean>;
+    open: (
+      id: number,
+      browser?: NeedsYouCommandInput<"open_need">["browser"],
+    ) => Promise<boolean>;
     check: (id: number) => Promise<boolean>;
     retry: (sourceId: number) => Promise<void>;
   },
@@ -83,7 +86,7 @@ export function createNeedsYouCommandRunner(
     },
     undo_form_answer_change: ({ undoId }) =>
       getStore().needsYou.undoAnswerChange(undoId),
-    open_need: ({ id }) => browser.open(id),
+    open_need: ({ id, browser: destination }) => browser.open(id, destination),
     check_need: ({ id }) => browser.check(id),
     retry_need: async ({ id }) => {
       const source = getStore().needsYou.details(id)?.task.source;
