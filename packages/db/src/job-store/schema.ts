@@ -136,6 +136,7 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   },
   // Why the source's last attempt failed; a resume tries it again.
   { table: "search_source_queue", column: "failure", definition: "TEXT" },
+  { table: "search_listing_queue", column: "completed_as", definition: "TEXT" },
   { table: "fit_context", column: "scoring_fingerprint", definition: "TEXT" },
 ];
 
@@ -236,6 +237,12 @@ WHEN OLD.description IS NOT NEW.description OR OLD.seniority IS NOT NEW.seniorit
 BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.job_id; END;
 CREATE TRIGGER IF NOT EXISTS listing_row_fit_stale AFTER UPDATE OF title, company, location, work_modes, salary_text ON jobs
 WHEN OLD.title IS NOT NEW.title OR OLD.company IS NOT NEW.company OR OLD.location IS NOT NEW.location OR OLD.work_modes IS NOT NEW.work_modes OR OLD.salary_text IS NOT NEW.salary_text
+BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.id; END;
+CREATE TRIGGER IF NOT EXISTS listing_read_fit_stale AFTER UPDATE OF facts_json ON job_details
+WHEN json_extract(OLD.facts_json, '$.fullListingRead') IS NOT json_extract(NEW.facts_json, '$.fullListingRead')
+BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.job_id; END;
+CREATE TRIGGER IF NOT EXISTS listing_date_fit_stale AFTER UPDATE OF posted_at ON jobs
+WHEN OLD.posted_at IS NOT NEW.posted_at
 BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.id; END;
 
 -- Each site that lists the job. A job seen on two sites is one job.

@@ -1,5 +1,8 @@
 import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
-import type { AgentDiscoveryOptions } from "@nestor/browser-runtime";
+import type {
+  AgentDiscoveryOptions,
+  BrowserSessionRuntime,
+} from "@nestor/browser-runtime";
 import {
   DiscoveryRunResultSchema,
   JobDiscoveryTargetSchema,
@@ -172,63 +175,83 @@ test("a browser collection cut short by a restart continues from the page it rea
   ]);
 });
 
-test("a collection an outage cut short is resumed, not reused as finished", async () => {
-  const seed = createSeed();
-  const target = JobDiscoveryTargetSchema.parse({
-    id: "source",
-    label: "Synthetic board",
-    startingUrl: "https://careers.example/jobs",
-  });
-  const saved = new Map<string, SourceNavigationProgress>();
-  const runAgentDiscovery = vi.fn(() =>
-    Promise.resolve(
-      DiscoveryRunResultSchema.parse({
-        source: "target_site",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-        querySummary: "Synthetic",
-        warning:
-          "The AI service is unavailable right now. Nothing was changed.",
-        jobs: [],
-        agentMetadata: {
-          incomplete: true,
-          phaseCompletionMode: null,
-        },
-      }),
-    ),
-  );
-  const engine = createListingSearchEngine({
-    aiClient: scriptedModel(),
-    browserRuntime: {
-      readRenderedPage: (url: string) =>
-        Promise.resolve({
-          finalUrl: url,
-          html: '<main><p>Loading...</p><script src="/app.js"></script></main>',
-        }),
-      runAgentDiscovery,
-    },
-  });
-  const collect = () =>
-    engine.collectSource({
-      target,
-      context: {
-        profile: seed.profile,
-        searchPreferences: seed.searchPreferences,
-        sources: [],
-        sourceInstructionArtifacts: [],
-      },
-      settings: JobSearchSettingsSchema.parse({}),
-      signal: new AbortController().signal,
-      lane: "browser",
-      navigation: {
-        read: (url) => saved.get(url) ?? null,
-        save: (url, progress) => saved.set(url, progress),
-      },
-      message: () => {},
-      knownUrls: () => [],
+test.each([null, "structured_finish"] as const)(
+  "an incomplete collection is resumed even when the older checkpoint has a %s finish",
+  async (phaseCompletionMode) => {
+    const seed = createSeed();
+    const target = JobDiscoveryTargetSchema.parse({
+      id: "source",
+      label: "Synthetic board",
+      startingUrl: "https://careers.example/jobs",
     });
-  expect(await collect()).toMatchObject({ complete: false });
-  expect(saved.get(target.startingUrl)?.outcome).toBeUndefined();
-  await collect();
-  expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
-});
+    const saved = new Map<string, SourceNavigationProgress>();
+    const next = `${target.startingUrl}?page=3`;
+    const notes = [`Read page 3 at ${next}.`];
+    if (phaseCompletionMode)
+      saved.set(target.startingUrl, {
+        currentUrl: `${target.startingUrl}?page=2`,
+        visitedUrls: [target.startingUrl],
+        collected: 20,
+        stepCount: 7,
+        savedAt: new Date().toISOString(),
+        outcome: { complete: false, pagesRead: 2, notes },
+      });
+    const runAgentDiscovery = vi.fn<
+      NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
+    >(() =>
+      Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          querySummary: "Synthetic",
+          warning:
+            "The AI service is unavailable right now. Nothing was changed.",
+          jobs: [],
+          agentMetadata: {
+            incomplete: true,
+            phaseCompletionMode,
+          },
+        }),
+      ),
+    );
+    const engine = createListingSearchEngine({
+      aiClient: scriptedModel(),
+      browserRuntime: {
+        readRenderedPage: (url: string) =>
+          Promise.resolve({
+            finalUrl: url,
+            html: '<main><p>Loading...</p><script src="/app.js"></script></main>',
+          }),
+        runAgentDiscovery,
+      },
+    });
+    const collect = () =>
+      engine.collectSource({
+        target,
+        context: {
+          profile: seed.profile,
+          searchPreferences: seed.searchPreferences,
+          sources: [],
+          sourceInstructionArtifacts: [],
+        },
+        settings: JobSearchSettingsSchema.parse({}),
+        signal: new AbortController().signal,
+        lane: "browser",
+        navigation: {
+          read: (url) => saved.get(url) ?? null,
+          save: (url, progress) => saved.set(url, progress),
+        },
+        message: () => {},
+        knownUrls: () => [],
+      });
+    expect(await collect()).toMatchObject({ complete: false, cutShort: true });
+    if (phaseCompletionMode)
+      expect(
+        runAgentDiscovery.mock.calls[0]?.[1].resumeCheckpoint?.remainingWork,
+      ).toEqual(notes);
+    else expect(saved.get(target.startingUrl)?.outcome).toBeUndefined();
+    await collect();
+    expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
+  },
+);

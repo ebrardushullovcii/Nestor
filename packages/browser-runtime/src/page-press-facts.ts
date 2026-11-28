@@ -5,6 +5,7 @@ import type {
 import type { Page, Request, Response } from "playwright";
 import { readPageMutationResponseText } from "./mutation-response-body";
 import { rememberApplicationSubmitRequest } from "./attachment-upload-ledger";
+import { withPageConnectionLiveness } from "./browser-navigation";
 
 /** Observe a press without deciding what it means or changing its execution. */
 export function watchPagePress(
@@ -77,7 +78,10 @@ export function watchPagePress(
     finish: async () => {
       page.off("request", onRequest);
       try {
-        await Promise.all(responseReads);
+        if (responseReads.length)
+          await withPageConnectionLiveness(page, () =>
+            Promise.all(responseReads),
+          ).catch(() => undefined);
       } finally {
         page.off("response", onResponse);
         page.off("requestfailed", onFailure);

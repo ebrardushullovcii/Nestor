@@ -106,44 +106,57 @@ export function createSearchPipeline(input: {
   const finishRead = (
     cards: readonly ListingCard[],
     result: ReadListingResult,
-  ) => {
-    save(result.jobs);
-    const bySource = new Map<string, ListingCard[]>();
-    for (const card of cards) {
-      const group = bySource.get(card.sourceId) ?? [];
-      group.push(card);
-      bySource.set(card.sourceId, group);
-    }
-    const jobs = new Map<string, number>();
-    for (const job of result.jobs)
-      jobs.set(job.sourceId, (jobs.get(job.sourceId) ?? 0) + 1);
-    const failures = new Map(
-      result.failures.map((failure) => [failure.url, failure]),
-    );
-    const closed = new Set(result.closed ?? []);
-    if (closed.size) deps.store.closeFoundUrls([...closed]);
-    for (const [id, group] of bySource) {
-      const source = sources.get(id)!;
-      source.processed += group.length;
-      source.row.found += jobs.get(id) ?? 0;
-      for (const card of group) {
-        if (closed.has(card.url)) source.removed++;
-        const failure = failures.get(card.url);
-        if (failure) {
-          source.row.failedReads++;
-          // A listing's failure says nothing about the rest of its source.
-          source.readFailures.push(`${card.url}: ${failure.reason}`);
-          if (failure.needsYou)
-            input.needsAccess(
-              source,
-              `${source.target.label} (${card.url}): ${failure.reason}`,
-            );
-        }
+    acknowledge = true,
+  ) =>
+    deps.store.transaction(() => {
+      save(result.jobs);
+      const bySource = new Map<string, ListingCard[]>();
+      for (const card of cards) {
+        const group = bySource.get(card.sourceId) ?? [];
+        group.push(card);
+        bySource.set(card.sourceId, group);
       }
-      input.write(source);
-      input.settled(source);
-    }
-  };
+      const jobs = new Map<string, number>();
+      for (const job of result.jobs)
+        jobs.set(job.sourceId, (jobs.get(job.sourceId) ?? 0) + 1);
+      const failures = new Map(
+        result.failures.map((failure) => [failure.url, failure]),
+      );
+      const closed = new Set(result.closed ?? []);
+      if (closed.size) deps.store.closeFoundUrls([...closed]);
+      if (acknowledge)
+        durable.acknowledgeCards(
+          input.searchId,
+          cards
+            .filter((card) => !failures.has(card.url))
+            .map((card) => ({
+              card,
+              outcome: closed.has(card.url) ? "related_removed" : "related",
+            })),
+        );
+      for (const [id, group] of bySource) {
+        const source = sources.get(id)!;
+        source.processed += group.length;
+        source.row.found += jobs.get(id) ?? 0;
+        for (const card of group) {
+          if (closed.has(card.url)) source.removed++;
+          const failure = failures.get(card.url);
+          if (failure) {
+            source.row.failedReads++;
+            // A listing's failure says nothing about the rest of its source.
+            source.readFailures.push(`${card.url}: ${failure.reason}`);
+            if (failure.needsYou)
+              input.needsAccess(
+                source,
+                `${source.target.label} (${card.url}): ${failure.reason}`,
+              );
+          }
+        }
+        input.write(source);
+        durable.put(input.searchId, source.row);
+        input.settled(source);
+      }
+    });
   /**
    * Related cards' detail reads, one ordered queue per source. Screening the
    * next wave needs only its cards, so no wave or screening batch waits for
@@ -248,7 +261,7 @@ export function createSearchPipeline(input: {
         // A reader that does not hand groups over returns them all at once.
         if (handled.size === 0) await keep(relatedCards, result);
       };
-      const readDone = async (
+      const readDone = (
         relatedCards: readonly ListingCard[],
         result: ReadListingResult,
       ) => {
@@ -259,7 +272,12 @@ export function createSearchPipeline(input: {
             .filter((failure) => failure.requiresBrowser)
             .map((failure) => failure.url),
         );
-        const indexUrls = new Set(result.indexes ?? []);
+        const indexUrls = new Map(
+          result.indexes?.map(({ requestedUrl, indexUrl }) => [
+            requestedUrl,
+            indexUrl,
+          ]),
+        );
         const fastCards = relatedCards.filter(
           (card) => !deferredUrls.has(card.url) && !indexUrls.has(card.url),
         );
@@ -272,14 +290,11 @@ export function createSearchPipeline(input: {
         });
         // The reader found an index, not a vacancy: collect its postings
         // through the source's inventory path instead of a vacancy read.
-        for (const card of relatedCards)
-          if (indexUrls.has(card.url) && !deferredUrls.has(card.url))
-            await collectIndex(
-              sources.get(card.sourceId)!,
-              card.url,
-              "http",
-              signal,
-            );
+        for (const card of relatedCards) {
+          const indexUrl = indexUrls.get(card.url);
+          if (indexUrl && !deferredUrls.has(card.url))
+            queueIndex(card, indexUrl);
+        }
         const deferred = new Map<string, ListingCard[]>();
         for (const card of relatedCards)
           if (deferredUrls.has(card.url)) {
@@ -308,7 +323,20 @@ export function createSearchPipeline(input: {
                   ),
               );
               for (const card of own) handled.add(card);
-              finishRead(own, result);
+              const indexes = new Map(
+                result.indexes?.map(({ requestedUrl, indexUrl }) => [
+                  requestedUrl,
+                  indexUrl,
+                ]),
+              );
+              finishRead(
+                own.filter((card) => !indexes.has(card.url)),
+                result,
+              );
+              for (const card of own) {
+                const indexUrl = indexes.get(card.url);
+                if (indexUrl) queueIndex(card, indexUrl);
+              }
             };
             let result: ReadListingResult;
             try {
@@ -403,6 +431,25 @@ export function createSearchPipeline(input: {
           else source.row.seen++;
         }
       }
+      deps.store.transaction(() => {
+        durable.acknowledgeCards(
+          input.searchId,
+          cards
+            .filter(
+              (card) =>
+                !related.has(`${card.sourceId}\n${card.url}`) &&
+                !failed.has(card.url),
+            )
+            .map((card) => ({
+              card,
+              outcome: gone.has(card.url)
+                ? "removed"
+                : rejected.has(card.url)
+                  ? "unrelated"
+                  : "seen",
+            })),
+        );
+      });
       for (const [id, reason] of failedSources)
         sources
           .get(id)!
@@ -419,6 +466,36 @@ export function createSearchPipeline(input: {
     concurrency(deps.concurrency?.sources, 12),
     durable.cardQueue(input.searchId),
   );
+  const indexesInRun = new Map<
+    string,
+    { waiting: ListingCard[]; completed: boolean | null }
+  >();
+  const queueIndex = (card: ListingCard, url: string) => {
+    const key = `${card.sourceId}\n${url}`;
+    const existing = indexesInRun.get(key);
+    if (existing) {
+      if (existing.completed !== null)
+        finishRead([card], { jobs: [], failures: [] }, existing.completed);
+      else existing.waiting.push(card);
+      return;
+    }
+    const index: { waiting: ListingCard[]; completed: boolean | null } = {
+      waiting: [card],
+      completed: null,
+    };
+    indexesInRun.set(key, index);
+    const source = sources.get(card.sourceId)!;
+    queueReads([card], () =>
+      collectIndex(source, url, "http", signal, (completed) => {
+        index.completed = completed;
+        finishRead(
+          index.waiting.splice(0),
+          { jobs: [], failures: [] },
+          completed,
+        );
+      }),
+    );
+  };
   /**
    * Collects the postings of an index a listing read found into its source,
    * by HTTP and then, when the index needs it, in the browser, where the
@@ -430,6 +507,7 @@ export function createSearchPipeline(input: {
     url: string,
     lane: "http" | "browser",
     laneSignal: AbortSignal,
+    complete: (completed: boolean) => void,
   ): Promise<void> => {
     let inventory: SourceInventory | null = null;
     let failure: string | null = null;
@@ -445,6 +523,8 @@ export function createSearchPipeline(input: {
         ...(source.pageLog ? { pageLog: source.pageLog } : {}),
         ...(source.navigation ? { navigation: source.navigation } : {}),
         knownUrls: (urls) => deps.store.findKnownUrls(urls),
+        collectedUrls: (urls) =>
+          urls.filter((address) => source.urls.has(address)),
         onCards: (cards) => accept(source, cards),
         message: () => {},
       });
@@ -456,7 +536,7 @@ export function createSearchPipeline(input: {
     }
     if (lane === "http" && (failure !== null || inventory?.requiresBrowser)) {
       input.browser(source, (browserSignal) =>
-        collectIndex(source, url, "browser", browserSignal),
+        collectIndex(source, url, "browser", browserSignal, complete),
       );
       return;
     }
@@ -465,13 +545,16 @@ export function createSearchPipeline(input: {
         source,
         `${source.target.label} (${url}): ${inventory.notes.join(" ")}`,
       );
-    else if (failure !== null || !inventory?.complete)
-      source.readFailures.push(
-        `${url}: this index's listings were not all collected. ${failure ?? inventory?.notes.join(" ") ?? ""}`.trim(),
-      );
-    source.processed++;
-    input.write(source);
-    input.settled(source);
+    else if (failure !== null || !inventory?.complete) {
+      const reason =
+        `${url}: this index's listings were not all collected. ${failure ?? inventory?.notes.join(" ") ?? ""}`.trim();
+      source.row.failedReads++;
+      source.failure ??= reason;
+      source.readFailures.push(reason);
+    }
+    complete(
+      inventory?.complete === true && !inventory.needsYou && failure === null,
+    );
   };
   const accept = async (source: SourceWork, cards: readonly ListingCard[]) => {
     const quick = sourceSettings(settings, source).depth === "quick";
@@ -517,6 +600,19 @@ export function createSearchPipeline(input: {
       for (const url of urls) source.urls.add(url);
       if (urls.length) restored.set(source.target.id, urls);
       source.row.cards = source.urls.size;
+      for (const { outcome, total } of durable.cardOutcomes(
+        input.searchId,
+        id,
+      )) {
+        source.processed += total;
+        source.screened += total;
+        if (outcome === "related" || outcome === "related_removed")
+          source.row.related += total;
+        if (outcome === "unrelated") source.row.unrelated += total;
+        if (outcome === "seen") source.row.seen += total;
+        if (outcome === "removed" || outcome === "related_removed")
+          source.removed += total;
+      }
     },
     /**
      * A complete fresh inventory is the site's current list. Cards an

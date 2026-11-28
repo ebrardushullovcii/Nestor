@@ -2482,6 +2482,7 @@ export const AgentDebugFindingsSchema = z.object({
 export type AgentDebugFindings = z.infer<typeof AgentDebugFindingsSchema>;
 
 export const DiscoveryAgentMetadataSchema = z.object({
+  listingIndexUrl: UrlStringSchema.optional(),
   coveredPageUrls: z.array(UrlStringSchema).optional(),
   deferredListingPageUrls: z.array(UrlStringSchema).optional(),
   duplicateListingPageUrls: z.array(UrlStringSchema).optional(),
@@ -2619,6 +2620,7 @@ export interface BrowserAgentRunCheckpoint {
    */
   collectedEarlier?: number | undefined;
   visitedUrls: string[];
+  remainingWork?: string[] | undefined;
   phaseEvidence: z.infer<typeof SourceDebugPhaseEvidenceSchema>;
 }
 
@@ -2635,6 +2637,7 @@ export const BrowserAgentRunCheckpointSchema: z.ZodType<
   collectedJobs: z.array(JobPostingSchema).default([]),
   collectedEarlier: z.number().int().nonnegative().optional(),
   visitedUrls: z.array(UrlStringSchema).default([]),
+  remainingWork: z.array(z.string()).optional(),
   phaseEvidence: SourceDebugPhaseEvidenceSchema,
 });
 

@@ -1906,7 +1906,11 @@ test("a page the reader calls an index of vacancies is returned for collection, 
         html: "<main><h1>DevOps and Sysadmin Jobs</h1><p>Latest remote DevOps postings from many employers, each with its own page.</p></main>",
       }),
   });
-  expect(result).toEqual({ jobs: [], failures: [], indexes: [index.url] });
+  expect(result).toEqual({
+    jobs: [],
+    failures: [],
+    indexes: [{ requestedUrl: index.url, indexUrl: index.url }],
+  });
   expect(chatWithTools.mock.calls[0]?.[0][0]?.content).toContain(
     "When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true",
   );
@@ -2148,6 +2152,53 @@ test("a page another lane must finish is not logged as read", async () => {
   });
   expect(inventory).toMatchObject({ complete: false, requiresBrowser: true });
   expect(record).not.toHaveBeenCalled();
+});
+
+test("a finished public feed is logged after acceptance and skipped on restart", async () => {
+  const board = { ...source, url: "https://jobs.ashbyhq.com/synthetic" };
+  const readPage = vi.fn((url: string) =>
+    Promise.resolve({
+      finalUrl: url,
+      html:
+        url === board.url
+          ? "<title>Synthetic Careers</title>"
+          : JSON.stringify({
+              jobs: [
+                {
+                  id: "7",
+                  title: "Platform Engineer",
+                  jobUrl: `${board.url}/7`,
+                  descriptionPlain: "Build and maintain the release service.",
+                },
+              ],
+            }),
+    }),
+  );
+  const pages = new Map<string, readonly string[]>();
+  const onPage = vi.fn();
+  const record = vi.fn(
+    (url: string, finalUrl: string, links: readonly string[]) => {
+      pages.set(url, links);
+      pages.set(finalUrl, links);
+    },
+  );
+  const pageLog = { links: (url: string) => pages.get(url) ?? null, record };
+  const input = { source: board, readPage, pageLog, onPage };
+
+  expect(await collectSource(input)).toMatchObject({ complete: true });
+  expect(onPage).toHaveBeenCalledOnce();
+  expect(record).toHaveBeenCalledWith(board.url, board.url, []);
+  expect(onPage.mock.invocationCallOrder[0]).toBeLessThan(
+    record.mock.invocationCallOrder[0],
+  );
+  readPage.mockClear();
+
+  expect(await collectSource(input)).toMatchObject({
+    complete: true,
+    resumed: true,
+    cards: [],
+  });
+  expect(readPage).not.toHaveBeenCalled();
 });
 
 test("listing reads hand each finished group over before the other groups end", async () => {

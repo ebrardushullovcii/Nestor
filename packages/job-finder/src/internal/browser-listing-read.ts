@@ -77,7 +77,7 @@ export async function readListingInBrowser(
     siteInstructions: [
       "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
       "When this page shows only part of the vacancy and points to the employer's own posting, such as an Apply on company website link, open that posting and read the vacancy there.",
-      "If the supplied URL is actually an index, collect its vacancy cards under their own URLs using extract_jobs or save_jobs_from_data and follow pagination. An index is not a vacancy; do not ask the person for links already on it.",
+      "If the supplied URL leads to an index and the requested vacancy is absent, return the index address in finish.listingIndexUrl. The search can collect that index once for all the postings that led there.",
       "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
     ],
     targetJobCount: 1,

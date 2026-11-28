@@ -5,7 +5,7 @@ import {
   configureTaskPageOwner,
   taskSendPage,
 } from "./task-page-tabs";
-import { withTraceScope } from "@nestor/core/run-trace";
+import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
   bindTracePage,
@@ -3768,6 +3768,7 @@ export function createBrowserAgentRuntime(
               result.compactionUsedFallbackTrigger ?? false,
             phaseCompletionMode: result.phaseCompletionMode ?? null,
             phaseCompletionReason: result.phaseCompletionReason ?? null,
+            listingIndexUrl: result.listingIndexUrl,
             coveredPageUrls: result.coveredPageUrls,
             deferredListingPageUrls: result.deferredListingPageUrls,
             duplicateListingPageUrls: result.duplicateListingPageUrls,
@@ -3870,18 +3871,19 @@ export function createBrowserAgentRuntime(
         if (!hasSourceCatalog && !warmPageReusable) {
           if (navigationTarget) {
             allowPrepareOnlyRunNavigation(page, navigationTarget);
-            await page
-              .goto(navigationTarget, {
-                waitUntil: "domcontentloaded",
-                timeout: 0,
-              })
-              .catch((error: unknown) => {
-                // A navigation deadline does not mean the page is unusable.
-                // Let the agent inspect it and wait or retry, keeping its work.
-                if (error instanceof Error && error.name === "TimeoutError")
-                  return null;
-                throw error;
-              });
+            const discoveryPage = page;
+            await withNavigationLiveness(
+              discoveryPage,
+              () =>
+                discoveryPage.goto(navigationTarget, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 0,
+                }),
+              agentOptions.signal,
+            ).catch((error: unknown) => {
+              agentOptions.signal?.throwIfAborted();
+              traceEvent("search_page_open_failed", { error });
+            });
           }
         }
 

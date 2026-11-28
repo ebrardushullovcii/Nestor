@@ -1,5 +1,6 @@
 import type { Locator, Page } from "playwright";
 import { isDetachedFrameError, readVisibleText } from "./visible-page-text";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
@@ -96,20 +97,36 @@ export async function captureModelPageImage(
   page: Page,
   clip?: TraceCaptureInput["clip"],
 ): Promise<Uint8Array> {
-  const { masks, boxes } = await secretFieldMasks(page);
+  return captureMaskedPageImage(page, await secretFieldMasks(page), clip);
+}
+
+async function captureMaskedPageImage(
+  page: Page,
+  { masks, boxes }: Awaited<ReturnType<typeof secretFieldMasks>>,
+  clip?: TraceCaptureInput["clip"],
+): Promise<Uint8Array> {
   const viewport = await page.evaluate(() => ({
     width: innerWidth,
     height: innerHeight,
   }));
   const capture = captures.get(page.context());
-  return capture
-    ? capture(page, { masks: boxes, viewport, ...(clip ? { clip } : {}) })
-    : page.screenshot({
-        type: "png",
-        scale: "css",
-        mask: masks,
+  const native = capture
+    ? await capture(page, {
+        masks: boxes,
+        viewport,
         ...(clip ? { clip } : {}),
-      });
+      }).catch(() => null)
+    : null;
+  return (
+    native ??
+    page.screenshot({
+      type: "png",
+      scale: "css",
+      timeout: 0,
+      mask: masks,
+      ...(clip ? { clip } : {}),
+    })
+  );
 }
 
 /** Captures the supplied Page, never a last/active tab chosen by URL. */
@@ -143,21 +160,12 @@ async function capturePageTrace(
   try {
     const started = Date.now();
     // Secrets remain masked in all frames. Text collection never reads input values.
-    const { masks, boxes, sensitive } = await secretFieldMasks(page);
-    const capture = captures.get(page.context());
-    const viewport = await page.evaluate(() => ({
-      width: innerWidth,
-      height: innerHeight,
-    }));
-    const image =
-      bytes && !sensitive
+    const image = await withBrowserReadLiveness(page, async () => {
+      const masks = await secretFieldMasks(page);
+      return bytes && !masks.sensitive
         ? bytes
-        : capture
-          ? await capture(page, { masks: boxes, viewport })
-          : await page.screenshot({
-              type: "png",
-              mask: masks,
-            });
+        : captureMaskedPageImage(page, masks);
+    });
     if (privatePages.has(page)) {
       traceEvent("page_snapshot", {
         applicationKey,

@@ -427,6 +427,11 @@ export function createJobSearchRunner(
       )
         source.completeAccess?.();
       source.row.phase = null;
+      if (source.row.state === "partial" || source.row.state === "needs_you")
+        source.failure ??=
+          source.notes.join(" ") ||
+          source.readFailures[0] ||
+          "Some of this site's work remains.";
       source.row.message =
         `${source.row.cards} listings; ${source.row.related} related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
         (source.removed
@@ -597,6 +602,7 @@ export function createJobSearchRunner(
           ...(source.pageLog ? { pageLog: source.pageLog } : {}),
           ...(source.navigation ? { navigation: source.navigation } : {}),
           knownUrls: (urls) => deps.store.findKnownUrls(urls),
+          collectedUrls: (urls) => urls.filter((url) => source.urls.has(url)),
           onCards: async (cards) => {
             await pipeline.accept(source, cards);
             recordAccess(cards.length);
@@ -632,11 +638,15 @@ export function createJobSearchRunner(
       // This is the current collection outcome, replacing the earlier HTTP
       // attempt when browser navigation recovered the source. An attempt
       // that read nothing does not erase what an earlier one found and said.
-      const readNothing = !inventory.complete && !inventory.cards.length;
+      const readNothing = !inventory.complete && !source.row.cards;
       const later = `${inventory.cutShort && source.row.cards ? "The last attempt to read this site failed" : "A later attempt did not finish"}: ${inventory.notes.join(" ")}`;
-      if (readNothing && source.notesRead)
+      if (!inventory.complete && !inventory.cards.length && source.notesRead)
         source.notes = [...source.notes, later];
-      else if (readNothing && inventory.cutShort && source.row.cards)
+      else if (
+        !inventory.complete &&
+        !inventory.cards.length &&
+        source.row.cards
+      )
         source.notes = [later];
       else {
         source.notes = inventory.notes;
@@ -825,7 +835,11 @@ export function createJobSearchRunner(
    */
   const begin = (
     input: JobSearchSettingsInput,
-    forced?: { targets: JobDiscoveryTarget[]; full?: boolean },
+    forced?: {
+      targets: JobDiscoveryTarget[];
+      full?: boolean;
+      continueFrom?: string;
+    },
     resume?: JobSearchRecord,
   ): Promise<JobSearchRecord> => {
     if (active)
@@ -960,9 +974,17 @@ export function createJobSearchRunner(
               pending.filter((item) => item.full).map((item) => item.target.id),
             );
           } else {
-            for (const target of targets)
+            for (const target of targets) {
               resultRows.plan(run.record!.id, target, Boolean(forced?.full));
+              if (forced?.continueFrom)
+                resultRows.copyProgress(
+                  forced.continueFrom,
+                  run.record!.id,
+                  target.id,
+                );
+            }
           }
+          resultRows.pruneRetiredProgress(run.record!.id);
         });
         search = run.record;
         revision++;
@@ -1054,7 +1076,11 @@ export function createJobSearchRunner(
       }
       // A new run over just these sites, keeping the person's choices for
       // their next search as they were.
-      return begin(search?.settings ?? {}, { targets, full: true });
+      return begin(search?.settings ?? {}, {
+        targets,
+        full: true,
+        ...(search ? { continueFrom: search.id } : {}),
+      });
     },
     stop() {
       if (continuation) clearTimeout(continuation);

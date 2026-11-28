@@ -7,6 +7,7 @@ import {
 import { screenshotPage } from "./page-image-input";
 import { readPageLinkedText } from "./page-linked-text";
 import { isVisibleFrame } from "./visible-page-text";
+import { configureTraceCapture } from "./trace-page";
 
 let browser: Browser;
 beforeAll(async () => {
@@ -20,6 +21,20 @@ const board = `<main><h1>Remote jobs</h1>
 <article><a href="https://jobs.example.test/jobs/1">Senior Platform Engineer</a><p>Synthetic Employer, Europe</p></article>
 <label for="q">Search</label><input id="q"><button>Search</button>
 <div data-testid="card">Load more jobs</div></main>`;
+
+test("a native compositor failure falls back to a screenshot of the same page", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(board);
+    configureTraceCapture(page.context(), () =>
+      Promise.reject(new Error("UnknownVizError")),
+    );
+    const image = await screenshotPage(page);
+    expect(image.dataUrl).toMatch(/^data:image\/png;base64,iVBORw0KGgo/u);
+  } finally {
+    await page.context().close();
+  }
+});
 
 /** A page whose frame list still holds an ad frame that has since detached. */
 async function pageWithDetachedAdFrame(): Promise<{

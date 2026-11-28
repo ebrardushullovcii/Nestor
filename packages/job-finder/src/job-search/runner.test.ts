@@ -455,6 +455,7 @@ test("a restart keeps every browser listing read that finished before it and rea
     hold = false;
     browserReads.length = 0;
     engine.readListings.mockClear();
+    engine.screenCards.mockClear();
     const restarted = createJobSearchRunner({
       store: reopened,
       engine,
@@ -466,6 +467,11 @@ test("a restart keeps every browser listing read that finished before it and rea
     );
     // Only the listing whose read had not finished is read again.
     expect(browserReads).toEqual([cards[2]!.url]);
+    expect(
+      engine.screenCards.mock.calls.flatMap(([input]) =>
+        input.cards.map((row) => row.url),
+      ),
+    ).toEqual([cards[2]!.url]);
     expect(
       engine.readListings.mock.calls.flatMap(([input]) =>
         input.cards.map((row) => row.url),
@@ -686,7 +692,12 @@ test("a crash recovers accepted card facts when the source's fresh inventory is 
     ),
   ).toEqual([accepted.url]);
   expect(store.stageCounts().found).toBe(1);
-  expect(rows.cardUrls(search.id, "one")).toEqual([]);
+  // The partial source still has more index work to do. Its acknowledged
+  // card remains as an address, with no listing body left to lease again.
+  expect(rows.cardQueue(search.id).take("one", 400)).toEqual([]);
+  expect(rows.cardOutcomes(search.id, "one")).toEqual([
+    { outcome: "related", total: 1 },
+  ]);
   expect(store.searches.get(search.id)).toMatchObject({
     state: "done",
     sourcesDone: 1,
@@ -2620,7 +2631,7 @@ test("a stale flag on unchanged inputs keeps the stored answer without asking ag
         url: job.url,
         description: job.description,
         salaryMin: 150_000,
-        facts: { fullListingRead: true },
+        facts: job.facts,
       },
     ],
   });
@@ -2829,6 +2840,7 @@ test("an index the listing reader finds is collected for its postings, in the br
   const { runner, engine, store, context } = setup();
   context.sources = [context.sources[0]!];
   const index = "https://one.example/categories/backend";
+  const alias = "https://one.example/jobs/archived";
   const posting = (slug: string): ListingCard => ({
     url: `https://one.example/jobs/${slug}`,
     title: `Backend Engineer ${slug}`,
@@ -2856,19 +2868,36 @@ test("an index the listing reader finds is collected for its postings, in the br
             },
       );
     return Promise.resolve({
-      cards: [{ ...posting("index"), url: index, title: "Backend Jobs" }],
+      cards: [
+        { ...posting("index"), url: index, title: "Backend Jobs" },
+        { ...posting("archived"), url: alias },
+      ],
       pagesRead: 1,
       complete: true,
       notes: [],
     });
   });
-  engine.readListings.mockImplementation(({ cards }) =>
+  engine.readListings.mockImplementation(({ cards, lane }) =>
     Promise.resolve({
       jobs: cards
-        .filter((card) => card.url !== index)
+        .filter((card) => card.url !== index && card.url !== alias)
         .map((card) => ({ ...found(card), sourceJobId: card.url })),
-      failures: [],
-      ...(cards.some((card) => card.url === index) ? { indexes: [index] } : {}),
+      failures:
+        lane === "http" && cards.some((card) => card.url === alias)
+          ? [
+              {
+                url: alias,
+                reason: "JavaScript redirect",
+                requiresBrowser: true,
+              },
+            ]
+          : [],
+      indexes: cards
+        .filter(
+          (card) =>
+            card.url === index || (card.url === alias && lane === "browser"),
+        )
+        .map((card) => ({ requestedUrl: card.url, indexUrl: index })),
     }),
   );
   await runner.start({ depth: "thorough", postedWithin: "any" });
@@ -2896,7 +2925,7 @@ test("an index the listing reader finds is collected for its postings, in the br
       .sort(),
   ).toEqual(["Backend Engineer a", "Backend Engineer b"]);
   const [row] = createSearchSourcesStore(store).list({}).rows;
-  expect(row).toMatchObject({ state: "done", failedReads: 0, cards: 3 });
+  expect(row).toMatchObject({ state: "done", failedReads: 0, cards: 4 });
   // The site's own collection and every index read share one record of the
   // index pages this search has read; only index reads skip them.
   const [main, ...indexReads] = engine.collectSource.mock.calls.map(
