@@ -25,6 +25,7 @@ import {
   approveOriginalResumesForTests,
   seedTrackerDemo,
 } from "@nestor/db/job-store";
+import { applicationIdentity } from "@nestor/job-finder/applications";
 import type { IpcMain } from "electron";
 
 import { getApplicationStore } from "../services/job-finder/application-store";
@@ -92,6 +93,17 @@ export async function executeApplicationStoreCommand(
       if (!application) return null;
       const work = store.getWork(id);
       const resume = store.getResumeArtifact(id);
+      const receipt = store.getSubmissionReceipt(id);
+      const earlierSendForm =
+        receipt?.outcome === "outcome_uncertain"
+          ? store
+              .earlierAttemptProgress(id, application.attempt)
+              .find(
+                ({ attempt }) =>
+                  applicationIdentity(id, attempt).resultId ===
+                  receipt.resultId,
+              )
+          : undefined;
       return ApplicationDetailsSchema.parse({
         application,
         summary: work?.execution.summary ?? null,
@@ -99,7 +111,15 @@ export async function executeApplicationStoreCommand(
         resumeFileName: resume?.fileName ?? null,
         resumeFilePath: resume?.filePath ?? null,
         reviewCard: work?.reviewCard ?? null,
-        receipt: store.getSubmissionReceipt(id),
+        receipt,
+        ...(earlierSendForm && {
+          earlierSendForm: {
+            filledFieldCount: earlierSendForm.filledFields.length,
+            attachedFileNames: earlierSendForm.uploadedFiles.map(
+              ({ fileName }) => fileName,
+            ),
+          },
+        }),
         accessDetail:
           work?.execution.blocker?.code === "site_login_required"
             ? work.execution.blocker.detail

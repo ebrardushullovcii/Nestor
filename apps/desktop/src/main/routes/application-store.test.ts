@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getWork: vi.fn(),
   getResumeArtifact: vi.fn(),
   getSubmissionReceipt: vi.fn(),
+  earlierAttemptProgress: vi.fn(),
   needDetails: vi.fn(),
   openExternal: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock("../services/job-finder/application-store", () => ({
     getWork: mocks.getWork,
     getResumeArtifact: mocks.getResumeArtifact,
     getSubmissionReceipt: mocks.getSubmissionReceipt,
+    earlierAttemptProgress: mocks.earlierAttemptProgress,
     needsYou: { details: mocks.needDetails },
   }),
 }));
@@ -140,6 +142,60 @@ describe("application commands in main", () => {
       });
     },
   );
+
+  it("reads form progress from the attempt that pressed an unconfirmed Send", async () => {
+    const at = "2026-11-28T17:58:29.000Z";
+    mocks.getApplication.mockReturnValue({
+      id: 3,
+      jobId: 3,
+      mode: "autonomous_submit",
+      title: "Synthetic role",
+      company: "Synthetic employer",
+      location: "Remote",
+      state: "uncertain",
+      attempt: 3,
+      queuedAt: at,
+      updatedAt: at,
+      submittedAt: null,
+      error: null,
+    });
+    mocks.getWork.mockReturnValue(null);
+    mocks.getResumeArtifact.mockReturnValue(null);
+    mocks.getSubmissionReceipt.mockReturnValue({
+      id: "outcome",
+      preflightId: "preflight",
+      idempotencyKey: "send",
+      authorityEnvelopeId: "authority",
+      authorityRevision: 1,
+      runId: "application_run_3",
+      jobId: "3",
+      resultId: "application_3_attempt_1",
+      applicationRecordId: "application_3",
+      outcome: "outcome_uncertain",
+      attemptedAt: at,
+      verifiedAt: null,
+      evidence: [],
+      retry: { eligible: false, blockReason: "outcome_uncertain" },
+    });
+    mocks.earlierAttemptProgress.mockReturnValue([
+      {
+        attempt: 1,
+        filledFields: ["Name", "Email", "Phone", "Certification"],
+        uploadedFiles: [{ fileName: "synthetic-resume.pdf" }],
+      },
+      { attempt: 2, filledFields: [], uploadedFiles: [] },
+    ]);
+
+    await expect(
+      executeApplicationStoreCommand("get-application-details", { id: 3 }),
+    ).resolves.toMatchObject({
+      earlierSendForm: {
+        filledFieldCount: 4,
+        attachedFileNames: ["synthetic-resume.pdf"],
+      },
+    });
+    expect(mocks.earlierAttemptProgress).toHaveBeenCalledExactlyOnceWith(3, 3);
+  });
 
   it.each([true, false])(
     "Open delegates the retained page or URL to the service and never opens an unrelated active tab: %s",

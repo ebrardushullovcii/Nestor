@@ -136,6 +136,13 @@ export const ApplicationDetailsSchema = z.object({
   resumeFilePath: z.string().nullable().optional(),
   reviewCard: ApplicationReviewCardSchema.nullable(),
   receipt: SubmissionOutcomeRecordSchema.nullable(),
+  /** Recorded form work from the earlier attempt that pressed an unconfirmed Send. */
+  earlierSendForm: z
+    .object({
+      filledFieldCount: z.number().int().nonnegative(),
+      attachedFileNames: z.array(z.string()),
+    })
+    .optional(),
   /**
    * The run's recorded reason for a sign-in step it handed to the person
    * (such as access a sign-in provider asks for beyond basic profile), as
