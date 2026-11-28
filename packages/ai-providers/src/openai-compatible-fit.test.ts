@@ -128,6 +128,18 @@ test.each([
         expect(messages[0]!.content).toContain(
           "say that the hiring scope is unverified and weigh that uncertainty in the score",
         );
+        expect(messages[0]!.content).toContain(
+          "infer the posting country's local currency when the posting makes that the natural reading, and state the assumption",
+        );
+        expect(messages[0]!.content).toContain(
+          "use a reasonable approximate exchange rate and state the rate and converted amount as estimates in preferencesExplanation",
+        );
+        expect(messages[0]!.content).toContain(
+          "the pay still cannot be compared after using the posting context and reasonable conversions, or the uncertainty in the estimate could change whether the floor is met",
+        );
+        expect(messages[0]!.content).not.toContain(
+          "without a supplied conversion",
+        );
       }
       // The rubric guides the model; the app does not replace its verdict.
       expect(batch.map(({ jobId, score }) => ({ jobId, score }))).toEqual(
