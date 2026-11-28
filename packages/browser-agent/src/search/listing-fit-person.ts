@@ -29,6 +29,10 @@ export function buildListingFitPerson(profile: CandidateProfile) {
     currentCity: profile.currentCity,
     currentRegion: profile.currentRegion,
     currentCountry: profile.currentCountry,
+    // Left out when empty, so a profile without it keeps its fit key.
+    ...(profile.citizenshipCountries.length
+      ? { citizenshipCountries: profile.citizenshipCountries }
+      : {}),
     yearsExperience: profile.yearsExperience,
     workEligibility: workEligibilityForModel(profile.workEligibility),
     skills: profile.skills,

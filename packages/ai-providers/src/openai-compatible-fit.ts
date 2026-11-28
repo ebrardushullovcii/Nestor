@@ -185,6 +185,13 @@ function plainEligibility(profile: CandidateProfile) {
   return {
     "Countries where the person is legally allowed to work (citizenship, residence, visa or permit)":
       facts.authorizedWorkCountries,
+    // Left out when empty, so other profiles' requests stay as they were.
+    ...(profile.citizenshipCountries.length
+      ? {
+          "Citizenship (countries; passport country first)":
+            profile.citizenshipCountries,
+        }
+      : {}),
     "Limited work permissions": (facts.limitedWorkPermissions ?? []).map(
       (permit) => ({
         Country: permit.country,
