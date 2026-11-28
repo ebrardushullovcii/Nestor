@@ -1,0 +1,16 @@
+{
+  "pageUrl": "https://careers.example.test/postings/42/apply",
+  "step": {
+    "label": "Experience",
+    "index": 2,
+    "total": 5
+  },
+  "filledFields": ["Job title", "Employer"],
+  "uploadedFiles": [
+    {
+      "field": "Resume",
+      "fileName": "resume.pdf",
+      "documentId": "document_resume_example"
+    }
+  ]
+}

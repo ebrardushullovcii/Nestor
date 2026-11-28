@@ -1,0 +1,10 @@
+{
+  "pageUrl": "https://careers.example.test/postings/42",
+  "step": {
+    "label": null,
+    "index": null,
+    "total": null
+  },
+  "filledFields": [],
+  "uploadedFiles": []
+}

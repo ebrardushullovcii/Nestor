@@ -1,4 +1,5 @@
 import {
+  ApplicationAttemptProgressSchema,
   ApplicationResumeArtifactSchema,
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
@@ -55,6 +56,7 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   TrackerFilterSchema,
   JobListingFactsSchema,
   ApplicationReviewCardSchema,
+  ApplicationAttemptProgressSchema,
   SubmissionOutcomeRecordSchema,
   ApplicationResumeArtifactSchema,
   ApplyExecutionResultSchema,
@@ -83,6 +85,7 @@ const FIXTURES: Record<string, string> = {
   TrackerFilterSchema: "tracker-filter",
   JobListingFactsSchema: "job-listing-facts",
   ApplicationReviewCardSchema: "application-review-card",
+  ApplicationAttemptProgressSchema: "application-attempt-progress",
   SubmissionOutcomeRecordSchema: "submission-outcome-record",
   ApplicationResumeArtifactSchema: "application-resume-artifact",
   ApplyExecutionResultSchema: "apply-execution-result",
