@@ -181,6 +181,11 @@ it("Add to Find jobs reads rendered DOM facts when the initial capture has no po
 
 it("fills a partial posting from its application link through the browser listing reader", async () => {
   const description = "Design accessible products. Partner with engineers.";
+  const salaryText = "€27,000–€28,000 gross annually";
+  const responsibilities = [
+    "Design accessible products.",
+    "Partner with engineers.",
+  ];
   const runAgentDiscovery = vi
     .fn<NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>>()
     .mockResolvedValue(
@@ -196,6 +201,8 @@ it("fills a partial posting from its application link through the browser listin
             canonicalUrl: applicationUrl,
             title: "Product Designer, Core Platform",
             description,
+            salaryText,
+            responsibilities,
             listingDetailFetch: {
               outcome: "enriched",
               method: "page_text",
@@ -235,11 +242,28 @@ it("fills a partial posting from its application link through the browser listin
     posting: {
       ...boardPosting,
       description,
+      salaryText,
+      responsibilities,
       needsRenderedPage: false,
       listingDetailFetch: { outcome: "enriched" },
     },
     fullListingRead: true,
   });
+  const store = openJobStore(":memory:");
+  try {
+    const saved = savePageJobs(store, {
+      postings: [result.posting],
+      pageUrl,
+      fullListingRead: result.fullListingRead,
+    });
+    expect(store.getJob(saved.ids[0]!)).toMatchObject({
+      url: pageUrl,
+      salaryText,
+      facts: { fullListingRead: true, responsibilities },
+    });
+  } finally {
+    store.close();
+  }
 });
 
 it("keeps and saves the partial posting when the application page cannot be read", async () => {

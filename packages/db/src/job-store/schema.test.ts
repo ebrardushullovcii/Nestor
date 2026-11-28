@@ -96,10 +96,10 @@ const RELEASED_COLUMNS: Record<string, string> = {
   resumes:
     "job_id level state updated_at error draft_json previous_json approved_at pdf_path",
   search_sources:
-    "id search_id source_id label url state lane phase cards related unrelated seen failed_reads found added hidden message",
+    "id search_id source_id label url state lane phase cards related unrelated seen failed_reads full_reads partial_reads found added hidden message",
   search_source_queue: "search_id source_id target_json full completed",
   search_listing_queue:
-    "id search_id source_id url card_json leased completed_as",
+    "id search_id source_id url card_json leased completed_as browser_read",
   search_source_navigation: "search_id source_id start_url progress_json",
   search_source_pages: "search_id source_id url links_json",
   searches:

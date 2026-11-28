@@ -82,6 +82,9 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       INSERT INTO search_sources VALUES('search_old','acme','acme.test','done','http',NULL,'https://acme.test',99,0,0,99,0,0,0,0,NULL);
       INSERT INTO search_sources VALUES('search_now','acme','acme.test','done','browser',NULL,'https://acme.test',12,3,2,7,5,0,3,0,'12 listings');
       INSERT INTO search_sources VALUES('search_now','beta','beta.test','stopped','http',NULL,'https://beta.test',0,0,0,0,0,0,0,0,NULL);
+      ALTER TABLE search_sources ADD COLUMN full_reads INTEGER;
+      ALTER TABLE search_sources ADD COLUMN partial_reads INTEGER;
+      UPDATE search_sources SET full_reads=2,partial_reads=1 WHERE source_id='acme' AND search_id='search_now';
       CREATE TABLE job_sightings(job_id INTEGER,url TEXT,site TEXT,source_id TEXT,source_label TEXT,apply_url TEXT,seen_at INTEGER);
       INSERT INTO job_sightings VALUES(7,'https://acme.test/7','acme.test','acme','acme.test',NULL,${Date.parse("2026-11-06T10:00:02.000Z")});
       INSERT INTO job_sightings VALUES(7,'https://acme.test/old','acme.test','acme','acme.test',NULL,1500);
@@ -324,6 +327,8 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
     assert.equal(acme.trace.modelCalls, 1);
     assert.equal(acme.errors.events[0].error.message, "search stopped");
     assert.equal(search.perSource.length, 2);
+    assert.equal(acme.fullPostingsRead, 2);
+    assert.equal(acme.partialPostingsRead, 1);
     const acmeSection = readFileSync(
       path.join(searchOut, acme.section),
       "utf8",

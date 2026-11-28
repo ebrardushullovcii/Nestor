@@ -55,6 +55,7 @@ test("screening, full reads and fit use the selected million-token route's real 
                   company: "Synthetic Employer",
                   location: "Remote",
                   workModes: ["remote"],
+                  fullListingRead: true,
                   sourceJobId: null,
                   employmentType: null,
                   seniority: null,
@@ -572,6 +573,8 @@ test("a browser listing read marks only postings it read in full", async () => {
     ...seed.savedJobs[0]!,
     canonicalUrl: "https://board.example/jobs/read",
     description: "Complete duties and requirements of the requested vacancy.",
+    salaryText: "€27,000–€28,000 gross annually",
+    responsibilities: ["Maintain the reporting service."],
     listingDetailFetch: {
       attemptedAt: new Date().toISOString(),
       outcome: "enriched",
@@ -632,6 +635,10 @@ test("a browser listing read marks only postings it read in full", async () => {
     [read.canonicalUrl, true],
     [card.canonicalUrl, false],
   ]);
+  expect(result.jobs[0]).toMatchObject({
+    salaryText: read.salaryText,
+    facts: { responsibilities: read.responsibilities },
+  });
 });
 
 test("a card saved from page data is read from its own URL before it counts as a read posting", async () => {
@@ -727,7 +734,7 @@ test("a card saved from page data is read from its own URL before it counts as a
   expect(runAgentDiscovery.mock.calls[1]?.[1].requestedListing?.url).toBe(
     cardUrl,
   );
-  expect(read.jobs.map((job) => [job.description, job.facts])).toEqual([
-    [postingText, { fullListingRead: true }],
+  expect(read.jobs).toMatchObject([
+    { description: postingText, facts: { fullListingRead: true } },
   ]);
 });

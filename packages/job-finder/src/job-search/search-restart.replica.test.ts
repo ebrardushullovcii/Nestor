@@ -182,6 +182,7 @@ function scriptedModel(
                 company: "Longboard Employer",
                 location: "Remote",
                 workModes: ["remote"],
+                fullListingRead: true,
                 sourceJobId: null,
                 employmentType: null,
                 seniority: null,
@@ -676,7 +677,13 @@ test("quitting while the browser walks a board continues at the page it reached,
             { name: "navigate", args: { url: jobs(1) } },
             { name: "extract_jobs", args: { pageType: "search_results" } },
             { name: "navigate", args: { url: jobs(2) } },
-            { name: "extract_jobs", args: { pageType: "search_results" } },
+            {
+              name: "extract_jobs",
+              args: {
+                pageType: "search_results",
+                remainingWork: [`Continue with ${jobs(3)} after this batch.`],
+              },
+            },
           ]
         : [
             ...[3, 4, 5, 6].flatMap((page) => [
@@ -748,14 +755,14 @@ test("quitting while the browser walks a board continues at the page it reached,
     expect(runs[1]?.resumeCheckpoint).toMatchObject({
       currentUrl: jobs(2),
       collectedEarlier: 20,
+      remainingWork: [`Continue with ${jobs(3)} after this batch.`],
     });
     expect(loaded.filter((url) => url.startsWith("2 "))).not.toContain(
       `2 ${jobs(1)}`,
     );
-    // From page 2 the agent walks the rest of the board itself: the restart
-    // costs no model turn. (The model's resume prompt is checked in
-    // job-search-agent.test.ts.)
-    expect(prompts).toHaveLength(1);
+    // The resumed model gets its saved next-page note on the first turn.
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain(`Continue with ${jobs(3)} after this batch.`);
     // Every public posting is saved once.
     const saved = savedUrls(store);
     expect(new Set(saved).size).toBe(saved.length);

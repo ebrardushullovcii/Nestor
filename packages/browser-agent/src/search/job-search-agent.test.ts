@@ -2,6 +2,7 @@ import {
   CandidateProfileSchema,
   JobPostingSchema,
   SourceDebugPhaseEvidenceSchema,
+  type BrowserAgentRunCheckpoint,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
@@ -225,6 +226,45 @@ test.each([false, undefined])(
     expect(result.accessBlockerReason).toBeUndefined();
   },
 );
+
+test("a source checkpoint keeps unread page parts until a restarted reader finishes them", async () => {
+  const url = "https://jobs.example.test/search?q=engineer";
+  const initial = rawPage({
+    url,
+    bodyText: "Platform Engineer with Northwind",
+  });
+  const onCheckpoint = vi.fn<(checkpoint: BrowserAgentRunCheckpoint) => void>();
+  const read = { name: "extract_jobs", args: { pageType: "search_results" } };
+  const finish = { name: "finish", args: { reason: "Finished the search." } };
+  const first = await runJobSearchAgent({
+    hands: hands({ current: initial }),
+    config: config({ inventoryOnly: true, onCheckpoint }),
+    llmClient: scripted([read, finish]),
+    jobExtractor: {
+      extractJobsFromPage: () => Promise.reject(new Error("Connection reset")),
+    },
+  });
+  expect(first.incomplete).toBe(true);
+  const checkpoint = onCheckpoint.mock.calls.at(-1)?.[0];
+  if (!checkpoint) throw new Error("The unread page was not checkpointed.");
+  expect(checkpoint.unreadPages).toEqual([{ url, parts: 1 }]);
+
+  const resume = config({ inventoryOnly: true, resumeCheckpoint: checkpoint });
+  expect(createJobSearchPrompts(resume).user).toContain(`${url} (1 unread)`);
+  const second = await runJobSearchAgent({
+    hands: hands({ current: initial }),
+    config: resume,
+    llmClient: scripted([read, finish]),
+    jobExtractor: {
+      extractJobsFromPage: () =>
+        Promise.resolve([
+          posting("Platform Engineer", "Northwind", "northwind"),
+        ]),
+    },
+  });
+  expect(second.incomplete).toBe(false);
+  expect(second.jobs).toHaveLength(1);
+});
 
 test("a supplied index can save its postings from data rather than ask for a vacancy URL", async () => {
   const index = "https://jobs.example.test/categories/engineering";
@@ -3091,6 +3131,8 @@ test("the search model can save complete listings read from JSON without rendere
     description:
       `Unique listing ${index}. ` + "Full requirements. ".repeat(1500),
     fullPostingText: true,
+    salaryText: "€27,000–€28,000 gross annually",
+    responsibilities: ["Maintain the synthetic reports."],
   }));
   const page = {
     url: () => pages.current.url!,
@@ -3138,6 +3180,10 @@ test("the search model can save complete listings read from JSON without rendere
   expect(result.jobs.map((job) => job.description)).toEqual(
     jobs.map((job) => job.description.trim()),
   );
+  expect(result.jobs[0]).toMatchObject({
+    salaryText: jobs[0].salaryText,
+    responsibilities: jobs[0].responsibilities,
+  });
   expect(readResponse).toContain("Unique listing 19");
   expect(onCheckpoint).toHaveBeenCalled();
   expect(extractor.extractJobsFromPage).not.toHaveBeenCalled();

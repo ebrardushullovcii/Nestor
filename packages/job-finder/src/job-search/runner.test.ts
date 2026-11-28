@@ -431,7 +431,13 @@ test("a restart keeps every browser listing read that finished before it and rea
               ),
             );
           const read = {
-            jobs: [{ ...found(row), sourceJobId: row.url }],
+            jobs: [
+              {
+                ...found(row),
+                sourceJobId: row.url,
+                facts: { fullListingRead: true },
+              },
+            ],
             failures: [],
           };
           result.jobs.push(...read.jobs);
@@ -466,18 +472,23 @@ test("a restart keeps every browser listing read that finished before it and rea
     await vi.waitFor(() =>
       expect(reopened!.searches.get(started.id)?.state).toBe("done"),
     );
-    // Only the listing whose read had not finished is read again.
+    // Only the unfinished browser read resumes, at that same stage.
     expect(browserReads).toEqual([cards[2]!.url]);
+    expect(engine.screenCards).not.toHaveBeenCalled();
     expect(
-      engine.screenCards.mock.calls.flatMap(([input]) =>
-        input.cards.map((row) => row.url),
-      ),
-    ).toEqual([cards[2]!.url]);
+      engine.readListings.mock.calls.map(([input]) => ({
+        lane: input.lane,
+        urls: input.cards.map((row) => row.url),
+      })),
+    ).toEqual([{ lane: "browser", urls: [cards[2]!.url] }]);
     expect(
-      engine.readListings.mock.calls.flatMap(([input]) =>
-        input.cards.map((row) => row.url),
-      ),
-    ).not.toContain(cards[0]!.url);
+      createSearchSourcesStore(reopened).get(started.id, "one"),
+    ).toMatchObject({
+      state: "done",
+      related: 3,
+      fullReads: 3,
+      partialReads: 0,
+    });
     expect(reopened.stageCounts().found).toBe(3);
     expect(reopened.searches.get(started.id)).toMatchObject({ added: 3 });
   } finally {
@@ -489,6 +500,71 @@ test("a restart keeps every browser listing read that finished before it and rea
     }
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a saved partial posting remains unfinished and Keep reading retries its browser detail", async () => {
+  const { store, runner, engine, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://board.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const sourceId = context.sources[0]!.id;
+  const listing = card(sourceId);
+  engine.collectSource.mockResolvedValue({
+    cards: [listing],
+    pagesRead: 1,
+    complete: true,
+    notes: ["The board inventory was collected."],
+  });
+  let full = false;
+  engine.readListings.mockImplementation(({ cards, lane }) =>
+    Promise.resolve(
+      lane === "http"
+        ? {
+            jobs: [],
+            failures: [
+              {
+                url: listing.url,
+                reason: "Only a preview",
+                requiresBrowser: true,
+              },
+            ],
+          }
+        : {
+            jobs: cards.map((card) => ({
+              ...found(card),
+              description: full
+                ? "Complete vacancy duties and requirements."
+                : "Visible preview",
+              facts: { fullListingRead: full },
+            })),
+            failures: [],
+          },
+    ),
+  );
+  const search = await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  const results = createSearchSourcesStore(store);
+  expect(results.get(search.id, sourceId)).toMatchObject({
+    state: "partial",
+    fullReads: 0,
+    partialReads: 1,
+    failedReads: 0,
+  });
+  const jobId = store.listJobs({ stage: "found" }).rows[0]!.id;
+  expect(store.getJob(jobId)?.facts.fullListingRead).toBe(false);
+  full = true;
+  engine.readListings.mockClear();
+  const resumed = await runner.keepReading(Number(sourceId));
+  await finished(runner);
+  expect(engine.readListings.mock.calls.map(([input]) => input.lane)).toEqual([
+    "browser",
+  ]);
+  expect(results.get(resumed.id, sourceId)).toMatchObject({
+    state: "done",
+    fullReads: 1,
+    partialReads: 0,
+  });
+  expect(store.getJob(jobId)?.facts.fullListingRead).toBe(true);
 });
 
 test("collection pages and browser progress survive a restart and reach the engine again", async () => {
@@ -530,11 +606,13 @@ test("collection pages and browser progress survive a restart and reach the engi
     stores.splice(stores.indexOf(store), 1);
     reopened = openJobStore(file);
     const seen = deferred<{
+      lane: "http" | "browser";
       links: readonly string[] | null;
       progress: unknown;
     }>();
-    engine.collectSource.mockImplementation(({ pageLog, navigation }) => {
+    engine.collectSource.mockImplementation(({ lane, pageLog, navigation }) => {
       seen.resolve({
+        lane,
         links: pageLog?.links("https://one.example/?page=1") ?? null,
         progress: navigation?.read("https://one.example/") ?? null,
       });
@@ -553,6 +631,7 @@ test("collection pages and browser progress survive a restart and reach the engi
     });
     runners.push(restarted);
     const restored = await seen.promise;
+    expect(restored.lane).toBe("browser");
     expect(restored.links).toEqual(["https://one.example/?page=2"]);
     expect(restored.progress).toMatchObject({
       currentUrl: "https://one.example/?page=2",

@@ -36,6 +36,7 @@ export interface ListingCard {
     | "salaryText"
     | "applyUrl"
     | "postedAt"
+    | "facts"
   >;
 }
 
@@ -107,6 +108,8 @@ export interface SourceNavigationProgress {
   savedAt: string;
   /** The model's instructions for pages, cards or cursors still to read. */
   remainingWork?: string[];
+  /** Pages whose extraction reported unread parts. */
+  unreadPages?: { url: string; parts: number }[];
   /** Set when the collection ended: how it ended, for a restart to reuse. */
   outcome?: {
     complete: boolean;

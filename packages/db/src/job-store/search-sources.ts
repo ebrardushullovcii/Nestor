@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS search_sources (
   unrelated INTEGER NOT NULL DEFAULT 0,
   seen INTEGER NOT NULL DEFAULT 0,
   failed_reads INTEGER NOT NULL DEFAULT 0,
+  full_reads INTEGER,
+  partial_reads INTEGER,
   found INTEGER NOT NULL DEFAULT 0,
   added INTEGER NOT NULL DEFAULT 0,
   hidden INTEGER NOT NULL DEFAULT 0,
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS search_listing_queue (
   card_json TEXT NOT NULL,
   leased INTEGER NOT NULL DEFAULT 0,
   completed_as TEXT,
+  browser_read INTEGER NOT NULL DEFAULT 0,
   UNIQUE(search_id, source_id, url)
 );
 CREATE INDEX IF NOT EXISTS search_listing_queue_source ON search_listing_queue(search_id, source_id, id);
@@ -76,9 +79,10 @@ WHEN NEW.state IN ('stopped', 'failed') BEGIN
 END;
 `;
 const COLUMNS = `source_id AS sourceId, label, url, state, lane, phase, cards, related, unrelated, seen,
- failed_reads AS failedReads, found, added, hidden, message`;
+ failed_reads AS failedReads, full_reads AS fullReads, partial_reads AS partialReads, found, added, hidden, message`;
 type CardOutcome =
   | "related"
+  | "related_full"
   | "unrelated"
   | "seen"
   | "removed"
@@ -140,8 +144,8 @@ export function createSearchSourcesStore(store: JobStore) {
     clearProgress,
     copyProgress(from: string, to: string, sourceId: string): void {
       sql(
-        `INSERT INTO search_listing_queue (search_id, source_id, url, card_json, completed_as)
-         SELECT ?, source_id, url, card_json, completed_as FROM search_listing_queue
+        `INSERT INTO search_listing_queue (search_id, source_id, url, card_json, completed_as, browser_read)
+         SELECT ?, source_id, url, card_json, completed_as, browser_read FROM search_listing_queue
          WHERE search_id=? AND source_id=?`,
       ).run(to, from, sourceId);
       sql(
@@ -215,6 +219,22 @@ export function createSearchSourcesStore(store: JobStore) {
         `SELECT completed_as AS outcome, count(*) AS total FROM search_listing_queue
          WHERE search_id=? AND source_id=? AND completed_as IS NOT NULL GROUP BY completed_as`,
       ).all(searchId, sourceId) as { outcome: CardOutcome; total: number }[];
+    },
+    deferredBrowserUrls(searchId: string, sourceId: string): string[] {
+      const rows = sql(
+        `SELECT url FROM search_listing_queue
+         WHERE search_id=? AND source_id=? AND completed_as IS NULL AND browser_read=1`,
+      ).all(searchId, sourceId) as { url: string }[];
+      return rows.map((row) => row.url);
+    },
+    deferBrowserReads(searchId: string, cards: readonly ListingCard[]): void {
+      const defer = sql(
+        `UPDATE search_listing_queue SET browser_read=1
+         WHERE search_id=? AND source_id=? AND url=? AND completed_as IS NULL`,
+      );
+      store.transaction(() => {
+        for (const card of cards) defer.run(searchId, card.sourceId, card.url);
+      });
     },
     acknowledgeCards(
       searchId: string,
@@ -367,10 +387,11 @@ export function createSearchSourcesStore(store: JobStore) {
     },
     put(searchId: string, row: JobSearchSourceRow): void {
       store.transaction(() => {
-        sql(`INSERT INTO search_sources(search_id, source_id, label, url, state, lane, phase, cards, related, unrelated, seen, failed_reads, found, added, hidden, message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sql(`INSERT INTO search_sources(search_id, source_id, label, url, state, lane, phase, cards, related, unrelated, seen, failed_reads, full_reads, partial_reads, found, added, hidden, message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(search_id,source_id) DO UPDATE SET label=excluded.label, url=excluded.url, state=excluded.state, lane=excluded.lane, phase=excluded.phase,
         cards=excluded.cards, related=excluded.related, unrelated=excluded.unrelated, seen=excluded.seen, failed_reads=excluded.failed_reads,
+        full_reads=excluded.full_reads, partial_reads=excluded.partial_reads,
         found=excluded.found, added=excluded.added, hidden=excluded.hidden, message=excluded.message`).run(
           searchId,
           row.sourceId,
@@ -384,6 +405,8 @@ export function createSearchSourcesStore(store: JobStore) {
           row.unrelated,
           row.seen,
           row.failedReads,
+          row.fullReads ?? null,
+          row.partialReads ?? null,
           row.found,
           row.added,
           row.hidden,

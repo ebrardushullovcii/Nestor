@@ -1,4 +1,5 @@
 import {
+  getRejectedModelRequest,
   modelConversationKeys,
   type JobFinderAiClient,
 } from "@nestor/ai-providers";
@@ -35,7 +36,10 @@ import {
   type JobPosting,
 } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
-import { readListingInBrowser } from "../internal/browser-listing-read";
+import {
+  listingFactsFromPosting,
+  readListingInBrowser,
+} from "../internal/browser-listing-read";
 import { coalesceScreening } from "./coalesce-screening";
 
 interface SearchInput {
@@ -279,6 +283,7 @@ export function createListingSearchEngine(deps: {
                   workModes: job.workMode,
                   employmentType: job.employmentType ?? null,
                   salaryText: job.salaryText ?? null,
+                  facts: listingFactsFromPosting(job, true),
                   applyUrl: job.applicationUrl ?? null,
                   postedAt: job.postedAt ?? null,
                 },
@@ -325,6 +330,7 @@ export function createListingSearchEngine(deps: {
           collected: earlier?.collected ?? 0,
           stepCount: earlier?.stepCount ?? 0,
           ...(remainingWork ? { remainingWork } : {}),
+          ...(earlier?.unreadPages ? { unreadPages: earlier.unreadPages } : {}),
         };
         const accepted = new Map<string, JobPosting>();
         // The runner bounds source navigation in its browser queue.
@@ -365,6 +371,7 @@ export function createListingSearchEngine(deps: {
                     collectedEarlier: earlier.collected,
                     visitedUrls: earlier.visitedUrls,
                     remainingWork,
+                    unreadPages: earlier.unreadPages,
                     phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
                   },
                 }
@@ -394,6 +401,9 @@ export function createListingSearchEngine(deps: {
                 stepCount: checkpoint.stepCount,
                 ...(checkpoint.remainingWork
                   ? { remainingWork: checkpoint.remainingWork }
+                  : {}),
+                ...(checkpoint.unreadPages
+                  ? { unreadPages: checkpoint.unreadPages }
                   : {}),
               };
               progress(latest);
@@ -451,13 +461,13 @@ export function createListingSearchEngine(deps: {
             ...(result.agentMetadata?.phaseCompletionReason
               ? [result.agentMetadata.phaseCompletionReason]
               : []),
-            result.warning ??
-              `${cards.length} listings collected with browser navigation.`,
+            ...(result.warning ? [result.warning] : []),
           ],
           ...(earlier ? { resumed: true } : {}),
           ...(!complete && !needsYou ? { cutShort: true } : {}),
         };
-        if (complete && !inventory.needsYou && input.navigation) {
+        if (input.navigation) {
+          signal.throwIfAborted();
           await input.onCards?.(cards);
           progress({
             ...latest,
@@ -466,7 +476,7 @@ export function createListingSearchEngine(deps: {
               (earlier?.collected ?? 0) + cards.length,
             ),
             outcome: {
-              complete: inventory.complete,
+              complete: inventory.complete && !inventory.needsYou,
               pagesRead: inventory.pagesRead,
               notes: inventory.notes,
             },
@@ -672,36 +682,37 @@ export function createListingSearchEngine(deps: {
               postedAt: job.postedAt ?? null,
               description: job.description,
               // An index the agent walked yields cards, not read postings.
-              facts: {
-                fullListingRead: job.listingDetailFetch?.outcome === "enriched",
-              },
-              summary: null,
+              facts: listingFactsFromPosting(
+                job,
+                job.listingDetailFetch?.outcome === "enriched",
+              ),
+              summary: job.summary,
               seniority: job.seniority ?? null,
               employmentType: job.employmentType ?? null,
               salaryText: job.salaryText ?? null,
-              salaryMin: null,
-              salaryMax: null,
-              salaryCurrency: null,
+              salaryMin: job.normalizedCompensation.minAmount ?? null,
+              salaryMax: job.normalizedCompensation.maxAmount ?? null,
+              salaryCurrency: job.normalizedCompensation.currency ?? null,
               ...(job.searchRejection?.category === "closed"
                 ? { hiddenReason: `Closed: ${job.searchRejection.reason}` }
                 : {}),
             });
-          if (!indexUrl && !discovery.jobs.length)
+          const needsYou = [
+            "auth_required",
+            "site_protection",
+            "manual_step_required",
+          ].includes(discovery.agentMetadata?.accessBlockerReason ?? "");
+          if (!indexUrl && (!discovery.jobs.length || needsYou))
             own.failures.push({
               url: card.url,
               reason:
                 discovery.warning ??
                 "The browser agent did not finish reading this vacancy.",
-              ...([
-                "auth_required",
-                "site_protection",
-                "manual_step_required",
-              ].includes(discovery.agentMetadata?.accessBlockerReason ?? "")
-                ? { needsYou: true }
-                : {}),
+              ...(needsYou ? { needsYou: true } : {}),
             });
         } catch (error) {
           input.signal.throwIfAborted();
+          if (getRejectedModelRequest(error)) throw error;
           own.failures.push({
             url: card.url,
             reason: error instanceof Error ? error.message : String(error),

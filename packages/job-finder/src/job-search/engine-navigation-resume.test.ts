@@ -250,7 +250,13 @@ test.each([null, "structured_finish"] as const)(
       expect(
         runAgentDiscovery.mock.calls[0]?.[1].resumeCheckpoint?.remainingWork,
       ).toEqual(notes);
-    else expect(saved.get(target.startingUrl)?.outcome).toBeUndefined();
+    else
+      expect(saved.get(target.startingUrl)?.outcome).toMatchObject({
+        complete: false,
+        notes: [
+          "The AI service is unavailable right now. Nothing was changed.",
+        ],
+      });
     await collect();
     expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
   },

@@ -131,6 +131,7 @@ function metadataClient(
   company = "Real Employer",
   location = "Remote, Worldwide",
   workModes: string[] = ["remote"],
+  fullListingRead = true,
 ) {
   return {
     chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
@@ -149,6 +150,7 @@ function metadataClient(
             company,
             location,
             workModes,
+            fullListingRead,
             sourceJobId: null,
             employmentType: null,
             seniority: null,
@@ -164,6 +166,26 @@ function metadataClient(
     }),
   };
 }
+
+test("an HTTP detail page with only a preview goes to the browser without a full-read claim", async () => {
+  const requested = card("Backend Engineer");
+  const client = metadataClient("Employer", "Europe", ["remote"], false);
+  const readPage = () =>
+    Promise.resolve({
+      finalUrl: requested.url,
+      html: "<main><h1>Backend Engineer</h1><p>Backend Engineer at Employer. Sign in for the full description.</p></main>",
+    });
+  const request = { cards: [requested], client, readPage };
+  const deferred = await readListings({ ...request, lane: "http" });
+  expect(deferred.jobs).toEqual([]);
+  expect(deferred.failures).toMatchObject([
+    { url: requested.url, requiresBrowser: true },
+  ]);
+  const afterBrowser = await readListings({ ...request, lane: "browser" });
+  expect(afterBrowser.jobs).toMatchObject([
+    { url: requested.url, facts: { fullListingRead: false } },
+  ]);
+});
 
 test("the model sees a closed listing's landed board and keeps the requested identity as closed", async () => {
   const requested = card("Backend Engineer");
@@ -227,6 +249,7 @@ test("the model can keep a login link's real listing destination without storing
           company: "Employer",
           location: "Europe",
           workModes: [],
+          fullListingRead: true,
           sourceJobId: null,
           employmentType: null,
           seniority: null,
@@ -260,6 +283,7 @@ test("one malformed metadata row never loses a complete sibling listing", async 
           company: "Employer",
           location: "Europe",
           workModes: [],
+          fullListingRead: true,
           sourceJobId: null,
           employmentType: null,
           seniority: null,
@@ -332,6 +356,7 @@ test("an unusual title the model asks to read is judged with its full duties and
             company: "Real Employer",
             location: "Germany",
             workModes: ["remote"],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: "part_time",
             seniority: null,
@@ -824,6 +849,7 @@ test("returns full visible requirements beyond sparse JSON-LD and reads metadata
             company: "Real Employer",
             location: "Berlin",
             workModes: ["onsite"],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: "Part-time",
             seniority: null,
@@ -906,6 +932,7 @@ test.each([undefined, null, "https://employer.example/forms/one"])(
             company: "Own Employer",
             location: "Remote",
             workModes: ["remote"],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: null,
             seniority: null,
@@ -1269,6 +1296,7 @@ test("a source can be an unlinked single vacancy; its complete page is reused fo
               company: "Real Employer",
               location: "Remote",
               workModes: ["remote"],
+              fullListingRead: true,
               sourceJobId: null,
               employmentType: null,
               seniority: null,
@@ -1603,6 +1631,7 @@ test("uncertain metadata receives the complete listing on its first model call",
                   : "",
                 location: "Berlin",
                 workModes: [],
+                fullListingRead: true,
                 sourceJobId: null,
                 employmentType: null,
                 seniority: null,
@@ -1672,6 +1701,7 @@ test("a known employer beside a breadcrumb still needs the real location read", 
               company: "Real Employer",
               location: "Berlin",
               workModes: [],
+              fullListingRead: true,
               sourceJobId: null,
               employmentType: null,
               seniority: null,
@@ -1899,6 +1929,7 @@ test("missing title/company parses and a different heading still reach the model
             company: "",
             location: "",
             workModes: [],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: null,
             seniority: null,
@@ -2098,6 +2129,7 @@ test("a page read caches shared navigation and keeps each full listing recoverab
             company: "Real Employer",
             location: "Berlin",
             workModes: [],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: null,
             seniority: null,

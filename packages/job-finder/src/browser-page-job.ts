@@ -137,6 +137,30 @@ export async function readJobFromBrowserPage(
           posting: {
             ...posting,
             description: read.description,
+            summary: read.summary ?? posting.summary,
+            salaryText: read.salaryText ?? posting.salaryText,
+            normalizedCompensation: read.salaryText
+              ? read.normalizedCompensation
+              : posting.normalizedCompensation,
+            keySkills: read.keySkills.length
+              ? read.keySkills
+              : posting.keySkills,
+            responsibilities: read.responsibilities.length
+              ? read.responsibilities
+              : posting.responsibilities,
+            minimumQualifications: read.minimumQualifications.length
+              ? read.minimumQualifications
+              : posting.minimumQualifications,
+            preferredQualifications: read.preferredQualifications.length
+              ? read.preferredQualifications
+              : posting.preferredQualifications,
+            benefits: read.benefits.length ? read.benefits : posting.benefits,
+            seniority: read.seniority ?? posting.seniority,
+            employmentType: read.employmentType ?? posting.employmentType,
+            department: read.department ?? posting.department,
+            team: read.team ?? posting.team,
+            employerDomain: read.employerDomain ?? posting.employerDomain,
+            atsProvider: read.atsProvider ?? posting.atsProvider,
             needsRenderedPage: false,
             listingDetailFetch: read.listingDetailFetch,
           },
