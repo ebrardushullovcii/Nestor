@@ -165,7 +165,7 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     status: "imported",
     added: 1,
     updated: 2,
-    skipped: 188,
+    skipped: 41,
     counts: {
       added: 1,
       updated: 2,
@@ -173,7 +173,7 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
       locked: 0,
       unsupportedEncryption: 1,
       unreadable: 0,
-      insecureHttp: 147,
+      upgradedToHttps: 2,
       androidApp: 33,
       unsupportedOrigin: 1,
       invalid: 2,
@@ -213,35 +213,42 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     "1Added",
     "2Updated",
     "3Already saved",
+    "2Moved to the HTTPS version of the site",
     "1Unsupported encryption",
-    "147For sites without HTTPS that Nestor doesn’t fill",
     "33For Android apps",
     "1Other unsupported login addresses",
     "2Empty or damaged login records",
     "1Couldn’t be saved in Nestor",
   ]);
-  expect(receipt.queryByText(/choose Import password CSV/i)).toBeNull();
+  expect(receipt.getByText(/choose Import password CSV/i)).toBeTruthy();
   expect(passwords.importFromBrowser).toHaveBeenCalledExactlyOnceWith({
     sourceId: "readable",
   });
 
-  for (const counts of [
-    { ...result.counts, locked: 4 },
-    { ...result.counts, unreadable: 5 },
-  ]) {
+  for (const [label, locked, unreadable] of [
+    ["Locked to the browser", 4, 0],
+    ["Couldn’t be unlocked", 0, 5],
+    [null, 0, 0],
+  ] as const) {
+    const counts = {
+      ...result.counts,
+      locked,
+      unreadable,
+      unsupportedEncryption: 0,
+    };
     await waitFor(() => expect(readable.disabled).toBe(false));
     passwords.importFromBrowser.mockResolvedValueOnce({
       ...result,
       counts,
-      skipped: result.skipped + counts.locked + counts.unreadable,
+      skipped: result.skipped - 1 + counts.locked + counts.unreadable,
     });
     fireEvent.click(readable);
     const nextReceipt = within(await screen.findByRole("status"));
-    expect(nextReceipt.getByText(/choose Import password CSV/i)).toBeTruthy();
-    expect(
-      nextReceipt.getByText(
-        counts.locked ? "Locked to the browser" : "Couldn’t be unlocked",
-      ),
-    ).toBeTruthy();
+    if (label) {
+      expect(nextReceipt.getByText(/choose Import password CSV/i)).toBeTruthy();
+      expect(nextReceipt.getByText(label)).toBeTruthy();
+    } else {
+      expect(nextReceipt.queryByText(/choose Import password CSV/i)).toBeNull();
+    }
   }
 });

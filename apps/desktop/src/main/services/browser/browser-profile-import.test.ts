@@ -142,7 +142,6 @@ describe("Windows profile passwords", () => {
       unreadable: 0,
       invalid: 0,
       unsupportedEncryption: 0,
-      insecureHttp: 0,
       androidApp: 0,
       unsupportedOrigin: 0,
       couldNotSave: 0,
@@ -242,6 +241,7 @@ describe("Windows profile passwords", () => {
           origin: "https://example.test",
           username: "synthetic",
           password: "synthetic-only",
+          upgradedToHttps: false,
         },
       ],
       unsupported: false,
@@ -250,7 +250,6 @@ describe("Windows profile passwords", () => {
         unreadable: 2,
         invalid: 0,
         unsupportedEncryption: 1,
-        insecureHttp: 0,
         androidApp: 0,
         unsupportedOrigin: 0,
         couldNotSave: 0,
@@ -610,7 +609,7 @@ test("an unreadable WAL fails the snapshot instead of silently importing an inco
   await expect(snapshotDatabase(file)).rejects.toThrow();
 });
 
-test("reports skipped password origins separately and imports under the saved site", async () => {
+test("reports skipped password origins and upgrades remote HTTP to the same site over HTTPS", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "nestor-password-import-"));
   temporary.push(home);
   const directory = path.join(home, ".config/google-chrome/Default");
@@ -636,7 +635,7 @@ test("reports skipped password origins separately and imports under the saved si
   );
   for (const origin of [
     "http://localhost:8080/sign-in",
-    "http://remote.test",
+    "http://remote.test:8443/sign-in",
     "android://fixture@com.example.fixture/",
     "ftp://example.test",
     "malformed-origin",
@@ -662,12 +661,18 @@ test("reports skipped password origins separately and imports under the saved si
     "https://example.test",
     "https://cross-origin.test",
     "http://localhost:8080",
+    "https://remote.test:8443",
+  ]);
+  expect(result.values.map((value) => value.upgradedToHttps)).toEqual([
+    false,
+    false,
+    false,
+    true,
   ]);
   expect(
     result.values.every((value) => value.password === "synthetic-only"),
   ).toBe(true);
   expect(result.counts).toMatchObject({
-    insecureHttp: 1,
     androidApp: 1,
     unsupportedOrigin: 1,
     invalid: 1,

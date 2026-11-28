@@ -54,11 +54,12 @@ const PasswordCount = z.number().int().nonnegative();
 export const BrowserPasswordImportCountsSchema = z.object({
   added: PasswordCount,
   updated: PasswordCount,
+  // Subset of added and updated, not a separate outcome.
+  upgradedToHttps: PasswordCount,
   alreadySaved: PasswordCount,
   locked: PasswordCount,
   unsupportedEncryption: PasswordCount,
   unreadable: PasswordCount,
-  insecureHttp: PasswordCount,
   androidApp: PasswordCount,
   unsupportedOrigin: PasswordCount,
   invalid: PasswordCount,

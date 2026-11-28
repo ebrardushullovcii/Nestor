@@ -24,7 +24,6 @@ const emptyReadCounts = {
   locked: 0,
   unsupportedEncryption: 0,
   unreadable: 0,
-  insecureHttp: 0,
   androidApp: 0,
   unsupportedOrigin: 0,
   invalid: 0,
@@ -118,34 +117,41 @@ it("imports only a native-picked file in main, returns counts, and never deletes
     [
       "url,username,password",
       "https://example.test,synthetic-account,synthetic-value",
-      "http://example.test,synthetic-account,synthetic-value",
+      "http://upgraded.test:8443/sign-in,synthetic-account,synthetic-value",
       "android://fixture@com.example.fixture/,synthetic-account,synthetic-value",
       "https://empty.test,synthetic-account,",
     ].join("\n"),
   );
-  vault.save.mockReturnValueOnce("added");
+  vault.save.mockReturnValue("added");
   const counts = {
     ...emptyReadCounts,
-    added: 1,
+    added: 2,
     updated: 0,
     alreadySaved: 0,
-    insecureHttp: 1,
+    upgradedToHttps: 1,
     androidApp: 1,
     invalid: 1,
   };
   const receipt = await handlers.get("browser-passwords:import-csv")!(event);
   expect(receipt).toMatchObject({
     status: "imported",
-    added: 1,
+    added: 2,
     updated: 0,
-    skipped: 3,
+    skipped: 2,
     counts,
+  });
+  expect(vault.save).toHaveBeenLastCalledWith({
+    origin: "https://upgraded.test:8443",
+    username: "synthetic-account",
+    password: "synthetic-value",
   });
   expect(mocks.trace).toHaveBeenCalledExactlyOnceWith(
     "browser_password_import_result",
     counts,
   );
-  expect(JSON.stringify(receipt)).not.toMatch(/synthetic|example\.test/);
+  expect(JSON.stringify(receipt)).not.toMatch(
+    /synthetic|example\.test|upgraded\.test/,
+  );
   expect(mocks.read).toHaveBeenCalledExactlyOnceWith(
     "synthetic-export.csv",
     "utf8",
@@ -163,17 +169,17 @@ it("imports only a native-picked file in main, returns counts, and never deletes
 
 it("keeps browser passwords in main, returns only counts and releases plaintext after saving", async () => {
   const { handlers, event, vault } = setup();
-  const input = Array.from({ length: 4 }, () => ({
+  const input = Array.from({ length: 4 }, (_, index) => ({
     origin: "https://example.test",
     username: "synthetic",
     password: "synthetic-only",
+    upgradedToHttps: index > 0,
   }));
   const values = [...input];
   const readCounts = {
     locked: 2,
     unsupportedEncryption: 3,
     unreadable: 4,
-    insecureHttp: 7,
     androidApp: 3,
     unsupportedOrigin: 2,
     invalid: 5,
@@ -199,6 +205,7 @@ it("keeps browser passwords in main, returns only counts and releases plaintext 
     ...readCounts,
     added: 1,
     updated: 1,
+    upgradedToHttps: 1,
     alreadySaved: 1,
     couldNotSave: 2,
   };
@@ -206,7 +213,7 @@ it("keeps browser passwords in main, returns only counts and releases plaintext 
     status: "imported",
     added: 1,
     updated: 1,
-    skipped: 29,
+    skipped: 22,
     counts,
   });
   expect(mocks.trace).toHaveBeenCalledExactlyOnceWith(
