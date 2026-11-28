@@ -104,9 +104,49 @@ export function rolePrefix(company: string, title: string): string | null {
 }
 
 /** One employer, or one side does not name it. */
+// A legal form names how an employer is registered, not which employer it is:
+// "CircuitHub" and "Circuithub Ltd" are one company.
+const LEGAL_FORMS = new Set([
+  "ag",
+  "ab",
+  "as",
+  "bv",
+  "co",
+  "company",
+  "corp",
+  "corporation",
+  "gmbh",
+  "inc",
+  "incorporated",
+  "kg",
+  "limited",
+  "llc",
+  "llp",
+  "ltd",
+  "nv",
+  "oy",
+  "plc",
+  "pty",
+  "sa",
+  "sarl",
+  "sas",
+  "se",
+  "sl",
+  "spa",
+  "srl",
+  "ug",
+]);
+
+function employerName(value: string): string {
+  const words = normalizeText(value).split(" ").filter(Boolean);
+  while (words.length > 1 && LEGAL_FORMS.has(words.at(-1)!)) words.pop();
+  return words.join(" ");
+}
+
 function sameEmployer(left: string, right: string): boolean {
   const [a, b] = [normalizeText(left), normalizeText(right)];
-  return !a || !b || UNSTATED.has(a) || UNSTATED.has(b) || a === b;
+  if (!a || !b || UNSTATED.has(a) || UNSTATED.has(b) || a === b) return true;
+  return employerName(left) === employerName(right);
 }
 
 /** The end of a role prefix's key range: "|" is followed by "}". */
