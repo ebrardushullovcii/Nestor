@@ -291,6 +291,40 @@ describe("inferCompanyFromCanonicalUrl", () => {
 });
 
 describe("job extraction with openai-compatible client", () => {
+  test("retains the identity and apply link of a detail page with no description", async () => {
+    const canonicalUrl = "https://board.example.test/jobs/designer";
+    const applicationUrl = "https://employer.example.test/jobs/designer";
+    const partial = {
+      title: "Product Designer",
+      company: "Example Studio",
+      canonicalUrl,
+      applicationUrl,
+      description: "",
+      summary: "Design team",
+      needsRenderedPage: true,
+    };
+    const restoreFetch = mockJsonFetch({
+      choices: [{ message: { content: JSON.stringify({ jobs: [partial] }) } }],
+    });
+    try {
+      const client = createOpenAiCompatibleJobFinderAiClient({
+        apiKey: "test-key",
+        baseUrl: "https://provider.example.test/v1",
+        model: "test-model",
+      });
+      const jobs = await client.extractJobsFromPage({
+        pageText: "Product Designer at Example Studio",
+        pageUrl: canonicalUrl,
+        pageType: "job_detail",
+        maxJobs: 1,
+      });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject(partial);
+    } finally {
+      restoreFetch();
+    }
+  });
+
   test("preserves extracted apply metadata when the model returns it", async () => {
     const restoreFetch = mockJsonFetch({
       choices: [

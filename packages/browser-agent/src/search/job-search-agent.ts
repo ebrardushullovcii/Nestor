@@ -941,7 +941,11 @@ async function runJobSearchAgentPrivate(
           }),
         );
         if (posting) posting.producingPageUrl = observation.url;
-        if (posting && pageType === "job_detail") {
+        if (
+          posting?.description &&
+          !posting.needsRenderedPage &&
+          pageType === "job_detail"
+        ) {
           // The extractor chooses this vacancy's text from the landed page.
           // Assigning the whole page here attached blogs, board chrome and
           // other postings to the requested vacancy after a redirect.
@@ -964,7 +968,7 @@ async function runJobSearchAgentPrivate(
           // can correct a provisional result-page rejection.
           if (
             previous &&
-            (pageType === "job_detail" ||
+            (posting.listingDetailFetch?.outcome === "enriched" ||
               (decision &&
                 JSON.stringify(previous.searchRejection ?? null) !==
                   JSON.stringify(posting.searchRejection ?? null)))

@@ -1,9 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import type { readJobFromBrowserPage } from "@nestor/job-finder";
 const mocks = vi.hoisted(() => ({
   readTab: vi.fn(),
   capture: vi.fn(),
-  read: vi.fn(),
+  read: vi.fn<typeof readJobFromBrowserPage>(),
   save: vi.fn(),
   score: vi.fn(),
   owns: vi.fn(),
@@ -64,8 +65,14 @@ it("validates exact-tab IPC, reads that page in main and saves its job to Find j
     url: "https://example.test/job",
     value: "<main>Designer</main>",
   });
-  const posting = { title: "Designer", company: "Example Studio" };
-  mocks.read.mockResolvedValue(posting);
+  const posting = {
+    title: "Designer",
+    company: "Example Studio",
+    description: "",
+  } as Awaited<ReturnType<typeof readJobFromBrowserPage>>["posting"];
+  const warning =
+    "Job Finder could not read the full description from the application link.";
+  mocks.read.mockResolvedValue({ posting, fullListingRead: false, warning });
   mocks.save.mockReturnValue({ ids: [7] });
   const add = handlers.get("browser:add-job")!;
   expect(await add(event, { tabId: "chosen" })).toEqual({
@@ -73,6 +80,7 @@ it("validates exact-tab IPC, reads that page in main and saves its job to Find j
     title: "Designer",
     company: "Example Studio",
     planName: null,
+    warning,
   });
   expect(mocks.readTab).toHaveBeenCalledWith("chosen", BROWSER_JOB_PAGE_HTML);
   expect(mocks.read).toHaveBeenCalledWith(
@@ -82,14 +90,13 @@ it("validates exact-tab IPC, reads that page in main and saves its job to Find j
       pageUrl: "https://example.test/job",
     }),
   );
-  const readInput = mocks.read.mock.calls[0]?.[1] as {
-    readRenderedPage?: unknown;
-  };
-  expect(readInput.readRenderedPage).toBeTypeOf("function");
+  expect(mocks.read.mock.calls[0]?.[1].browser?.runtime.readRenderedPage).toBe(
+    mocks.readRenderedPage,
+  );
   expect(mocks.save).toHaveBeenCalledWith(mocks.store, {
     postings: [posting],
     pageUrl: "https://example.test/job",
-    fullListingRead: true,
+    fullListingRead: false,
   });
   // Its fit is judged in the background, after the job is saved.
   expect(mocks.score).toHaveBeenCalledOnce();

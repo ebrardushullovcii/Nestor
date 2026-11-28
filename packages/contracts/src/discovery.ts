@@ -1190,7 +1190,9 @@ export const JobPostingSchema = z.object({
   // for both writing and re-deriving it.
   listingDetailCapture: ListingDetailCaptureSchema.optional(),
   summary: NonEmptyStringSchema.nullable().default(null),
-  description: NonEmptyStringSchema,
+  // A posting can have a known identity and application link before its
+  // description is available.
+  description: z.string().trim(),
   keySkills: z.array(NonEmptyStringSchema).default([]),
   responsibilities: z.array(NonEmptyStringSchema).default([]),
   minimumQualifications: z.array(NonEmptyStringSchema).default([]),
