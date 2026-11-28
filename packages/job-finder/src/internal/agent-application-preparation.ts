@@ -119,6 +119,7 @@ export interface AgentApplicationPreparationInput {
     typeof runApplyAgent
   >[0]["earlierAttachments"];
   earlierActivity?: Parameters<typeof runApplyAgent>[0]["earlierActivity"];
+  pendingQuestions?: Parameters<typeof runApplyAgent>[0]["pendingQuestions"];
   earlierAttemptProgress?: Parameters<
     typeof runApplyAgent
   >[0]["earlierAttemptProgress"];
@@ -653,6 +654,7 @@ export async function runAgentApplicationPreparation(
     ...(input.earlierActivity?.length
       ? { earlierActivity: input.earlierActivity }
       : {}),
+    pendingQuestions: input.pendingQuestions,
     earlierAttemptProgress: input.earlierAttemptProgress,
     saveAttemptProgress: input.saveAttemptProgress,
     ...(input.replay ? { replay: input.replay } : {}),
@@ -986,6 +988,7 @@ export function createApplyFormPreparer(input: {
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: AgentApplicationPreparationInput["earlierAttachments"];
   earlierActivity?: AgentApplicationPreparationInput["earlierActivity"];
+  pendingQuestions?: AgentApplicationPreparationInput["pendingQuestions"];
   earlierAttemptProgress?: AgentApplicationPreparationInput["earlierAttemptProgress"];
   saveAttemptProgress?: AgentApplicationPreparationInput["saveAttemptProgress"];
   replay?: AgentApplicationPreparationInput["replay"];
@@ -1088,6 +1091,7 @@ export function createApplyFormPreparer(input: {
           ...(input.earlierActivity?.length
             ? { earlierActivity: input.earlierActivity }
             : {}),
+          pendingQuestions: input.pendingQuestions,
           earlierAttemptProgress: input.earlierAttemptProgress,
           saveAttemptProgress: input.saveAttemptProgress,
           ...(input.initialUnansweredPickerQuestions

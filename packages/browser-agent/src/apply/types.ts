@@ -32,6 +32,7 @@ import type {
   CandidateReusableAnswer,
   CoverLetterPreference,
   JobSearchPreferences,
+  NeedsYouTask,
   RawApplyPage,
   RawApplyControl,
   RawApplySummaryRow,
@@ -587,6 +588,7 @@ export interface ApplyAgentResult {
   stepReceipts?: ApplyStepReceipt[];
   /** The recorded application the model found already sent this posting. */
   duplicateOfApplication?: number;
+  settledQuestionIds?: number[];
   questionContexts?: Array<{ prompt: string; step: string }>;
   /** Choices pickers on this application refused, for the next run. */
   pickerAttempts?: ApplyPickerAttempt[];
@@ -668,9 +670,20 @@ export type ApplyProposal =
       needsPerson?: boolean;
       /** Each question or task for the person, apart from the reason. */
       forPerson?: ApplyPersonRequest[];
+      settledQuestionIds?: number[];
     };
 
 export interface ApplyAgentConfig extends BrowserPermissionPolicy {
+  pendingQuestions?:
+    | ReadonlyArray<
+        Pick<
+          NeedsYouTask,
+          "id" | "prompt" | "input" | "options" | "askReason"
+        > & {
+          description: string | null;
+        }
+      >
+    | undefined;
   /** Existing local checkpoints retained when this application is continued. */
   earlierActivity?: readonly ApplicationAttemptCheckpoint[];
   earlierAttemptProgress?:

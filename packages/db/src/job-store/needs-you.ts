@@ -573,8 +573,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     origin: string,
     answer: string,
   ): number {
+    // Application-model handoffs carry an ask reason and opt out of legacy
+    // prompt reuse. The next application run decides what a saved fact answers.
     const waiting = sql(
-      `SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND country=? AND site_origin=?`,
+      `SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND country=? AND site_origin=?
+        AND (reuse_prompt=1 OR ask_reason_json IS NULL)`,
     ).all(country, origin) as Task[];
     return waiting.reduce((queued, task) => {
       if (sql("SELECT 1 FROM needs_you_drafts WHERE task_id=?").get(task.id))
@@ -612,13 +615,76 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     counts,
     forApplication(id: number): NeedsYouTask[] {
       return (
-        sql(`SELECT t.* FROM application_needs_you n
+        sql(`SELECT DISTINCT t.* FROM application_needs_you n
         JOIN applications a ON a.id = n.application_id AND a.attempt = n.attempt
         JOIN needs_you t ON t.id = n.task_id
         WHERE a.id = ? AND t.resolved_at IS NULL ORDER BY t.id LIMIT 100`).all(
           id,
         ) as Task[]
       ).map(toTask);
+    },
+    /** Outstanding facts are kept across attempts until the model or person settles them. */
+    openFactQuestions(applicationId: number) {
+      const rows =
+        sql(`SELECT t.*, n.field_key, MAX(n.attempt) AS latest_attempt
+        FROM application_needs_you n
+        JOIN needs_you t ON t.id=n.task_id WHERE n.application_id=?
+        AND t.kind='question' AND t.input<>'file' AND t.resolved_at IS NULL
+        GROUP BY t.id ORDER BY t.id`).all(applicationId) as (Task & {
+          field_key: string;
+        })[];
+      return rows.map((row) => ({
+        fieldKey: row.field_key,
+        task: toTask(row),
+      }));
+    },
+    /** The model decided these earlier cards no longer need the person. */
+    settleFactQuestions(applicationId: number, attempt: number, ids: number[]) {
+      if (!ids.length) return;
+      store.transaction(() => {
+        const removed = sql(`DELETE FROM application_needs_you
+          WHERE application_id=? AND attempt<? AND task_id IN (
+            SELECT t.id FROM needs_you t JOIN json_each(?) chosen ON chosen.value=t.id
+            WHERE t.kind='question' AND t.input<>'file' AND t.resolved_at IS NULL)
+          AND EXISTS (SELECT 1 FROM applications a WHERE a.id=application_needs_you.application_id
+            AND a.attempt=? AND a.state='running') RETURNING task_id`).all(
+          applicationId,
+          attempt,
+          JSON.stringify(ids),
+          attempt,
+        ) as { task_id: number }[];
+        for (const { task_id } of removed)
+          sql(`DELETE FROM needs_you_drafts WHERE task_id=? AND EXISTS (
+            SELECT 1 FROM needs_you WHERE id=? AND resolved_at IS NOT NULL)`).run(
+            task_id,
+            task_id,
+          );
+        if (removed.length) changed();
+      });
+    },
+    /** A partial run can wait on cards from a step it has yet to revisit. */
+    retainOpenFactQuestions(applicationId: number, attempt: number) {
+      store.transaction(() => {
+        const result = sql(`UPDATE application_needs_you SET attempt=?
+          WHERE application_id=? AND attempt<? AND task_id IN (SELECT id FROM needs_you
+            WHERE kind='question' AND input<>'file' AND resolved_at IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM application_needs_you current
+            WHERE current.application_id=application_needs_you.application_id
+            AND current.task_id=application_needs_you.task_id AND current.attempt=?)
+          AND EXISTS (SELECT 1 FROM applications a WHERE a.id=application_needs_you.application_id
+            AND a.attempt=? AND a.state IN ('running','needs_you'))`).run(
+          attempt,
+          applicationId,
+          attempt,
+          attempt,
+          attempt,
+        );
+        if (!result.changes) return;
+        sql(
+          "UPDATE applications SET state='needs_you', updated_at=? WHERE id=?",
+        ).run(Date.now(), applicationId);
+        changed();
+      });
     },
     changeAnswers<T>(work: () => T) {
       return store.transaction(() => {

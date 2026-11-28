@@ -286,6 +286,9 @@ export function openJobStore(
       ].includes(change.cause)
     )
       return;
+    if (change.cause === "profile" || change.cause === "saved_answers")
+      sql(`UPDATE application_facts_revision SET revision=revision+1, changed_at=?
+        WHERE id=1`).run(Date.now());
     if (depth > 0) {
       if (
         change.cause === "profile" &&

@@ -188,6 +188,7 @@ export interface ApplicationServiceDeps {
 const WATCH_IDLE_MS = 30_000;
 const WATCH_CLOSE_MS = 2_000;
 const WATCH_CLOSE_FOR_MS = 120_000;
+const APPLICATION_FACTS_QUIET_MS = 10_000;
 
 export const applicationIdentity = (id: number, attempt: number) => ({
   applicationRecordId: `application_${id}`,
@@ -351,6 +352,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const access = () => deps.aiAccess ?? APP_AI_ACCESS;
   /** Claims the periodic check may make while the AI account refuses calls. */
   let checksAllowed = 0;
+  // The queue pump sees the durable edit once the profile and answers settle.
+  const factsRecheck = () => ({
+    settledBy: Date.now() - APPLICATION_FACTS_QUIET_MS,
+    activeIds: active.keys(),
+  });
   /**
    * Applications the AI account refused go back in the queue, through the
    * same path as Try again: all of them once calls go through again, or the
@@ -374,13 +380,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (stopped || active.size > 0) return false;
     const waitingRow =
       retryRefusedApplications("oldest") ||
-      applications
-        .listWorkInState("queued", rejectedRequests.size + 1)
-        .some(
-          (row) =>
-            row.error !== NESTOR_REQUEST_REJECTED_MESSAGE ||
-            !rejectedRequests.has(row.id),
-        );
+      applications.hasClaimableWork(rejectedRequests, factsRecheck());
     if (!waitingRow) return false;
     checksAllowed = 1;
     wake();
@@ -1144,6 +1144,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           : [];
       });
     const usageRecorder = createModelUsageRecorder();
+    const openQuestions = applications.needsYou.openFactQuestions(row.id);
+    const previousQuestions = new Map(
+      previous?.execution.questions.map((question) => [question.id, question]),
+    );
     const executeApplicationFlow: BrowserSessionRuntime["executeApplicationFlow"] =
       (...args) =>
         usageRecorder.run(() => browser.executeApplicationFlow(...args));
@@ -1158,6 +1162,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         prepareApplicationForm: createApplyFormPreparer({
           history: applications.history(),
           reusableAnswers: [...savedAnswers, ...localAnswers()],
+          pendingQuestions: openQuestions.map(({ fieldKey, task }) => ({
+            id: task.id,
+            prompt: task.prompt,
+            input: task.input,
+            options: task.options,
+            askReason: task.askReason,
+            description: previousQuestions.get(fieldKey)?.description ?? null,
+          })),
           initialUnansweredPickerQuestions:
             previous?.execution.questions
               .filter(
@@ -1489,27 +1501,63 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       { signal },
     );
     signal.throwIfAborted();
+    const prepared = agent as ApplyAgentResult | null;
+    const settled = new Set(prepared?.settledQuestionIds);
+    const settledIds = openQuestions
+      .map(({ task }) => task.id)
+      .filter((id) => settled.has(id));
+    const questions = [...result.questions];
+    if (result.state !== "ready") {
+      // Keep context for cards on earlier steps and answers given directly
+      // to this application, so the next attempt can still use them.
+      const stillOpen = new Set(
+        openQuestions
+          .filter(({ task }) => !settled.has(task.id))
+          .map(({ fieldKey }) => fieldKey),
+      );
+      const asked = new Set(questions.map(({ id }) => id));
+      for (const question of previousQuestions.values()) {
+        if (
+          !asked.has(question.id) &&
+          (stillOpen.has(question.id) ||
+            applications.needsYou.fieldAnswer(row.id, question.id))
+        )
+          questions.push(question);
+      }
+    }
     if (
       !current(row) ||
-      !applications.saveWork(row.id, {
-        attempt: row.attempt,
-        resumeArtifact: artifact,
-        execution: {
-          ...result,
-          // A run that never reached the form still keeps what earlier runs
-          // learned about its pickers.
-          pickerAttempts: result.pickerAttempts?.length
-            ? result.pickerAttempts
-            : (previous?.execution.pickerAttempts ?? []),
-          applyUsageTotals: accumulateApplyUsage(
-            previous?.execution,
-            usageRecorder.snapshot(),
-          ),
-          answerDependencies: answerDependencies.snapshot(),
-        },
-        reviewCard: review,
-        authorityEnvelopeId: envelope?.id ?? null,
-        profileDigest,
+      !jobs.transaction(() => {
+        if (
+          !applications.saveWork(row.id, {
+            attempt: row.attempt,
+            resumeArtifact: artifact,
+            execution: {
+              ...result,
+              questions,
+              // A run that never reached the form still keeps what earlier runs
+              // learned about its pickers.
+              pickerAttempts: result.pickerAttempts?.length
+                ? result.pickerAttempts
+                : (previous?.execution.pickerAttempts ?? []),
+              applyUsageTotals: accumulateApplyUsage(
+                previous?.execution,
+                usageRecorder.snapshot(),
+              ),
+              answerDependencies: answerDependencies.snapshot(),
+            },
+            reviewCard: review,
+            authorityEnvelopeId: envelope?.id ?? null,
+            profileDigest,
+          })
+        )
+          return false;
+        applications.needsYou.settleFactQuestions(
+          row.id,
+          row.attempt,
+          settledIds,
+        );
+        return true;
       })
     )
       return;
@@ -1660,7 +1708,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     }
     // The raw engine's typed blockers distinguish access steps from technical failures.
-    const prepared = agent as ApplyAgentResult | null;
     if (prepared && !prepared.pauses.some((pause) => pause.blocker))
       for (const task of applications.needsYou.accessForApplication(row.id))
         applications.needsYou.completeAccess(task.id, row.id);
@@ -1709,6 +1756,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       });
     }
     if (ownBrowser) return;
+    if (result.state === "paused")
+      applications.needsYou.retainOpenFactQuestions(row.id, row.attempt);
     if (applications.getApplication(row.id)?.state === "needs_you") {
       waiting.set(row.id, row.attempt);
       if (applications.needsYou.accessForApplication(row.id).length)
@@ -2121,7 +2170,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           if (checksAllowed === 0) break;
           checksAllowed--;
         }
-        const row = applications.claimNext(rejectedRequests);
+        const row = applications.claimNext(rejectedRequests, factsRecheck());
         if (!row) break;
         void runClaimed(row, new AbortController());
       }
