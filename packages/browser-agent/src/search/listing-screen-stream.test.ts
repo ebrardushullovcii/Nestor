@@ -172,6 +172,49 @@ test("completed model batches stream while another batch is still pending", asyn
   expect(onRelated).toHaveBeenCalledTimes(2);
 });
 
+test("cold listing screen starts one request then releases every lane when its answer starts", async () => {
+  const first = deferred<Awaited<ReturnType<LLMClient["chatWithTools"]>>>();
+  const cards = Array.from({ length: 241 }, (_, i) =>
+    card(`Interface Specialist ${i}`),
+  );
+  const answer = (length: number) => ({
+    content: JSON.stringify({
+      keep: Array.from({ length }, (_, index) => ({ index, verdict: 1 })),
+    }),
+  });
+  const chatWithTools = vi
+    .fn<LLMClient["chatWithTools"]>()
+    .mockImplementationOnce(() => first.promise)
+    .mockResolvedValueOnce(answer(120))
+    .mockResolvedValueOnce(answer(1));
+  const work = screenCards({
+    cards,
+    goals,
+    signal: new AbortController().signal,
+    client: { chatWithTools },
+  });
+
+  try {
+    await vi.waitFor(() => expect(chatWithTools).toHaveBeenCalledOnce());
+    const onStream = chatWithTools.mock.calls[0][2]?.onStreamEvent;
+    expect(onStream).toBeTypeOf("function");
+    onStream?.({ type: "provider_wait", delayMs: 100 });
+    await Promise.resolve();
+    expect(chatWithTools).toHaveBeenCalledOnce();
+    onStream?.({ type: "reasoning_delta", text: "Reading the cards." });
+    await vi.waitFor(() => expect(chatWithTools).toHaveBeenCalledTimes(3));
+    const lead = JSON.stringify({ goals }).slice(0, -1);
+    for (const [messages, , options] of chatWithTools.mock.calls) {
+      expect(options?.stableLead).toBe(lead);
+      expect(messages[1].content.startsWith(lead)).toBe(true);
+    }
+  } finally {
+    first.resolve(answer(120));
+    await work;
+  }
+  expect((await work).related).toEqual(cards);
+});
+
 test("an ambiguous title the model asks to read streams after its full-text judgment with its captured page", async () => {
   const listing = card("Interface Specialist");
   const body =

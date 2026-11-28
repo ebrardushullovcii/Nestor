@@ -493,43 +493,58 @@ it("offers Retry fit for retained unfinished jobs and Stop fit only while runnin
   await waitFor(() => expect(run).toHaveBeenCalledWith("stop_search", {}));
 });
 
-it("says why a first search is paused and offers Try again instead of rows that never arrive", async () => {
-  store.close();
-  store = openJobStore(":memory:");
-  const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
-  searchStatus = {
-    ...searchStatus,
-    search,
-    parked: {
-      owner: "nestor",
-      requestRejected: true,
-      message: "Nestor sent an invalid request to the AI provider.",
-      providerMessage: null,
-    },
-  };
-  type Run = (name: string, input: unknown) => Promise<unknown>;
-  const jobs = (window as unknown as { nestor: { jobs: { run: Run } } }).nestor
-    .jobs;
-  const run = jobs.run;
-  const resumed: unknown[] = [];
-  jobs.run = (name: string, input: unknown) => {
-    if (name === "keep_reading") {
-      resumed.push(input);
-      return Promise.resolve(search);
+it.each([false, true])(
+  "offers Try again when a search is paused (existing jobs: %s)",
+  async (hasJobs) => {
+    if (!hasJobs) {
+      store.close();
+      store = openJobStore(":memory:");
     }
-    return run(name, input);
-  };
-  render(
-    <MemoryRouter>
-      <ToastProvider>
-        <FindJobsScreen />
-      </ToastProvider>
-    </MemoryRouter>,
-  );
-  expect(
-    await screen.findByText("Search paused: Nestor sent an invalid AI request"),
-  ).toBeTruthy();
-  expect(screen.getByText(/tries again when Nestor restarts/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(resumed).toEqual([{}]));
-});
+    const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+    searchStatus = {
+      ...searchStatus,
+      search,
+      parked: {
+        owner: "nestor",
+        requestRejected: true,
+        message: "Nestor sent an invalid request to the AI provider.",
+        providerMessage: null,
+      },
+    };
+    type Run = (name: string, input: unknown) => Promise<unknown>;
+    const jobs = (window as unknown as { nestor: { jobs: { run: Run } } })
+      .nestor.jobs;
+    const run = jobs.run;
+    const resumed: unknown[] = [];
+    jobs.run = (name: string, input: unknown) => {
+      if (name === "keep_reading") {
+        resumed.push(input);
+        return Promise.resolve(search);
+      }
+      return run(name, input);
+    };
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <FindJobsScreen />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    if (hasJobs) {
+      expect(
+        await screen.findByRole("heading", { name: "Supply Chain Analyst 1" }),
+      ).toBeTruthy();
+    } else {
+      expect(
+        await screen.findByText(
+          "Search paused: Nestor sent an invalid AI request",
+        ),
+      ).toBeTruthy();
+      expect(screen.getByText(/tries again when Nestor restarts/)).toBeTruthy();
+    }
+    const controls = within(screen.getByRole("region", { name: "Search" }));
+    expect(controls.getByRole("button", { name: "Stop search" })).toBeTruthy();
+    fireEvent.click(controls.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(resumed).toEqual([{}]));
+  },
+);

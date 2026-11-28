@@ -50,10 +50,12 @@ import { buildListingFitPerson } from "./listing-fit-person";
 import { fitSchema, fitResponseSchema } from "./listing-fit-response";
 import { fitCountryCodes } from "./fit-country-codes";
 import {
+  sharePageText,
   splitLinksOnEveryPage,
   textCoveredBy,
   withoutRepeatedBlocks,
 } from "./prompt-material";
+import { withWarmSearchCache } from "./warm-search-cache";
 
 export interface ListingEngineModel {
   client: LLMClient;
@@ -168,10 +170,9 @@ async function ask<Output, Input>(
   reasoningTask: BrowserAgentReasoningTask,
   jsonSchema?: { name: string; schema: Record<string, unknown> },
   /**
-   * The leading fields of `data` that repeat across this work's requests
-   * (the person's facts ahead of a batch), in the same key order.
+   * The serialized opening of `data` that repeats across requests.
    */
-  lead?: Record<string, unknown>,
+  leadText?: string,
 ): Promise<Output> {
   const recovery: Array<{ role: "user"; content: string }> = [];
   const parts = createContextParts();
@@ -189,10 +190,8 @@ async function ask<Output, Input>(
     },
     { role: "user", content: serializedData },
   ];
-  // The serialized lead without its closing brace opens the serialized data.
-  const leadText = lead ? JSON.stringify(lead).slice(0, -1) : "";
   const stableLead =
-    leadText.length > 1 && serializedData.startsWith(leadText)
+    leadText && serializedData.startsWith(leadText)
       ? leadText
       : undefined;
   try {
@@ -204,7 +203,7 @@ async function ask<Output, Input>(
       );
       let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
       try {
-        reply = await model.client.chatWithTools(modelMessages, tools, {
+        const options = {
           ...(model.signal ? { signal: model.signal } : {}),
           reasoningTask,
           includeUsage: true,
@@ -214,7 +213,21 @@ async function ask<Output, Input>(
           // The selected Chat gateway rejects response_format=json_object.
           // The prompt requests JSON; parsing and per-row schemas still validate it.
           ...(jsonSchema ? { jsonSchema } : {}),
-        });
+        };
+        if (reasoningTask === "listing_screen" || reasoningTask === "page_read") {
+          reply = await withWarmSearchCache(
+            model.client,
+            model.signal,
+            JSON.stringify([modelMessages[0]?.content, stableLead]),
+            (onStreamEvent) =>
+              model.client.chatWithTools(modelMessages, tools, {
+                ...options,
+                ...(onStreamEvent ? { onStreamEvent } : {}),
+              }),
+          );
+        } else {
+          reply = await model.client.chatWithTools(modelMessages, tools, options);
+        }
       } catch (error) {
         model.signal?.throwIfAborted();
         if (isModelInputLimit(error)) {
@@ -791,6 +804,7 @@ export async function screenCards(
             },
           },
         },
+        JSON.stringify({ goals: input.goals }).slice(0, -1),
       );
       const verdicts = screenVerdicts(raw, titles.length);
       remaining = [];
@@ -1146,22 +1160,6 @@ export async function readListings(
     jobs: FoundJob[] = [];
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
-  /**
-   * One request's pages. Navigation on every page is listed once, ahead of
-   * the listings, so consecutive requests for one site share it as a cached
-   * prefix; a body the page text already holds is not sent a second time.
-   */
-  /** One listing's page text, links and (when it adds text) body. */
-  const pageMaterial = (
-    page: { pageText: string; description?: string } | undefined,
-    links: readonly { label: string; url: string }[] | undefined,
-  ) => ({
-    pageText: page?.pageText ?? "",
-    links: links ?? [],
-    ...(page?.description !== undefined
-      ? { description: page.description }
-      : {}),
-  });
   const pageReadInput = (batch: readonly Read[]) => {
     const pages = batch.map((read) => {
       const pageText = withoutRepeatedBlocks(
@@ -1175,15 +1173,34 @@ export async function readListings(
       };
     });
     const links = splitLinksOnEveryPage(pages.map((page) => page.links));
-    return {
+    const text = sharePageText(pages.map((page) => page.pageText));
+    // Shared page text and links precede the listings so another batch
+    // with the same material can read them from the provider's cache.
+    const sharedLinks = {
       ...(links.shared.length ? { linksOnEveryPage: links.shared } : {}),
+    };
+    const [firstBlock] = text.shared;
+    // The rest of the shared text can vary with the batch (e.g. related
+    // jobs). End the reusable prefix at the first common block.
+    const lead = firstBlock
+      ? JSON.stringify({ ...sharedLinks, textOnEveryPage: [firstBlock] }).slice(0, -2)
+      : links.shared.length
+        ? JSON.stringify(sharedLinks).slice(0, -1)
+        : undefined;
+    const data = {
+      ...sharedLinks,
+      ...(text.shared.length ? { textOnEveryPage: text.shared } : {}),
       listings: batch.map((read, id) => ({
         id,
         title: read.card.title,
         url: read.card.url,
         finalUrl: read.page.finalUrl,
         card: read.card.text,
-        ...pageMaterial(pages.at(id), links.own.at(id)),
+        pageText: text.pages[id],
+        links: links.own[id],
+        ...(pages[id]?.description !== undefined
+          ? { description: pages[id].description }
+          : {}),
         published: read.structured
           ? {
               title: read.structured.title,
@@ -1198,6 +1215,7 @@ export async function readListings(
           : null,
       })),
     };
+    return { data, lead };
   };
   const append = (
     read: Read,
@@ -1282,13 +1300,16 @@ export async function readListings(
     },
   ): Promise<void> => {
     const { failures, indexes } = part;
+    const { data, lead } = pageReadInput(batch);
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
-      pageReadInput(batch),
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. A pageText array holds ordered pieces of that page: join its string pieces and the exact textOnEveryPage blocks selected by its zero-based numeric references, without inserting separators. A string pageText is already complete. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
+      data,
       z.object({ jobs: z.array(z.unknown()) }),
       Math.max(2000, batch.length * 220),
       "page_read",
+      undefined,
+      lead,
     );
     const rows = answer.jobs.map((job) => fieldsSchema.safeParse(job));
     for (const [id, read] of batch.entries()) {
@@ -1509,7 +1530,7 @@ export async function fitJobs(
           Math.max(32_000, batch.length * 1_000),
           "fit_batch",
           fitResponseSchema(),
-          context,
+          JSON.stringify(context).slice(0, -1),
         ).catch((error: unknown) => {
           input.signal?.throwIfAborted();
           if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError))

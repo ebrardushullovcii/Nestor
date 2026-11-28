@@ -57,7 +57,6 @@ import { SearchPanel, SearchStatus } from "./search-panel";
 import { TRIAGE_ACTIONS, type TriageAction } from "./triage-actions";
 import { useSearchStatus } from "./use-search-status";
 import { pausedSearch } from "./paused-search";
-import { useKeepReading } from "./site-results";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
 import { useAssistantContextSource } from "../job-finder/assistant/assistant-provider";
 
@@ -143,7 +142,6 @@ export function FindJobsScreen() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const status = useSearchStatus();
-  const resume = useKeepReading();
   const [stage, setStage] = useState<TriageStage>(remembered.stage);
   const [sortByStage, setSortByStage] = useState(remembered.sortByStage);
   const [text, setText] = useState(remembered.text);
@@ -470,6 +468,17 @@ export function FindJobsScreen() {
       setStarting(false);
     }
   }, []);
+  const retrySearch = async () => {
+    setStarting(true);
+    setSearchError(null);
+    try {
+      await window.nestor.jobs.run("keep_reading", {});
+    } catch (error) {
+      setSearchError(describe(error));
+    } finally {
+      setStarting(false);
+    }
+  };
 
   // Finishing guided setup starts the first search, if none has run.
   useEffect(() => {
@@ -613,16 +622,6 @@ export function FindJobsScreen() {
       <p className="font-medium text-foreground">{emptyMessage[0]}</p>
       {emptyMessage[1] ? <p>{emptyMessage[1]}</p> : null}
       <div className="flex flex-wrap justify-center gap-2">
-        {stage === "found" && counts.found === 0 && paused?.retry ? (
-          <Button
-            onClick={() => resume.keepReading()}
-            pending={resume.pending}
-            size="sm"
-            type="button"
-          >
-            Try again
-          </Button>
-        ) : null}
         {stage === "found" && counts.found === 0 && paused?.accountStep ? (
           <Button
             onClick={() => void navigate("/job-finder/actions")}
@@ -782,6 +781,7 @@ export function FindJobsScreen() {
       />
       <SearchPanel
         error={searchError}
+        onRetry={paused?.retry ? () => void retrySearch() : undefined}
         onStart={(settings) => void startSearch(settings)}
         onSiteTotal={setSiteTotal}
         onStop={() => void window.nestor.jobs.run("stop_search", {})}

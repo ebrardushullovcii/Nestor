@@ -2019,7 +2019,7 @@ test("hidden promotional markup is not a vacancy card, and unlinked published va
   );
 });
 
-test("a page read lists navigation on every page once, ahead of the listings, and sends a body the page text already holds once", async () => {
+test("a page read caches shared navigation and keeps each full listing recoverable", async () => {
   const nav = '<a href="/jobs">All jobs</a><a href="/about">About</a>';
   const html = (title: string, extra: string) =>
     `<body>${nav}<main><h1>${title}</h1><p>Build the synthetic order service for venues.</p>${extra}</main></body>`;
@@ -2028,9 +2028,13 @@ test("a page read lists navigation on every page once, ahead of the listings, an
     "https://board.example/two": html("Two", '<a href="/apply/two">Apply</a>'),
   };
   const requests: Parameters<LLMClient["chatWithTools"]>[0][] = [];
+  const leads: Array<string | undefined> = [];
+  const visibleText = (title: string) =>
+    `All jobs\nAbout\n${title}\nBuild the synthetic order service for venues.\nApply`;
   const client: LLMClient = {
-    chatWithTools: (messages) => {
+    chatWithTools: (messages, _tools, options) => {
       requests.push(messages);
+      leads.push(options?.stableLead);
       return Promise.resolve({
         content: JSON.stringify({
           jobs: [0, 1].map((id) => ({
@@ -2052,18 +2056,26 @@ test("a page read lists navigation on every page once, ahead of the listings, an
   await readListings({
     client,
     cards: [card("One", "one"), card("Two", "two")],
-    readPage: (url) => Promise.resolve({ finalUrl: url, html: pages[url] }),
+    readPage: (url) => Promise.resolve({
+      finalUrl: url,
+      html: pages[url],
+      visibleText: visibleText(url.endsWith("one") ? "One" : "Two"),
+    }),
   });
   expect(requests).toHaveLength(1);
   const input = JSON.parse(requests[0][1].content) as {
+    textOnEveryPage: string[];
     linksOnEveryPage: { label: string; url: string }[];
     listings: {
       links: { label: string; url: string }[];
-      pageText: string;
+      pageText: Array<string | number>;
       description?: string;
     }[];
   };
-  expect(Object.keys(input)).toEqual(["linksOnEveryPage", "listings"]);
+  const { textOnEveryPage, linksOnEveryPage } = input;
+  expect(Object.keys(input)).toEqual(["linksOnEveryPage", "textOnEveryPage", "listings"]);
+  expect(leads).toEqual([JSON.stringify({ linksOnEveryPage, textOnEveryPage: textOnEveryPage.slice(0, 1) }).slice(0, -2)]);
+  expect(textOnEveryPage[0]).toBe("All jobs\nAbout\n");
   expect(input.linksOnEveryPage.map((link) => link.label)).toEqual([
     "All jobs",
     "About",
@@ -2072,8 +2084,10 @@ test("a page read lists navigation on every page once, ahead of the listings, an
     [{ label: "Apply", url: "https://board.example/apply/one" }],
     [{ label: "Apply", url: "https://board.example/apply/two" }],
   ]);
-  for (const listing of input.listings) {
-    expect(listing.pageText).toContain("synthetic order service");
+  for (const [id, listing] of input.listings.entries()) {
+    expect(listing.pageText.map((piece) =>
+      typeof piece === "number" ? textOnEveryPage[piece] : piece
+    ).join("")).toBe(visibleText(id === 0 ? "One" : "Two"));
     expect(listing).not.toHaveProperty("description");
   }
 });

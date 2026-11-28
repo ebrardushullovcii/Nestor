@@ -103,3 +103,76 @@ export function splitLinksOnEveryPage<
     own: pages.map((page) => page.filter((link) => !onEvery.has(key(link)))),
   };
 }
+
+/** Store verbatim runs of lines present on every page once, in page order. */
+export function sharePageText(texts: readonly string[]): {
+  shared: string[];
+  pages: Array<string | Array<string | number>>;
+} {
+  const [first, ...rest] = texts;
+  if (first === undefined || !rest.length)
+    return { shared: [], pages: [...texts] };
+  const linesOf = (text: string) => text.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+  const leader = linesOf(first);
+  const others = rest.map((text) => {
+    const lines = linesOf(text);
+    const positions = new Map<string, number[]>();
+    for (const [index, line] of lines.entries()) {
+      if (!line.trim()) continue;
+      const found = positions.get(line);
+      if (found) found.push(index);
+      else positions.set(line, [index]);
+    }
+    return { lines, positions };
+  });
+  const shared: string[] = [];
+  const byFirstLine = new Map<string, { id: number; count: number }>();
+  for (let start = 0; start < leader.length; ) {
+    const line = leader[start] ?? "";
+    let count = leader.length - start;
+    for (const { lines, positions } of others) {
+      let longest = 0;
+      for (const position of positions.get(line) ?? []) {
+        let matched = 0;
+        while (
+          matched < count &&
+          lines[position + matched] === leader[start + matched]
+        )
+          matched++;
+        longest = Math.max(longest, matched);
+      }
+      count = longest;
+      if (count < 2) break;
+    }
+    if (count < 2 || byFirstLine.has(line)) {
+      start++;
+      continue;
+    }
+    byFirstLine.set(line, { id: shared.length, count });
+    shared.push(leader.slice(start, start + count).join(""));
+    start += count;
+  }
+  const encode = (text: string) => {
+    const lines = linesOf(text);
+    const parts: Array<string | number> = [];
+    let start = 0;
+    for (let index = 0; index < lines.length; ) {
+      const block = byFirstLine.get(lines[index] ?? "");
+      if (
+        !block ||
+        lines.slice(index, index + block.count).join("") !== shared[block.id]
+      ) {
+        index++;
+        continue;
+      }
+      if (index > start) parts.push(lines.slice(start, index).join(""));
+      parts.push(block.id);
+      index += block.count;
+      start = index;
+    }
+    if (!parts.length) return text;
+    if (start < lines.length) parts.push(lines.slice(start).join(""));
+    return parts;
+  };
+  return { shared, pages: texts.map(encode) };
+}

@@ -200,6 +200,7 @@ export function SearchPanel(props: {
   starting: boolean;
   error: string | null;
   onStart: (settings: JobSearchSettings) => void;
+  onRetry?: (() => void) | undefined;
   onStop: () => void;
   /** Turned-on sites, once known; 0 makes "Add a job site" the way on. */
   siteTotal?: number | null;
@@ -321,17 +322,28 @@ export function SearchPanel(props: {
           </div>
         </fieldset>
         {running ? (
-          <Button
-            className="order-7 ml-auto @3xl/search:order-4"
-            onClick={props.onStop}
-            size="toolbar"
-            title="Stop this search. Jobs found so far stay."
-            type="button"
-            variant="outline"
-          >
-            <CircleStop aria-hidden="true" />
-            Stop search
-          </Button>
+          <div className="order-7 ml-auto flex flex-wrap gap-2 @3xl/search:order-4">
+            {props.onRetry ? (
+              <Button
+                onClick={props.onRetry}
+                pending={props.starting}
+                size="toolbar"
+                type="button"
+              >
+                Try again
+              </Button>
+            ) : null}
+            <Button
+              onClick={props.onStop}
+              size="toolbar"
+              title="Stop this search. Jobs found so far stay."
+              type="button"
+              variant="outline"
+            >
+              <CircleStop aria-hidden="true" />
+              Stop search
+            </Button>
+          </div>
         ) : noSites ? (
           // A search reads the sites turned on in Profile; with none, the
           // way on is adding one, not a Search that cannot work.

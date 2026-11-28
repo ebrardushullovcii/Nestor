@@ -2992,7 +2992,7 @@ test("a listing read receives its exact identity without the general source-sear
   };
   const run = config({ requestedListing, retainAllFound: true });
   const prompt = createJobSearchPrompts(run);
-  expect(prompt.system).toContain(JSON.stringify(requestedListing));
+  expect(prompt.user).toContain(JSON.stringify(requestedListing));
   expect(prompt.system).toContain("listingIndexUrl");
   expect(prompt.system).not.toContain("find a broad pool");
   expect(
@@ -3317,22 +3317,43 @@ test("browser collection is told where the person lives, may work and would move
     );
     expect(facts).toContain('"remoteEligible":true');
     const marker = "\nThis site: ";
-    const firstPrefix = first.system.slice(0, first.system.indexOf(marker));
-    const secondPrefix = second.system.slice(0, second.system.indexOf(marker));
-    expect(first.system.indexOf(marker)).toBeGreaterThan(0);
+    const firstPrefix = inventoryOnly ? first.system : first.system.split(marker)[0];
+    const secondPrefix = inventoryOnly ? second.system : second.system.split(marker)[0];
     expect(firstPrefix).toBe(secondPrefix);
     expect(firstPrefix).toContain(facts);
     expect(firstPrefix).not.toContain("Built In");
-    expect(first.system.slice(firstPrefix.length)).toContain(
-      "This site: Built In.",
-    );
-    expect(first.system.slice(firstPrefix.length)).toContain(
-      "On Built In, use the location box.",
-    );
+    const siteContext = inventoryOnly ? first.user : first.system.split(marker)[1];
+    expect(siteContext).toContain("Built In.");
+    expect(siteContext).toContain("On Built In, use the location box.");
   }
   const inventory = createJobSearchPrompts(person("Built In", true)).system;
   expect(inventory).toContain("also outside their saved locations");
   expect(inventory).toContain('"locations":["Europe"]');
+});
+
+test("browser listing reads share their system prompt across postings and sites", () => {
+  const first = config({
+    promptContext: { siteLabel: "One", siteInstructions: ["Use the One portal."] },
+    requestedListing: {
+      url: "https://one.example/posting",
+      title: "Developer",
+      text: "One Employer",
+    },
+  });
+  const second = config({
+    promptContext: { siteLabel: "Two" },
+    requestedListing: {
+      url: "https://two.example/posting",
+      title: "Designer",
+      text: "Two Employer",
+    },
+  });
+  const firstPrompt = createJobSearchPrompts(first);
+  const secondPrompt = createJobSearchPrompts(second);
+  expect(firstPrompt.system).toBe(secondPrompt.system);
+  expect(firstPrompt.user).toContain(JSON.stringify(first.requestedListing));
+  expect(firstPrompt.user).toContain("This site: One.\nUse the One portal.");
+  expect(secondPrompt.user).toContain(JSON.stringify(second.requestedListing));
 });
 
 test("a restarted browser collection is told where the interrupted one had got to", () => {
