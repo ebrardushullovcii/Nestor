@@ -1,4 +1,22 @@
-import type { CandidateProfile } from "@nestor/contracts";
+import type {
+  CandidateProfile,
+  CandidateWorkEligibility,
+} from "@nestor/contracts";
+
+/**
+ * An empty own-words rule is left out, so the fit key of every profile that
+ * has none stays what it was and an upgrade spends no fits re-scoring.
+ */
+export function workEligibilityForModel(
+  facts: CandidateWorkEligibility,
+):
+  | CandidateWorkEligibility
+  | Omit<CandidateWorkEligibility, "workAuthorizationInOwnWords"> {
+  if (facts.workAuthorizationInOwnWords) return facts;
+  const { workAuthorizationInOwnWords: _empty, ...rest } = facts;
+  void _empty;
+  return rest;
+}
 
 /** Evidence for fit, shared with its invalidation key. No contact or file metadata. */
 export function buildListingFitPerson(profile: CandidateProfile) {
@@ -12,7 +30,7 @@ export function buildListingFitPerson(profile: CandidateProfile) {
     currentRegion: profile.currentRegion,
     currentCountry: profile.currentCountry,
     yearsExperience: profile.yearsExperience,
-    workEligibility: profile.workEligibility,
+    workEligibility: workEligibilityForModel(profile.workEligibility),
     skills: profile.skills,
     skillGroups: profile.skillGroups,
     experiences: profile.experiences.filter((entry) => !entry.isDraft),

@@ -1808,7 +1808,7 @@ export async function runProfileCopilotAgentTask(input: {
       {
         name: "set_work_eligibility_fields",
         description:
-          "Propose work-eligibility facts: authorizedWorkCountries (array of countries or regions such as European Union), requiresVisaSponsorship (boolean), remoteEligible, willingToRelocate, willingToTravel (booleans), preferredRelocationRegions (array), noticePeriodDays (number), availableStartDate, securityClearance. Only facts the person stated or their resume states outright. A permit limited to study, training or an internship is not authorization to work in that country.",
+          "Propose work-eligibility facts: authorizedWorkCountries (array of countries or regions such as European Union), requiresVisaSponsorship (boolean), remoteEligible, willingToRelocate, willingToTravel (booleans), preferredRelocationRegions (array), noticePeriodDays (number), availableStartDate, securityClearance, workAuthorizationInOwnWords (the person's own statement of where and how they may work, such as remote from home without sponsorship but sponsorship needed to work inside another country; keep their words). Only facts the person stated or their resume states outright. A permit limited to study, training or an internship is not authorization to work in that country.",
         inputSchema: WorkEligibilityFieldsInputSchema,
         parameters: jsonObject(
           {

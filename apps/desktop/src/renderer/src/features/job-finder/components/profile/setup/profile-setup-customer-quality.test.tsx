@@ -389,7 +389,7 @@ describe("profile setup customer-quality guidance", () => {
     );
     expect(headings).toEqual([
       "What to look for",
-      "Two answers every application asksRequired",
+      "Where you can workRequired",
     ]);
     // Where to look is its own block (mocked out here), between the two.
     const blocks = [
@@ -397,7 +397,24 @@ describe("profile setup customer-quality guidance", () => {
     ].map((block) => block.getAttribute("data-profile-setup-block"));
     expect(blocks).toEqual(["look-for", "more-about-you"]);
     expect(container?.textContent).toContain(
-      "Job Finder checks each job against these countries and any limited permissions.",
+      "Job Finder answers from these and checks each job against them",
+    );
+    // R10: remote work from home and the person's own rule sit beside the
+    // country list and the sponsorship answer, not folded away below.
+    const workBlock = container?.querySelector(
+      "[data-profile-setup-work-eligibility]",
+    );
+    expect(
+      workBlock?.querySelector(
+        "#profile-setup-field-eligibility-remote-eligible",
+      ),
+    ).toBeTruthy();
+    const ownWords = workBlock?.querySelector<HTMLTextAreaElement>(
+      "#profile-setup-field-eligibility-work-authorization-in-own-words",
+    );
+    expect(ownWords).toBeTruthy();
+    expect(workBlock?.textContent).toContain(
+      "Anything else about where and how you can work?",
     );
     const more = container?.querySelector<HTMLDetailsElement>(
       "[data-profile-setup-block='more-about-you']",
@@ -412,6 +429,9 @@ describe("profile setup customer-quality guidance", () => {
         "#profile-setup-field-eligibility-willing-to-relocate",
       ),
     ).toBeTruthy();
+    expect(
+      more?.querySelector("#profile-setup-field-eligibility-remote-eligible"),
+    ).toBeNull();
     // Each block carries one line of help, not a paragraph per field.
     expect(container?.textContent).not.toContain("Enter one place at a time");
   });

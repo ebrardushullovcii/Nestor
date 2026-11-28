@@ -73,6 +73,7 @@ export function createProfile(): CandidateProfile {
       noticePeriodDays: null,
       availableStartDate: null,
       securityClearance: null,
+      workAuthorizationInOwnWords: null,
     },
     professionalSummary: {
       shortValueProposition: null,

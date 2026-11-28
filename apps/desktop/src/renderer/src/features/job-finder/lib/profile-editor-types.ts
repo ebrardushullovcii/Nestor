@@ -48,6 +48,7 @@ export interface ProfileEditorValues {
     securityClearance: string;
     willingToRelocate: BooleanSelectValue;
     willingToTravel: BooleanSelectValue;
+    workAuthorizationInOwnWords: string;
   };
   languages: LanguageFormEntry[];
   links: LinkFormEntry[];

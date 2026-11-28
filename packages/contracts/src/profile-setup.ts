@@ -544,6 +544,7 @@ export function evaluateProfileSetupReadiness(
     profile.workEligibility.noticePeriodDays !== null ||
     hasMeaningfulText(profile.workEligibility.availableStartDate) ||
     hasMeaningfulText(profile.workEligibility.securityClearance) ||
+    hasMeaningfulText(profile.workEligibility.workAuthorizationInOwnWords) ||
     hasMeaningfulStringList(searchPreferences.locations) ||
     hasMeaningfulStringList(searchPreferences.workModes),
   );
@@ -558,7 +559,9 @@ export function evaluateProfileSetupReadiness(
             hasMeaningfulText(permission.country) &&
             hasMeaningfulText(permission.conditions),
         ),
-      )) &&
+      ) ||
+      // A rule in the person's own words says where they can work too.
+      hasMeaningfulText(profile.workEligibility.workAuthorizationInOwnWords)) &&
     profile.workEligibility.requiresVisaSponsorship !== null;
   const hasNarrative = hasMeaningfulNarrative(profile);
   // Finishing needs a name, one way to be contacted, and one place to look.

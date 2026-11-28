@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, test } from "vitest";
 import { CandidateExperienceSchema } from "@nestor/contracts";
 import {
@@ -307,4 +311,44 @@ test("goals retain all constraints and reject an invalid partial range atomicall
   ).toThrow();
   expect(preferences.goals.read().locations).toEqual(["Berlin"]);
   expect(preferences.goals.read().compensation.maximum).toBe(27);
+});
+
+test("the work rule in the person's own words is stored, also in a file from before it existed", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nestor-work-rule-"));
+  const file = path.join(dir, "jobs.sqlite");
+  const rule =
+    "Remote from Kosovo I need no sponsorship for any employer. To work in the UK or the EU I would need sponsorship, and I'm open to it.";
+  try {
+    const first = openJobStore(file);
+    createProfileStore(first).patch({
+      fields: { "workEligibility.requiresVisaSponsorship": false },
+    });
+    first.close();
+    // A file written before the field: the column is not there yet.
+    const old = new DatabaseSync(file);
+    old.exec(
+      "ALTER TABLE profile DROP COLUMN work_eligibility_work_authorization_in_own_words",
+    );
+    old.close();
+
+    const upgraded = openJobStore(file);
+    const profile = createProfileStore(upgraded);
+    expect(profile.read().workEligibility.workAuthorizationInOwnWords).toBe(
+      null,
+    );
+    expect(profile.read().workEligibility.requiresVisaSponsorship).toBe(false);
+    profile.patch({
+      fields: { "workEligibility.workAuthorizationInOwnWords": rule },
+    });
+    upgraded.close();
+
+    const reopened = openJobStore(file);
+    expect(
+      createProfileStore(reopened).read().workEligibility
+        .workAuthorizationInOwnWords,
+    ).toBe(rule);
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

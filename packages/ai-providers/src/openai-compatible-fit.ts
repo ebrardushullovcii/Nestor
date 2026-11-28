@@ -34,6 +34,7 @@ export function buildFitEvidenceInstructions(): string {
     `${PERSON_FACING_VOICE_INSTRUCTION} That covers reasons, gaps, summary and explanations.`,
     "Use the person's plain labels in explanations. Write Yes and No facts as ordinary sentences, never field names, key=value text or true/false flags.",
     "Read Limited work permissions by country: Conditions describe present permission, and Will need sponsorship later describes future work, not necessarily the present job. Compare the job type, hours and dates with every permit condition. Limited permission is neither unrestricted authorization nor absent permission. Unresolved conditions require review_before_applying with a clear question for the person.",
+    "The person's rule in their own words, when present, is their own statement of where and how they may work, for example remote from their home country without sponsorship but needing sponsorship to work inside another country. It is the country-specific condition for every country or work arrangement it names and wins over the general country list and sponsorship answer there; judge the job by its actual arrangement.",
     "Compare country-limited remote work with the person's current location, countries where they can work, sponsorship needs and saved eligibility answers. Remote does not mean worldwide: Accepting remote work outside preferred places never overrides a country restriction or work permission. Do not infer authorization from residence, education or past employers.",
     "Respect Remote work can be outside preferred places: when No, remote alone does not match a preferred place. A different listed place is a preferences conflict and lowers an otherwise matching job's score. When Yes, remote work available in the person's country or region can match their preferred places. Hiring restrictions and work permission always apply.",
     "For hybrid or onsite work, compare the actual office city and required attendance with saved locations and relocation facts. Willingness to relocate is not permission to work there. A material place or eligibility mismatch must appear in preferencesExplanation, gaps and summary and prevent an unqualified strong_fit or apply_with_original recommendation. If eligibility is not known, say what must be confirmed.",
@@ -199,6 +200,13 @@ function plainEligibility(profile: CandidateProfile) {
     "Notice period in days": facts.noticePeriodDays,
     "Available start date": facts.availableStartDate,
     "Security clearance": facts.securityClearance,
+    // Left out when empty, so other profiles' requests stay as they were.
+    ...(facts.workAuthorizationInOwnWords
+      ? {
+          "The person's rule in their own words (country-specific; wins for each country or arrangement it names)":
+            facts.workAuthorizationInOwnWords,
+        }
+      : {}),
   };
 }
 

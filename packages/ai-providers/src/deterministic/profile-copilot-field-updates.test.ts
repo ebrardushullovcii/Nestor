@@ -731,5 +731,6 @@ test("structured preference facts remain model-owned rather than guessed by fall
     "searchSelectivity",
     "shiftPreference",
     "weeklyHours",
+    "workAuthorizationInOwnWords",
   ]);
 });

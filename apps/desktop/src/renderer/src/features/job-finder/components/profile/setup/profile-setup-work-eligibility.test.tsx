@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useForm } from "react-hook-form";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -103,11 +103,52 @@ describe("Job targets asks the two questions every application form asks", () =>
       screen.queryByRole("button", { name: "I'm allowed to work in Germany" }),
     ).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    const sponsorship = within(
+      document.querySelector<HTMLElement>("[data-profile-setup-sponsorship]")!,
+    );
+    fireEvent.click(sponsorship.getByRole("button", { name: "No" }));
     expect(latestProfileValues?.eligibility.requiresVisaSponsorship).toBe("no");
     expect(
-      screen.getByRole("button", { name: "No" }).getAttribute("aria-pressed"),
+      sponsorship
+        .getByRole("button", { name: "No" })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
+  });
+
+  it("holds remote work from home and the person's own rule beside them (R10)", () => {
+    render(<Harness />);
+
+    const remote = within(
+      document.querySelector<HTMLElement>(
+        "[data-profile-setup-remote-eligible]",
+      )!,
+    );
+    expect(
+      remote
+        .getByRole("button", { name: "Not sure" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(remote.getByRole("button", { name: "Yes" }));
+    expect(latestProfileValues?.eligibility.remoteEligible).toBe("yes");
+    fireEvent.click(remote.getByRole("button", { name: "Not sure" }));
+    expect(latestProfileValues?.eligibility.remoteEligible).toBe("");
+
+    const ownWords = screen.getByLabelText(
+      /Anything else about where and how you can work\?/,
+    );
+    // The example speaks in the person's own situation.
+    expect(ownWords.getAttribute("placeholder")).toContain(
+      "Remote from Germany I need no sponsorship",
+    );
+    fireEvent.change(ownWords, {
+      target: {
+        value:
+          "Remote from Germany I need no sponsorship; to work in the US I would.",
+      },
+    });
+    expect(latestProfileValues?.eligibility.workAuthorizationInOwnWords).toBe(
+      "Remote from Germany I need no sponsorship; to work in the US I would.",
+    );
   });
 
   it("reads several countries from one entry", () => {

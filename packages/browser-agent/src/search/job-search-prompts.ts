@@ -1,6 +1,7 @@
 import { describeBrowserPermissions } from "../browser-permission-policy";
 import { KEYBOARD_INSTRUCTIONS } from "../keyboard-instructions";
 import type { AgentConfig } from "../types";
+import { workEligibilityForModel } from "./listing-fit-person";
 
 /**
  * What the search agent and the source-check agent are told.
@@ -32,7 +33,7 @@ function wherePersonCanWork(config: AgentConfig) {
     currentCity: profile.currentCity,
     currentRegion: profile.currentRegion,
     currentCountry: profile.currentCountry,
-    workEligibility: profile.workEligibility,
+    workEligibility: workEligibilityForModel(profile.workEligibility),
   };
 }
 

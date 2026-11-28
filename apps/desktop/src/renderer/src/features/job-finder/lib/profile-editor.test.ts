@@ -1233,3 +1233,28 @@ test("normalizes a bare portfolio domain and removes trailing skill punctuation"
   expect(result.payload?.portfolioUrl).toBe("https://portfolio.example.test/");
   expect(result.payload?.skills).toEqual(["SAP EWM", "SQL"]);
 });
+
+describe("profile editor work rule in the person's own words", () => {
+  test("round-trips the rule, trimmed, and clears it when emptied", () => {
+    const profile = createProfile();
+    const values = createProfileEditorValues(profile);
+    expect(values.eligibility.workAuthorizationInOwnWords).toBe("");
+
+    values.eligibility.workAuthorizationInOwnWords =
+      "  Remote from Kosovo I need no sponsorship. To work in the UK I would.  ";
+    const saved = buildProfilePayload(profile, values).payload;
+    expect(saved?.workEligibility.workAuthorizationInOwnWords).toBe(
+      "Remote from Kosovo I need no sponsorship. To work in the UK I would.",
+    );
+
+    const reopened = createProfileEditorValues(saved!);
+    expect(reopened.eligibility.workAuthorizationInOwnWords).toBe(
+      "Remote from Kosovo I need no sponsorship. To work in the UK I would.",
+    );
+    reopened.eligibility.workAuthorizationInOwnWords = "   ";
+    expect(
+      buildProfilePayload(saved!, reopened).payload?.workEligibility
+        .workAuthorizationInOwnWords,
+    ).toBeNull();
+  });
+});

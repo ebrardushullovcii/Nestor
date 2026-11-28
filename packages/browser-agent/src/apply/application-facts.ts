@@ -10,6 +10,7 @@ import { currentCountryTimezone } from "./current-timezone";
 import { fieldNamesAnotherPerson, githubUsername } from "./github-username";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { phoneCallingCode, phoneCountryPicker } from "./phone-answer";
+import { workEligibilityForModel } from "../search/listing-fit-person";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -169,7 +170,7 @@ export function applicationOwnerFacts(sources: ApplyAnswerSources) {
         })(sources.preferences)
       : undefined,
     yearsExperience: profile.yearsExperience,
-    workEligibility: profile.workEligibility,
+    workEligibility: workEligibilityForModel(profile.workEligibility),
     ...(profile.workEligibility.limitedWorkPermissions?.length
       ? {
           eligibilityInterpretation:

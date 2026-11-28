@@ -218,7 +218,8 @@ export function createProfile(): CandidateProfile {
       remoteEligible: null,
       noticePeriodDays: null,
       availableStartDate: null,
-      securityClearance: null
+      securityClearance: null,
+      workAuthorizationInOwnWords: null
     },
     professionalSummary: {
       shortValueProposition: null,

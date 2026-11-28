@@ -138,6 +138,12 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   { table: "search_source_queue", column: "failure", definition: "TEXT" },
   { table: "search_listing_queue", column: "completed_as", definition: "TEXT" },
   { table: "fit_context", column: "scoring_fingerprint", definition: "TEXT" },
+  // The person's work rule in their own words; empty in older files.
+  {
+    table: "profile",
+    column: "work_eligibility_work_authorization_in_own_words",
+    definition: "TEXT",
+  },
 ];
 
 const JOBS = `
