@@ -727,9 +727,13 @@ test("structured preference facts remain model-owned rather than guessed by fall
       .sort(),
   ).toEqual([
     "basis",
+    "citizenshipCountries",
+    "dateOfBirth",
     "limitedWorkPermissions",
+    "postalCode",
     "searchSelectivity",
     "shiftPreference",
+    "streetAddress",
     "taxBasis",
     "weeklyHours",
     "workAuthorizationInOwnWords",

@@ -150,6 +150,13 @@ export function applicationOwnerFacts(sources: ApplyAnswerSources) {
       country: profile.currentCountry,
       timeZone: profile.timeZone,
     },
+    postalAddress: {
+      street: profile.streetAddress,
+      city: profile.currentCity,
+      region: profile.currentRegion,
+      postalCode: profile.postalCode,
+      country: profile.currentCountry,
+    },
     links: {
       professionalProfile: profile.linkedinUrl,
       codeProfile: profile.githubUrl,
@@ -310,6 +317,16 @@ export function storedFacts(
     profile.currentCountry,
     "profile.currentCountry",
     "the country you live in",
+  );
+  add(profile.streetAddress, "profile.streetAddress", "your street address");
+  add(profile.postalCode, "profile.postalCode", "your postal code");
+  add(profile.dateOfBirth, "profile.dateOfBirth", "your date of birth");
+  profile.citizenshipCountries.forEach((country, index) =>
+    add(
+      country,
+      `profile.citizenshipCountries.${index}`,
+      index === 0 ? "your citizenship (passport country)" : "your citizenship",
+    ),
   );
   add(
     profile.linkedinUrl,

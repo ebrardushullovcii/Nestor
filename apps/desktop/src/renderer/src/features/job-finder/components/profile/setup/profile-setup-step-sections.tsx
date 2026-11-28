@@ -446,9 +446,10 @@ export function ProfileSetupEssentialsStep(props: {
       <CardHeader className="gap-2 border-b border-border/30 pb-5">
         <CardTitle>Basics</CardTitle>
         <CardDescription>
-          Name, contact details, location, links, and summary. These go on every
+          Name, contact details, address, links, and summary. These go on every
           resume and application, and they are the same fields you will find
-          later under Profile › Basics.
+          later under Profile › Basics. Date of birth, citizenship, street and
+          postal code are optional and only fill application forms.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 pt-6">
