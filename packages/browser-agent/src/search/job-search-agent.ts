@@ -1458,9 +1458,10 @@ async function runJobSearchAgentPrivate(
       })
     : [];
   const prompts = createJobSearchPrompts(config);
+  const mailboxFacts = await mailboxAccountFacts(hands);
   const messages: AgentLoopMessage[] = [
     { role: "system", content: prompts.system },
-    { role: "user", content: await mailboxAccountFacts(hands) },
+    { role: "user", content: mailboxFacts },
     { role: "user", content: prompts.user },
   ];
   if (config.sourceCatalog) {
@@ -1657,7 +1658,16 @@ async function runJobSearchAgentPrivate(
   ]);
   const loop = await runAgentLoop({
     messages,
-    model: llmClient,
+    model:
+      config.requestedListing || config.inventoryOnly
+        ? {
+            chatWithTools: (messages, tools, options) =>
+              llmClient.chatWithTools(messages, tools, {
+                ...options,
+                stableLead: mailboxFacts,
+              }),
+          }
+        : llmClient,
     tools: isSourceCheck
       ? tools
       : tools.map(

@@ -20,10 +20,15 @@ import {
   type JobSearchStatus,
   type ListingCard,
 } from "@nestor/contracts";
-import { openJobStore, type JobStore } from "@nestor/db/job-store";
+import {
+  createSearchSourcesStore,
+  openJobStore,
+  type JobStore,
+} from "@nestor/db/job-store";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { AiAccessWatch } from "../internal/ai-access-watch";
+import { createJobCommandRunner } from "../job-commands";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import type { JobSearchContext, JobSearchRunner } from "./types";
@@ -281,75 +286,97 @@ test("Stop on a parked search ends it as stopped", async () => {
   expect(runner.status().parked ?? null).toBeNull();
 });
 
-test("a rejected AI search request keeps its queue and resumes the same search on startup", async () => {
-  const { store, runner, engine, createRunner } = setup();
-  const request = vi
-    .fn()
-    .mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: { message: "Request schema rejected" } }),
-        { status: 400, headers: { "content-type": "application/json" } },
-      ),
-    )
-    .mockImplementation(() =>
-      Promise.resolve(
+test.each(["startup", "keep_reading"])(
+  "a rejected AI search request keeps its queue and resumes the same search through %s",
+  async (resume) => {
+    const { store, runner, engine, createRunner } = setup();
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: { content: '{"keep":{"0":1,"1":1,"2":1}}' },
-                finish_reason: "stop",
-              },
-            ],
-          }),
-          { headers: { "content-type": "application/json" } },
+          JSON.stringify({ error: { message: "Request schema rejected" } }),
+          { status: 400, headers: { "content-type": "application/json" } },
         ),
-      ),
+      )
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: { content: '{"keep":{"0":1,"1":1,"2":1}}' },
+                  finish_reason: "stop",
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", request);
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      baseUrl: "https://model.example.test/v1",
+      apiKey: "scripted",
+      model: "scripted",
+    });
+    engine.screenCards.mockImplementation((input) =>
+      screenListingCards({
+        client: { chatWithTools: client.chatWithTools.bind(client) },
+        cards: input.cards,
+        signal: input.signal,
+        goals: {
+          targetRoles: ["Backend Engineer"],
+          relatedRoles: [],
+          strategy: "wide_net",
+        },
+      }),
     );
-  vi.stubGlobal("fetch", request);
-  const client = createOpenAiCompatibleJobFinderAiClient({
-    baseUrl: "https://model.example.test/v1",
-    apiKey: "scripted",
-    model: "scripted",
-  });
-  engine.screenCards.mockImplementation((input) =>
-    screenListingCards({
-      client: { chatWithTools: client.chatWithTools.bind(client) },
-      cards: input.cards,
-      signal: input.signal,
-      goals: {
-        targetRoles: ["Backend Engineer"],
-        relatedRoles: [],
-        strategy: "wide_net",
-      },
-    }),
-  );
-  const started = await runner.start({ postedWithin: "any" });
-  const parked = await settledStatus(runner, (status) => !!status.parked);
-  expect(parked.parked).toMatchObject({
-    requestRejected: true,
-    message: NESTOR_REQUEST_REJECTED_MESSAGE,
-  });
-  expect(store.searches.get(started.id)).toMatchObject({
-    state: "running",
-    error: NESTOR_REQUEST_REJECTED_MESSAGE,
-  });
-  expect(parked.progress?.failed).toBe(0);
-  expect(request).toHaveBeenCalledOnce();
-  expect(engine.readListings).not.toHaveBeenCalled();
-  expect(aiAccessBlocks()).toEqual([]);
-  expect(checkAiAccessAgain()).toBe(false);
+    const started = await runner.start({ postedWithin: "any" });
+    const parked = await settledStatus(runner, (status) => !!status.parked);
+    expect(parked.parked).toMatchObject({
+      requestRejected: true,
+      message: NESTOR_REQUEST_REJECTED_MESSAGE,
+    });
+    expect(store.searches.get(started.id)).toMatchObject({
+      state: "running",
+      error: NESTOR_REQUEST_REJECTED_MESSAGE,
+    });
+    expect(parked.progress?.failed).toBe(0);
+    expect(parked.sources).toEqual([
+      expect.objectContaining({ sourceId: "one", state: "searching" }),
+    ]);
+    expect(createSearchSourcesStore(store).unfinishedIds(started.id)).toEqual(
+      [],
+    );
+    expect(request).toHaveBeenCalledOnce();
+    expect(engine.readListings).not.toHaveBeenCalled();
+    expect(aiAccessBlocks()).toEqual([]);
+    expect(checkAiAccessAgain()).toBe(false);
 
-  runner.suspend();
-  const restarted = createRunner();
-  const done = await settledStatus(
-    restarted,
-    (status) => status.search?.state === "done",
-  );
-  expect(done.search).toMatchObject({ id: started.id, error: null });
-  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(3);
-  expect(request).toHaveBeenCalledTimes(2);
-});
+    let continued = runner;
+    if (resume === "startup") {
+      runner.suspend();
+      continued = createRunner();
+    } else {
+      const runCommand = createJobCommandRunner({
+        store,
+        search: () => Promise.resolve(runner),
+      });
+      await expect(runCommand("keep_reading", {})).resolves.toMatchObject({
+        search: { id: started.id, state: "running", error: null },
+        parked: null,
+      });
+    }
+    const done = await settledStatus(
+      continued,
+      (status) => status.search?.state === "done",
+    );
+    expect(done.search).toMatchObject({ id: started.id, error: null });
+    expect(store.listJobs({ stage: "found" }).rows).toHaveLength(3);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(engine.readListings).toHaveBeenCalledOnce();
+  },
+);
 
 /** The AI account as a scripted transport leaves it, driven by the test. */
 function scriptedAccess() {

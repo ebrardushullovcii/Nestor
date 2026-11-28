@@ -202,11 +202,10 @@ export function createJobSearchRunner(
   // account is known to refuse still.
   if (fitRefused && aiAccess.status() !== "blocked") retryRefusedFit();
   /** The person said go: a parked search continues, and its calls go through now. */
-  const resumeForPerson = async (): Promise<void> => {
+  const resumeForPerson = (): Promise<JobSearchRecord> | null => {
     if (aiAccess.status() === "blocked") aiAccess.letCallsThrough();
     fitRequestRejected = false;
-    const resumed = resumeParked();
-    if (resumed) await resumed;
+    return resumeParked();
   };
   deps.store.onChange((change) => {
     if (fitLifetime.signal.aborted) return;
@@ -1052,7 +1051,8 @@ export function createJobSearchRunner(
     },
     async keepReading(id) {
       deps.onExplicitStart?.();
-      await resumeForPerson();
+      const resumed = await resumeForPerson();
+      if (resumed && id === undefined) return resumed;
       const ids =
         id !== undefined
           ? [String(id)]

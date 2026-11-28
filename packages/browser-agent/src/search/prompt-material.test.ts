@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  sharePageText,
   splitLinksOnEveryPage,
   textCoveredBy,
   withoutRepeatedBlocks,
@@ -62,6 +63,38 @@ describe("page material without its own copies", () => {
     expect(splitLinksOnEveryPage([[nav]])).toEqual({
       shared: [],
       own: [[nav]],
+    });
+  });
+
+  test("exact shared text can be reconstructed on each page, in order", () => {
+    const header = "All jobs\n\nPost a job\n";
+    const footer = "About\n\nContact support";
+    const input = [
+      `Role A\n\n${header}Responsibilities for role A\n${footer}`,
+      `Role B\n${header}Responsibilities for role B\n${header}More B\n${footer}`,
+      `Role C\n${header}Requirements unique to C\n${footer}`,
+    ];
+    const { shared, pages } = sharePageText(input);
+    expect(shared).toEqual([header, footer]);
+    expect(pages).toEqual([
+      ["Role A\n\n", 0, "Responsibilities for role A\n", 1],
+      ["Role B\n", 0, "Responsibilities for role B\n", 0, "More B\n", 1],
+      ["Role C\n", 0, "Requirements unique to C\n", 1],
+    ]);
+    expect(
+      pages.map((page) =>
+        typeof page === "string"
+          ? page
+          : page
+              .map((piece) =>
+                typeof piece === "number" ? shared[piece] : piece,
+              )
+              .join(""),
+      ),
+    ).toEqual(input);
+    expect(sharePageText([input[0]])).toEqual({
+      shared: [],
+      pages: [input[0]],
     });
   });
 });
