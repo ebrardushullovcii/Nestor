@@ -50,12 +50,27 @@ export const BrowserPasswordDeleteInputSchema = z
 export const BrowserPasswordAutofillInputSchema = z
   .object({ tabId: Id, credentialId: Id })
   .strict();
+const PasswordCount = z.number().int().nonnegative();
+export const BrowserPasswordImportCountsSchema = z.object({
+  added: PasswordCount,
+  updated: PasswordCount,
+  alreadySaved: PasswordCount,
+  locked: PasswordCount,
+  unsupportedEncryption: PasswordCount,
+  unreadable: PasswordCount,
+  invalid: PasswordCount,
+  couldNotSave: PasswordCount,
+});
+export type BrowserPasswordImportCounts = z.infer<
+  typeof BrowserPasswordImportCountsSchema
+>;
 export const BrowserPasswordImportResultSchema = z.object({
   status: z.enum(["imported", "cancelled", "unsupported", "failed"]),
-  added: z.number().int().nonnegative(),
-  updated: z.number().int().nonnegative(),
-  skipped: z.number().int().nonnegative(),
+  added: PasswordCount,
+  updated: PasswordCount,
+  skipped: PasswordCount,
   message: z.string(),
+  counts: BrowserPasswordImportCountsSchema.optional(),
 });
 export type BrowserPasswordImportResult = z.infer<
   typeof BrowserPasswordImportResultSchema

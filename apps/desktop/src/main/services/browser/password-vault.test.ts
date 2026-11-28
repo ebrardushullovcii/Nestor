@@ -7,7 +7,7 @@ import { createBrowserPasswordRepository } from "@nestor/db";
 import { PasswordVault, type PasswordEncryption } from "./password-vault";
 import {
   importPasswordCsv,
-  importPasswordValues,
+  savePasswordValues,
   parsePasswordCsv,
 } from "./password-csv";
 import { passwordOrigin, passwordOriginsMatch } from "./password-origin";
@@ -144,32 +144,24 @@ it("does not report an empty or wholly rejected password import as successful", 
       added: 0,
     });
     expect(
-      importPasswordValues(vault, [
+      savePasswordValues(vault, [
         {
           origin: "http://remote.test",
           username: "synthetic",
           password: "synthetic",
         },
       ]),
-    ).toMatchObject({ status: "failed", skipped: 1 });
+    ).toMatchObject({ couldNotSave: 1 });
     const value = {
       origin: "https://example.test",
       username: "synthetic",
       password: "synthetic",
     };
-    expect(importPasswordValues(vault, [value], 2)).toMatchObject({
-      status: "imported",
-      added: 1,
-      skipped: 2,
-    });
-    expect(importPasswordValues(vault, [value])).toMatchObject({
-      status: "imported",
+    expect(savePasswordValues(vault, [value])).toMatchObject({ added: 1 });
+    expect(savePasswordValues(vault, [value])).toMatchObject({
       added: 0,
-      skipped: 1,
+      alreadySaved: 1,
     });
-    expect(importPasswordValues(vault, [], 3).message).toContain(
-      "Import password CSV",
-    );
     expect(vault.list()).toHaveLength(1);
   } finally {
     repository.close();

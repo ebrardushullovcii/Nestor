@@ -44,32 +44,20 @@ export function parsePasswordCsv(text: string): string[][] {
   return rows;
 }
 
-export function importPasswordValues(
+export function savePasswordValues(
   vault: PasswordVault,
   values: readonly PasswordValue[],
-  skipped = 0,
-): BrowserPasswordImportResult {
-  const counts = { added: 0, updated: 0, skipped };
-  let failed = skipped;
+) {
+  const counts = { added: 0, updated: 0, alreadySaved: 0, couldNotSave: 0 };
   for (const value of values) {
     try {
-      counts[vault.save(value)]++;
+      const outcome = vault.save(value);
+      counts[outcome === "skipped" ? "alreadySaved" : outcome]++;
     } catch {
-      counts.skipped++;
-      failed++;
+      counts.couldNotSave++;
     }
   }
-  return {
-    status:
-      !counts.added &&
-      !counts.updated &&
-      counts.skipped === failed &&
-      (failed > 0 || values.length === 0)
-        ? "failed"
-        : "imported",
-    ...counts,
-    message: `Added ${counts.added}, updated ${counts.updated}, skipped ${counts.skipped} logins.${counts.skipped > 0 ? " Skipped records may be duplicates, invalid or protected. To bring over protected passwords, export them from your browser's password manager, then choose Import password CSV in Nestor. Imported passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed." : " Passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed."}`,
-  };
+  return counts;
 }
 
 export function importPasswordCsv(
@@ -107,5 +95,16 @@ export function importPasswordCsv(
     }
     values.push({ origin, username, password });
   }
-  return importPasswordValues(vault, values, skipped);
+  const { added, updated, alreadySaved, couldNotSave } = savePasswordValues(
+    vault,
+    values,
+  );
+  skipped += alreadySaved + couldNotSave;
+  return {
+    status: added || updated || alreadySaved ? "imported" : "failed",
+    added,
+    updated,
+    skipped,
+    message: `Added ${added}, updated ${updated}, skipped ${skipped} logins.${skipped > 0 ? " Skipped records may be duplicates, invalid or protected. To bring over protected passwords, export them from your browser's password manager, then choose Import password CSV in Nestor. Imported passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed." : " Passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed."}`,
+  };
 }

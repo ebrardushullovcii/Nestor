@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import type { CookiesSetDetails } from "electron";
 import { unprotectWindowsCurrentUserData } from "@nestor/os-integration";
 import type {
+  BrowserPasswordImportCounts,
   BrowserSignInSources,
   DesktopBrowserImportBrowser,
   DesktopBrowserImportInput,
@@ -300,7 +301,6 @@ interface ResolvedSource extends DesktopBrowserImportSource {
   cookiesPath: string | null;
   profileDirectory: string;
   family: BrowserFamily;
-  passwordCount: number;
 }
 
 // Source IDs cross IPC and must stay bounded even for deep profile paths.
@@ -341,13 +341,12 @@ async function windowsEncryptedKey(profileDirectory: string): Promise<Buffer> {
 async function passwordSupport(
   profileDirectory: string,
   env: ImportEnvironment,
-): Promise<DesktopBrowserImportSource["passwordImport"] & { count: number }> {
+): Promise<DesktopBrowserImportSource["passwordImport"]> {
   const files = await passwordFiles(profileDirectory);
   if (!files.length)
     return {
       supported: false,
       note: "No saved passwords in this profile.",
-      count: 0,
     };
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
   let count = 0;
@@ -384,7 +383,6 @@ async function passwordSupport(
       return {
         supported: false,
         note: "No saved passwords in this profile.",
-        count,
       };
     if (!readable || !["win32", "darwin", "linux"].includes(env.platform))
       return {
@@ -392,7 +390,6 @@ async function passwordSupport(
         note: protectedCount
           ? `Found ${count} saved password records; ${protectedCount} are locked to this browser by app-bound encryption. Export passwords from the browser's password manager, then choose Import password CSV in Nestor.`
           : PASSWORDS_LOCKED,
-        count,
       };
     if (env.platform === "win32") {
       const encrypted = await windowsEncryptedKey(profileDirectory);
@@ -400,7 +397,6 @@ async function passwordSupport(
     }
     return {
       supported: true,
-      count,
       note:
         env.platform === "darwin"
           ? "macOS asks for Keychain access to read saved passwords."
@@ -409,7 +405,6 @@ async function passwordSupport(
   } catch {
     return {
       supported: false,
-      count,
       note: "Passwords could not be read. Close the browser and try again, or import a CSV.",
     };
   } finally {
@@ -426,8 +421,7 @@ async function resolveSources(
       for (const profile of await chromiumProfiles(root)) {
         const cookiesPath = await chromiumCookiesPath(profile.directory);
         const support = await chromiumSupport(cookiesPath, env);
-        const { count: passwordCount, ...passwordImport } =
-          await passwordSupport(profile.directory, env);
+        const passwordImport = await passwordSupport(profile.directory, env);
         sources.push({
           id: sourceIdFor(`${family.browser}:${profile.directory}`),
           browser: family.browser,
@@ -436,7 +430,6 @@ async function resolveSources(
           supported: !!cookiesPath && support.supported,
           note: cookiesPath ? support.note : "No cookies in this profile.",
           passwordImport,
-          passwordCount,
           cookiesPath,
           profileDirectory: profile.directory,
           family,
@@ -454,7 +447,6 @@ async function resolveSources(
         supported: true,
         note: null,
         passwordImport: { supported: false, note: PASSWORDS_LOCKED },
-        passwordCount: 0,
         cookiesPath: path.join(profile.directory, "cookies.sqlite"),
         profileDirectory: profile.directory,
         family: FIREFOX_FAMILY,
@@ -468,11 +460,10 @@ export async function listBrowserImportSources(
   env: ImportEnvironment = defaultImportEnvironment(),
 ): Promise<DesktopBrowserImportSources> {
   const sources = (await resolveSources(env)).map(
-    ({ cookiesPath, profileDirectory, family, passwordCount, ...source }) => {
+    ({ cookiesPath, profileDirectory, family, ...source }) => {
       void cookiesPath;
       void profileDirectory;
       void family;
-      void passwordCount;
       return source;
     },
   );
@@ -480,7 +471,7 @@ export async function listBrowserImportSources(
     sources,
     note: sources.length
       ? null
-      : "No browser profiles with saved sign-ins or passwords were found on this device.",
+      : "No browser profiles with cookies or saved passwords were found on this device.",
   };
 }
 
@@ -587,27 +578,32 @@ export async function readBrowserPasswords(
   env: ImportEnvironment = defaultImportEnvironment(),
 ): Promise<{
   values: PasswordValue[];
-  skipped: number;
   unsupported: boolean;
-  diagnostics?: ImportDiagnostics;
+  counts: Pick<
+    BrowserPasswordImportCounts,
+    "locked" | "unsupportedEncryption" | "unreadable" | "invalid"
+  >;
 }> {
+  const counts = {
+    locked: 0,
+    unsupportedEncryption: 0,
+    unreadable: 0,
+    invalid: 0,
+  };
   const source = (await resolveSources(env)).find(
     (item) => item.id === sourceId,
   );
   if (!source || source.browser === "firefox")
-    return {
-      values: [],
-      skipped: source?.passwordCount ?? 0,
-      unsupported: true,
-    };
+    return { values: [], unsupported: true, counts };
   const key = !source.passwordImport.supported
     ? null
-    : env.platform === "win32"
-      ? await windowsPasswordKey(source.profileDirectory)
-      : await chromiumKey(source.family, env);
+    : await (
+        env.platform === "win32"
+          ? windowsPasswordKey(source.profileDirectory)
+          : chromiumKey(source.family, env)
+      ).catch(() => null);
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
   const values: PasswordValue[] = [];
-  const diagnostics = emptyDiagnostics();
   try {
     for (const file of await passwordFiles(source.profileDirectory)) {
       snapshot = await snapshotDatabase(file);
@@ -615,54 +611,48 @@ export async function readBrowserPasswords(
       try {
         const rows = db
           .prepare(
-            "SELECT origin_url, action_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
+            "SELECT origin_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
           )
           .all();
         for (const row of rows) {
-          diagnostics.found++;
           const encrypted = row.password_value;
           if (!(encrypted instanceof Uint8Array) || !encrypted.length) {
-            diagnostics.invalid++;
+            counts.invalid++;
             continue;
           }
           const prefix = Buffer.from(encrypted.subarray(0, 3)).toString(
             "latin1",
           );
           if (prefix === "v20") {
-            diagnostics.appBound++;
+            counts.locked++;
             continue;
           }
           if (
             prefix !== "v10" &&
             !(prefix === "v11" && env.platform === "darwin")
           ) {
-            diagnostics.unsupportedEncryption++;
+            counts.unsupportedEncryption++;
             continue;
           }
           const origin =
             typeof row.origin_url === "string"
               ? passwordOrigin(row.origin_url)
               : null;
-          const action =
-            typeof row.action_url === "string" && row.action_url
-              ? passwordOrigin(row.action_url)
-              : origin;
           const password = key
             ? decryptChromiumCookieValue(encrypted, key, "", 0, env.platform)
             : null;
           if (password === null) {
-            diagnostics.decryptFailed++;
+            counts.unreadable++;
             continue;
           }
           if (
             !origin ||
-            action !== origin ||
             !password ||
             typeof row.username_value !== "string" ||
             row.username_value.length > 1000 ||
             password.length > 10000
           ) {
-            diagnostics.invalid++;
+            counts.invalid++;
             continue;
           }
           values.push({ origin, username: row.username_value, password });
@@ -675,9 +665,8 @@ export async function readBrowserPasswords(
     }
     return {
       values,
-      skipped: diagnostics.found - values.length,
       unsupported: !source.passwordImport.supported,
-      diagnostics,
+      counts,
     };
   } finally {
     key?.fill(0);
@@ -1244,7 +1233,7 @@ export async function importSignInsByName(
       siteCount: 0,
       message: profiles.length
         ? `${label} has more than one profile here: ${profiles.map((source) => source.profileLabel).join(", ")}. Say which one.`
-        : `No ${label} profile with saved sign-ins was found on this device.`,
+        : `No ${label} profile with cookies was found on this device.`,
     };
   return importSignInsFromBrowser(host, { sourceId: chosen.id }, env);
 }
