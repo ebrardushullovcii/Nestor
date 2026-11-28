@@ -159,7 +159,7 @@ describe("the letter one application sends", () => {
     });
 
     expect(request.groundedIn.join("\n")).toContain(
-      "Resume sent with this application",
+      "Original imported resume",
     );
     expect(request.groundedIn.join("\n")).toContain("Saved sample letter");
     expect(request.prompt).toContain('"headline": "Platform engineer"');
@@ -186,9 +186,11 @@ describe("the letter one application sends", () => {
       "Use the original imported resume and saved profile to clarify how facts and qualifiers relate",
     );
     expect(request.prompt).toContain("Match the voice, not the content");
-    expect(request.prompt).toContain("Do not state anything else as fact");
     expect(request.prompt).toContain(
-      "must be supported by their resume or profile",
+      "Ground claims about skills, experience, achievements and qualifications in the saved Profile, original imported resume or a relevant confirmed answer.",
+    );
+    expect(request.prompt).toContain(
+      "A technology, rounded duration or other detail that appears only in the outgoing resume belongs to that document.",
     );
     expect(request.prompt).toContain(
       "never turn a job requirement into a claim that the person has done it",

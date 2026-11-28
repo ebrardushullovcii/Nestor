@@ -687,6 +687,10 @@ export async function runAgentApplicationPreparation(
         (executionInput.resumeArtifact.source === "original_upload"
           ? executionInput.profile.baseResume.textContent
           : null),
+      selectedResume: {
+        source: executionInput.resumeArtifact.source,
+        level: executionInput.resumeArtifact.level,
+      },
       posting: {
         title: executionInput.job.title,
         company: executionInput.job.company,

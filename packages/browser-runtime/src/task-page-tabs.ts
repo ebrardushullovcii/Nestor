@@ -11,6 +11,14 @@ const sessions = new WeakMap<Page, ApplyRawPageHands>();
 const activePages = new WeakMap<Page, () => Page>();
 const sendPages = new WeakMap<Page, Page>();
 
+const providerSessionProbes = [
+  {
+    provider: "LinkedIn",
+    url: "https://www.linkedin.com/feed/",
+    accountControl: '.global-nav__me, [data-test-global-nav-link="me"]',
+  },
+];
+
 /** The task tab the model works in now; the form tab itself otherwise. */
 export function activeTaskPage(primary: Page): Page {
   const page = activePages.get(primary)?.();
@@ -82,6 +90,7 @@ export function withTaskPageTabs(
     | "closeTab"
     | "closeAuxiliaryTabs"
     | "readMailboxSession"
+    | "readProviderSessions"
     | "readPage"
   > = {
     readPage: async () => ({
@@ -143,6 +152,15 @@ export function withTaskPageTabs(
       return { ok: true, url: active.url() };
     },
     closeAuxiliaryTabs,
+    readProviderSessions: () =>
+      Promise.all(
+        providerSessionProbes.map(
+          async ({ provider, url, accountControl }) => ({
+            provider,
+            status: await readProviderSession(primary, url, accountControl),
+          }),
+        ),
+      ),
     readMailboxSession: async () => {
       // The account label is non-secret. Never read or retain inbox messages
       // during this factual probe, and never infer sign-in from a cookie.
@@ -240,4 +258,42 @@ export function withTaskPageTabs(
   });
   sessions.set(primary, wrapped);
   return wrapped;
+}
+
+async function readProviderSession(
+  primary: Page,
+  url: string,
+  accountControl: string,
+): Promise<"signed_in" | "unknown"> {
+  const target = new URL(url);
+  const context = primary.context();
+  const atTarget = (page: Page) => {
+    const address = page.url();
+    if (!URL.canParse(address)) return false;
+    const current = new URL(address);
+    return (
+      current.origin === target.origin && current.pathname === target.pathname
+    );
+  };
+  let probe: Page | undefined;
+  try {
+    const existing = context.pages().find(atTarget);
+    if (!existing && !(await context.cookies(url)).length) return "unknown";
+    const page = existing ?? (probe = await context.newPage());
+    if (probe) {
+      markPrivateTracePage(probe);
+      await owners.get(primary)?.(probe);
+      await withNavigationLiveness(probe, () =>
+        page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 }),
+      );
+    }
+    if (!atTarget(page)) return "unknown";
+    return (await page.locator(accountControl).first().isVisible())
+      ? "signed_in"
+      : "unknown";
+  } catch {
+    return "unknown";
+  } finally {
+    await probe?.close().catch(() => undefined);
+  }
 }

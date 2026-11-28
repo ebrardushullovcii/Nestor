@@ -22,6 +22,30 @@ export async function mailboxAccountFacts(
   }
 }
 
+export async function signInSessionFacts(
+  hands: ApplyPageHands,
+): Promise<string> {
+  const [mailbox, providers] = await Promise.all([
+    mailboxAccountFacts(hands),
+    (async () => {
+      try {
+        return await hands.readProviderSessions?.();
+      } catch {
+        return undefined;
+      }
+    })(),
+  ]);
+  return [
+    mailbox,
+    ...(providers ?? []).map(({ provider, status }) =>
+      status === "signed_in"
+        ? `${provider} is signed in in this browser. The run-start read found its account menu.`
+        : `The run-start read did not confirm a ${provider} session in this browser.`,
+    ),
+    "For providers with unknown or unavailable session status, use any signed-in identity shown by the site's sign-in flow.",
+  ].join("\n");
+}
+
 /** Shared by application, search, source checks and sign-in page workflows. */
 export function createTabTools(
   hands: ApplyPageHands,

@@ -15,7 +15,7 @@ import type { ApplyAnswerSources, ApplyFormControl } from "./types";
  * form that asks for it in a box are the same request, and the person should
  * never end up having sent two different letters for the same job.
  *
- * Candidate claims must come from the outgoing resume and profile. The
+ * Candidate claims come from the saved applicant record. The
  * posting supplies employer and role context, not candidate experience.
  * The preference shapes how the letter reads; it never adds a fact.
  */
@@ -171,7 +171,7 @@ export function buildCoverLetterRequest(input: {
         .join(". "),
     ),
     profile.skills.length ? `Saved skills: ${profile.skills.join(", ")}` : null,
-    resumeText ? "Resume sent with this application" : null,
+    profile.baseResume.textContent ? "Original imported resume" : null,
     `Job context: ${sources.posting.title} at ${sources.posting.company}`,
     preference.sample ? "Saved sample letter (voice only)" : null,
   ].filter((value): value is string => Boolean(value));
@@ -180,8 +180,8 @@ export function buildCoverLetterRequest(input: {
     `Write a cover letter for ${sources.posting.title} at ${sources.posting.company}.`,
     "",
     "Rules:",
-    "- Claims about the person's skills, experience, achievements, and qualifications must be supported by their resume or profile. The posting describes the employer and role; it is not evidence of the person's experience. Do not state anything else as fact.",
-    "- Tie each result to the employer where the work history or resume places it. Saved proof points name no employer; never attach one to an employer from them alone.",
+    "- Ground claims about skills, experience, achievements and qualifications in the saved Profile, original imported resume or a relevant confirmed answer. Use the outgoing resume for context about how the person presents their experience. A technology, rounded duration or other detail that appears only in the outgoing resume belongs to that document. The posting describes the employer and role.",
+    "- Attribute each result to an employer only when the applicant record makes that connection. Saved proof points by themselves name no employer.",
     "- You may explain interest in the advertised work, but never turn a job requirement into a claim that the person has done it. Leave unsupported candidate claims out.",
     "- Use only the current saved profile name and contact details, even if the resume or sample has older or rejected details. Include the current saved email when one exists. Omit a missing contact detail; never recover it from the resume.",
     "- Compare this role’s employment type, hours and location with the person’s goals and availability. Do not repeat an incompatible generic career goal or promise hours or relocation they have not agreed to. State known material limits plainly. Do not ask the employer to accommodate incompatible hours, location or employment type unless the person has agreed to that wording for this application. If the role needs a change of intent, flag it for the person rather than claiming that change.",

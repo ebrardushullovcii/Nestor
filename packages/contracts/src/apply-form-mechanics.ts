@@ -454,6 +454,10 @@ export interface ApplyRawPageHands {
     | { status: "google_accounts_redirect" }
     | { status: "unknown" }
   >;
+  /** Non-secret sign-in observations from identity providers in this browser context. */
+  readProviderSessions?: () => Promise<
+    { provider: string; status: "signed_in" | "unknown" }[]
+  >;
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   listSavedCredentials?: () => Promise<BrowserPasswordsList>;
