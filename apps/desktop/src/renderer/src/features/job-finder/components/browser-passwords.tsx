@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { KeyRound, X } from "lucide-react";
 import { Dialog } from "@renderer/components/ui/dialog";
 import type {
+  BrowserPasswordImportResult,
   BrowserPasswordPrompt,
   DesktopBrowserBridge,
   BrowserPasswordsList,
@@ -68,6 +69,57 @@ export function BrowserPasswordOffer({
   );
 }
 
+function PasswordImportReceipt({
+  result,
+}: {
+  result: BrowserPasswordImportResult;
+}) {
+  const { counts, message } = result;
+  if (!counts)
+    return (
+      <p className="browser-import-result" role="status">
+        {message}
+      </p>
+    );
+  const lines = [
+    [counts.added, "Added"],
+    [counts.updated, "Updated"],
+    ...(
+      [
+        [counts.alreadySaved, "Already saved"],
+        [counts.locked, "Locked to the browser"],
+        [counts.unsupportedEncryption, "Unsupported encryption"],
+        [counts.unreadable, "Couldn’t be unlocked"],
+        [counts.invalid, "Invalid login records"],
+        [counts.couldNotSave, "Couldn’t be saved in Nestor"],
+      ] as const
+    ).filter(([count]) => count > 0),
+  ] as const;
+  return (
+    <div className="browser-import-result" role="status">
+      <div className="browser-import-result-body">
+        <div className="browser-import-counts browser-password-import-counts">
+          <ul aria-label="Password import counts">
+            {lines.map(([count, label]) => (
+              <li key={label}>
+                <span>{count.toLocaleString()}</span>
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {(counts.locked > 0 || counts.unreadable > 0) && (
+          <p>
+            To bring over locked or unreadable logins, export passwords from
+            your browser’s password manager, then choose Import password CSV.
+          </p>
+        )}
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
 export function BrowserPasswordPanel({
   bridge,
   tabId,
@@ -82,6 +134,11 @@ export function BrowserPasswordPanel({
   const [sources, setSources] = useState<DesktopBrowserImportSource[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [importResult, setImportResult] =
+    useState<BrowserPasswordImportResult | null>(null);
+  const passwordImportNote = sources.find(
+    (source) => source.passwordImport.supported && source.passwordImport.note,
+  )?.passwordImport.note;
   const refresh = () =>
     bridge.passwords.list(all || !tabId ? {} : { tabId }).then(setListed);
   useEffect(() => {
@@ -107,6 +164,7 @@ export function BrowserPasswordPanel({
   const run = (work: () => Promise<void>) => {
     setBusy(true);
     setMessage(null);
+    setImportResult(null);
     void work()
       .catch(() =>
         setMessage(
@@ -132,6 +190,7 @@ export function BrowserPasswordPanel({
             {message}
           </p>
         )}
+        {importResult && <PasswordImportReceipt result={importResult} />}
         <button
           type="button"
           className="browser-notice-action"
@@ -198,7 +257,7 @@ export function BrowserPasswordPanel({
             onClick={() =>
               run(async () => {
                 const result = await bridge.passwords.importCsv();
-                setMessage(result.message);
+                setImportResult(result);
                 await refresh();
               })
             }
@@ -213,9 +272,6 @@ export function BrowserPasswordPanel({
         </p>
         {sources.length > 0 && (
           <Disclosure summary="Import directly from a browser">
-            <p className="browser-password-help">
-              Windows browser protection and Firefox may require CSV instead.
-            </p>
             <div className="browser-import-list">
               {sources.map((source) => (
                 <button
@@ -227,13 +283,12 @@ export function BrowserPasswordPanel({
                     listed?.available === false ||
                     !source.passwordImport.supported
                   }
-                  title={source.passwordImport.note ?? undefined}
                   onClick={() =>
                     run(async () => {
                       const result = await bridge.passwords.importFromBrowser({
                         sourceId: source.id,
                       });
-                      setMessage(result.message);
+                      setImportResult(result);
                       await refresh();
                     })
                   }
@@ -251,6 +306,9 @@ export function BrowserPasswordPanel({
                 </button>
               ))}
             </div>
+            {passwordImportNote && (
+              <p className="browser-password-help">{passwordImportNote}</p>
+            )}
           </Disclosure>
         )}
       </div>

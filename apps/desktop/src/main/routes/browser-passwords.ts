@@ -5,6 +5,7 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { readFile, stat } from "node:fs/promises";
+import { traceEvent } from "@nestor/core/run-trace";
 import {
   BrowserPasswordsListInputSchema,
   BrowserPasswordsListSchema,
@@ -17,7 +18,7 @@ import {
 import type { EmbeddedBrowser } from "../services/browser/embedded-browser";
 import {
   importPasswordCsv,
-  importPasswordValues,
+  savePasswordValues,
 } from "../services/browser/password-csv";
 
 export function registerBrowserPasswordRoutes(
@@ -61,13 +62,12 @@ export function registerBrowserPasswordRoutes(
   const failure = (
     status: "failed" | "cancelled" | "unsupported",
     message: string,
-    skipped = 0,
   ) =>
     BrowserPasswordImportResultSchema.parse({
       status,
       added: 0,
       updated: 0,
-      skipped,
+      skipped: 0,
       message,
     });
   ipc.handle("browser-passwords:import-csv", async (event) => {
@@ -117,25 +117,48 @@ export function registerBrowserPasswordRoutes(
         const { readBrowserPasswords } =
           await import("../services/browser/browser-profile-import");
         const result = await readBrowserPasswords(sourceId);
-        if (result.unsupported)
-          return failure(
-            "unsupported",
-            "Direct password import is protected on this browser or device. In your browser's password manager, export passwords to CSV, then choose Import password CSV here.",
-            result.skipped,
-          );
-        if (!result.values.length && result.skipped)
-          return BrowserPasswordImportResultSchema.parse({
-            status: "unsupported",
-            added: 0,
-            updated: 0,
-            skipped: result.skipped,
-            message:
-              "This browser's saved passwords could not be decrypted. Export passwords from its password manager, then choose Import password CSV here.",
-          });
         try {
-          return BrowserPasswordImportResultSchema.parse(
-            importPasswordValues(vault, result.values, result.skipped),
-          );
+          const counts = {
+            ...savePasswordValues(vault, result.values),
+            ...result.counts,
+          };
+          const {
+            added,
+            updated,
+            alreadySaved,
+            locked,
+            unsupportedEncryption,
+            unreadable,
+            invalid,
+            couldNotSave,
+          } = counts;
+          const imported = added + updated + alreadySaved > 0;
+          const status = imported
+            ? "imported"
+            : result.unsupported ||
+                locked ||
+                unsupportedEncryption ||
+                unreadable
+              ? "unsupported"
+              : "failed";
+          const receipt = BrowserPasswordImportResultSchema.parse({
+            status,
+            added,
+            updated,
+            skipped:
+              alreadySaved +
+              locked +
+              unsupportedEncryption +
+              unreadable +
+              invalid +
+              couldNotSave,
+            counts,
+            message: imported
+              ? "Passwords do not bring over signed-in sessions. Sign in to the site in Nestor when needed."
+              : "No logins were imported from this browser profile.",
+          });
+          traceEvent("browser_password_import_result", counts);
+          return receipt;
         } finally {
           // JS strings cannot be zeroed; release references immediately after saving.
           for (const value of result.values) value.password = "";
@@ -144,7 +167,7 @@ export function registerBrowserPasswordRoutes(
       } catch {
         return failure(
           "failed",
-          "Passwords could not be read from this browser. Export them from its password manager, then choose Import password CSV here.",
+          "Passwords could not be read from this browser. Close the browser and try importing again.",
         );
       }
     },

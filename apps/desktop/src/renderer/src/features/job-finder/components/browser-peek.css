@@ -891,6 +891,10 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   color: var(--foreground);
   font-weight: 560;
 }
+.browser-password-import-counts {
+  padding-top: 0;
+  border-top: 0;
+}
 .browser-import-counts ul {
   display: grid;
   gap: 2px;

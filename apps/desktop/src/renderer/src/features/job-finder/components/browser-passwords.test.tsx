@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type {
   BrowserPasswordMetadata,
@@ -123,6 +124,8 @@ it("lists metadata, deletes one login and imports via native picker with counts 
 
 it("disables locked password profiles with a reason while leaving v10 profiles and CSV clickable", async () => {
   const { bridge, passwords, listSources } = setup();
+  const keychainNote =
+    "macOS asks for Keychain access to read saved passwords.";
   listSources.mockResolvedValue({
     sources: [
       {
@@ -144,18 +147,38 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
         profileLabel: "Profile 1",
         supported: false,
         note: "Sign-ins locked",
-        passwordImport: { supported: true, note: null },
+        passwordImport: { supported: true, note: keychainNote },
+      },
+      {
+        id: "readable-2",
+        browser: "edge",
+        browserLabel: "Microsoft Edge",
+        profileLabel: "Profile 2",
+        supported: false,
+        note: "Sign-ins locked",
+        passwordImport: { supported: true, note: keychainNote },
       },
     ],
     note: null,
   });
-  passwords.importFromBrowser.mockResolvedValue({
+  const result = {
     status: "imported",
     added: 1,
-    updated: 0,
-    skipped: 2,
-    message: "Added 1, updated 0, skipped 2 logins.",
-  });
+    updated: 2,
+    skipped: 7,
+    counts: {
+      added: 1,
+      updated: 2,
+      alreadySaved: 3,
+      locked: 0,
+      unsupportedEncryption: 1,
+      unreadable: 0,
+      invalid: 2,
+      couldNotSave: 1,
+    },
+    message: "Sign in to the site in Nestor when needed.",
+  };
+  passwords.importFromBrowser.mockResolvedValueOnce(result);
   render(<BrowserPasswordPanel bridge={bridge} tabId="tab" close={vi.fn()} />);
   await screen.findByText("Import directly from a browser");
   fireEvent.click(screen.getByText("Import directly from a browser"));
@@ -163,8 +186,10 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     name: /Google Chrome/,
   });
   const readable = screen.getByRole<HTMLButtonElement>("button", {
-    name: /Microsoft Edge/,
+    name: /Microsoft Edge Profile 1/,
   });
+  expect(screen.getAllByText(keychainNote)).toHaveLength(1);
+  expect(screen.queryByTitle(keychainNote)).toBeNull();
   expect(locked.disabled).toBe(true);
   expect(locked.textContent).toContain(
     "locked to itself. Export a CSV instead.",
@@ -178,8 +203,39 @@ it("disables locked password profiles with a reason while leaving v10 profiles a
     }).disabled,
   ).toBe(false);
   fireEvent.click(readable);
-  await screen.findByText("Added 1, updated 0, skipped 2 logins.");
+  const receipt = within(await screen.findByRole("status"));
+  expect(
+    receipt.getAllByRole("listitem").map((line) => line.textContent),
+  ).toEqual([
+    "1Added",
+    "2Updated",
+    "3Already saved",
+    "1Unsupported encryption",
+    "2Invalid login records",
+    "1Couldn’t be saved in Nestor",
+  ]);
+  expect(receipt.queryByText(/choose Import password CSV/i)).toBeNull();
   expect(passwords.importFromBrowser).toHaveBeenCalledExactlyOnceWith({
     sourceId: "readable",
   });
+
+  for (const counts of [
+    { ...result.counts, locked: 4 },
+    { ...result.counts, unreadable: 5 },
+  ]) {
+    await waitFor(() => expect(readable.disabled).toBe(false));
+    passwords.importFromBrowser.mockResolvedValueOnce({
+      ...result,
+      counts,
+      skipped: 7 + counts.locked + counts.unreadable,
+    });
+    fireEvent.click(readable);
+    const nextReceipt = within(await screen.findByRole("status"));
+    expect(nextReceipt.getByText(/choose Import password CSV/i)).toBeTruthy();
+    expect(
+      nextReceipt.getByText(
+        counts.locked ? "Locked to the browser" : "Couldn’t be unlocked",
+      ),
+    ).toBeTruthy();
+  }
 });

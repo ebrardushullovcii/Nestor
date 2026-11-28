@@ -137,7 +137,12 @@ describe("Windows profile passwords", () => {
     source = (await listBrowserImportSources(env)).sources[0]!;
     const result = await readBrowserPasswords(source.id, env);
     expect(result.values).toHaveLength(2);
-    expect(result.diagnostics?.found).toBe(2);
+    expect(result.counts).toEqual({
+      locked: 0,
+      unreadable: 0,
+      invalid: 0,
+      unsupportedEncryption: 0,
+    });
   });
 
   test("reports protected and empty rows across both stores without requesting a key", async () => {
@@ -157,15 +162,11 @@ describe("Windows profile passwords", () => {
     const result = await readBrowserPasswords(source.id, env);
     expect(result).toMatchObject({
       values: [],
-      skipped: 4,
       unsupported: true,
-      diagnostics: {
-        found: 4,
-        appBound: 2,
+      counts: {
+        locked: 2,
         invalid: 2,
-        expired: 0,
-        partitioned: 0,
-        decryptFailed: 0,
+        unreadable: 0,
         unsupportedEncryption: 0,
       },
     });
@@ -204,7 +205,7 @@ describe("Windows profile passwords", () => {
     expect(JSON.stringify(sources)).not.toContain(env.home);
     const locked = await readBrowserPasswords(sources[0]!.id, env);
     expect(locked.unsupported).toBe(true);
-    expect(locked.skipped).toBe(1);
+    expect(locked.counts.locked).toBe(1);
     expect(dpapi).not.toHaveBeenCalled();
   });
 
@@ -239,14 +240,10 @@ describe("Windows profile passwords", () => {
           password: "synthetic-only",
         },
       ],
-      skipped: 4,
       unsupported: false,
-      diagnostics: {
-        found: 5,
-        appBound: 1,
-        decryptFailed: 2,
-        expired: 0,
-        partitioned: 0,
+      counts: {
+        locked: 1,
+        unreadable: 2,
         invalid: 0,
         unsupportedEncryption: 1,
       },
@@ -255,7 +252,7 @@ describe("Windows profile passwords", () => {
     expect(unwrapped.every((byte) => byte === 0)).toBe(true);
   });
 
-  test("rejects a missing DPAPI prefix, failed unprotect and wrong key size without using app-bound keys", async () => {
+  test("counts passwords as unreadable when the DPAPI key is unavailable", async () => {
     const key = Buffer.alloc(32, 4);
     const { env, root } = await windowsProfiles(
       { Default: [encryptWindows("synthetic", key)] },
@@ -263,7 +260,11 @@ describe("Windows profile passwords", () => {
     );
     let source = (await listBrowserImportSources(env)).sources[0]!;
     expect(source.passwordImport.supported).toBe(false);
-    expect((await readBrowserPasswords(source.id, env)).unsupported).toBe(true);
+    expect(await readBrowserPasswords(source.id, env)).toMatchObject({
+      values: [],
+      unsupported: true,
+      counts: { unreadable: 1 },
+    });
     expect(dpapi).not.toHaveBeenCalled();
     await writeFile(
       path.join(root, "Local State"),
@@ -277,14 +278,16 @@ describe("Windows profile passwords", () => {
     );
     source = (await listBrowserImportSources(env)).sources[0]!;
     dpapi.mockRejectedValueOnce(new Error("Windows key access failed."));
-    await expect(readBrowserPasswords(source.id, env)).rejects.toThrow(
-      "Windows key access failed.",
-    );
+    expect(await readBrowserPasswords(source.id, env)).toMatchObject({
+      values: [],
+      counts: { unreadable: 1 },
+    });
     const wrongKey = Buffer.alloc(16, 3);
     dpapi.mockResolvedValueOnce(wrongKey);
-    await expect(readBrowserPasswords(source.id, env)).rejects.toThrow(
-      "Windows key is unavailable.",
-    );
+    expect(await readBrowserPasswords(source.id, env)).toMatchObject({
+      values: [],
+      counts: { unreadable: 1 },
+    });
     expect(wrongKey.every((byte) => byte === 0)).toBe(true);
   });
 });
@@ -599,7 +602,7 @@ test("an unreadable WAL fails the snapshot instead of silently importing an inco
   await expect(snapshotDatabase(file)).rejects.toThrow();
 });
 
-test("imports only explicitly chosen synthetic Chromium passwords and reports Windows CSV fallback", async () => {
+test("imports a cross-origin form under its saved site and rejects an invalid saved site", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "nestor-password-import-"));
   temporary.push(home);
   const directory = path.join(home, ".config/google-chrome/Default");
@@ -624,7 +627,7 @@ test("imports only explicitly chosen synthetic Chromium passwords and reports Wi
     encrypt(Buffer.from("synthetic-only"), key),
   );
   insert.run(
-    "https://example.test",
+    "https://cross-origin.test/sign-in",
     "https://foreign.test",
     "synthetic",
     encrypt(Buffer.from("synthetic-only"), key),
@@ -633,9 +636,12 @@ test("imports only explicitly chosen synthetic Chromium passwords and reports Wi
   const env: ImportEnvironment = { platform: "linux", home };
   const source = (await listBrowserImportSources(env)).sources[0]!;
   const result = await readBrowserPasswords(source.id, env);
-  expect(result.values.length).toBe(1);
-  expect(result.values[0]?.password === "synthetic-only").toBe(true);
-  expect(result.skipped).toBe(2);
+  expect(result.values.length).toBe(2);
+  expect(result.values[1]?.origin === "https://cross-origin.test").toBe(true);
+  expect(
+    result.values.every((value) => value.password === "synthetic-only"),
+  ).toBe(true);
+  expect(result.counts.invalid).toBe(1);
   expect(result.unsupported).toBe(false);
   const fallback = await readBrowserPasswords(source.id, {
     platform: "win32",
@@ -643,7 +649,7 @@ test("imports only explicitly chosen synthetic Chromium passwords and reports Wi
     localAppData: home,
     appData: home,
   });
-  expect(fallback).toEqual({ values: [], skipped: 0, unsupported: true });
+  expect(fallback).toMatchObject({ values: [], unsupported: true });
 });
 
 describe("browser profile import", () => {
