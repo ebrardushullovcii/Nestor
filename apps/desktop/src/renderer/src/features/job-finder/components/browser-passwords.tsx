@@ -90,7 +90,13 @@ function PasswordImportReceipt({
         [counts.locked, "Locked to the browser"],
         [counts.unsupportedEncryption, "Unsupported encryption"],
         [counts.unreadable, "Couldn’t be unlocked"],
-        [counts.invalid, "Invalid login records"],
+        [
+          counts.insecureHttp,
+          "For sites without HTTPS that Nestor doesn’t fill",
+        ],
+        [counts.androidApp, "For Android apps"],
+        [counts.unsupportedOrigin, "Other unsupported login addresses"],
+        [counts.invalid, "Empty or damaged login records"],
         [counts.couldNotSave, "Couldn’t be saved in Nestor"],
       ] as const
     ).filter(([count]) => count > 0),

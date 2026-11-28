@@ -28,7 +28,7 @@ import type {
 } from "@nestor/contracts";
 import type { EmbeddedBrowser } from "./embedded-browser";
 import type { PasswordValue } from "./password-vault";
-import { passwordOrigin } from "./password-origin";
+import { passwordImportOrigin } from "./password-origin";
 
 /**
  * Brings sign-ins over from a browser profile already on this device, the
@@ -579,16 +579,20 @@ export async function readBrowserPasswords(
 ): Promise<{
   values: PasswordValue[];
   unsupported: boolean;
-  counts: Pick<
+  counts: Omit<
     BrowserPasswordImportCounts,
-    "locked" | "unsupportedEncryption" | "unreadable" | "invalid"
+    "added" | "updated" | "alreadySaved"
   >;
 }> {
   const counts = {
     locked: 0,
     unsupportedEncryption: 0,
     unreadable: 0,
+    insecureHttp: 0,
+    androidApp: 0,
+    unsupportedOrigin: 0,
     invalid: 0,
+    couldNotSave: 0,
   };
   const source = (await resolveSources(env)).find(
     (item) => item.id === sourceId,
@@ -634,10 +638,6 @@ export async function readBrowserPasswords(
             counts.unsupportedEncryption++;
             continue;
           }
-          const origin =
-            typeof row.origin_url === "string"
-              ? passwordOrigin(row.origin_url)
-              : null;
           const password = key
             ? decryptChromiumCookieValue(encrypted, key, "", 0, env.platform)
             : null;
@@ -645,17 +645,26 @@ export async function readBrowserPasswords(
             counts.unreadable++;
             continue;
           }
-          if (
-            !origin ||
-            !password ||
-            typeof row.username_value !== "string" ||
-            row.username_value.length > 1000 ||
-            password.length > 10000
-          ) {
+          if (!password || typeof row.username_value !== "string") {
             counts.invalid++;
             continue;
           }
-          values.push({ origin, username: row.username_value, password });
+          const origin = passwordImportOrigin(
+            typeof row.origin_url === "string" ? row.origin_url : "",
+          );
+          if ("skipped" in origin) {
+            counts[origin.skipped]++;
+            continue;
+          }
+          if (row.username_value.length > 1000 || password.length > 10000) {
+            counts.couldNotSave++;
+            continue;
+          }
+          values.push({
+            origin: origin.origin,
+            username: row.username_value,
+            password,
+          });
         }
       } finally {
         db.close();

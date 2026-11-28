@@ -1,6 +1,9 @@
-import type { BrowserPasswordImportResult } from "@nestor/contracts";
+import type {
+  BrowserPasswordImportCounts,
+  BrowserPasswordImportResult,
+} from "@nestor/contracts";
 import type { PasswordVault, PasswordValue } from "./password-vault";
-import { passwordOrigin } from "./password-origin";
+import { passwordImportOrigin } from "./password-origin";
 
 /** RFC 4180 fields, including escaped quotes and embedded CR/LF. Errors never quote input. */
 export function parsePasswordCsv(text: string): string[][] {
@@ -60,6 +63,13 @@ export function savePasswordValues(
   return counts;
 }
 
+export function countSkippedPasswordImports(
+  counts: BrowserPasswordImportCounts,
+) {
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  return total - counts.added - counts.updated;
+}
+
 export function importPasswordCsv(
   vault: PasswordVault,
   text: string,
@@ -78,33 +88,50 @@ export function importPasswordCsv(
       "Choose a Chrome, Edge or Firefox password CSV with URL, username and password columns.",
     );
   const values: PasswordValue[] = [];
-  let skipped = 0;
+  const rejected = {
+    locked: 0,
+    unsupportedEncryption: 0,
+    unreadable: 0,
+    insecureHttp: 0,
+    androidApp: 0,
+    unsupportedOrigin: 0,
+    invalid: 0,
+    couldNotSave: 0,
+  };
   for (const row of rows) {
-    const origin = passwordOrigin(row[urlIndex] ?? ""),
-      username = row[usernameIndex],
+    const username = row[usernameIndex],
       password = row[passwordIndex];
-    if (
-      !origin ||
-      username === undefined ||
-      !password ||
-      username.length > 1000 ||
-      password.length > 10000
-    ) {
-      skipped++;
+    if (username === undefined || !password) {
+      rejected.invalid++;
       continue;
     }
-    values.push({ origin, username, password });
+    const origin = passwordImportOrigin(row[urlIndex] ?? "");
+    if ("skipped" in origin) {
+      rejected[origin.skipped]++;
+      continue;
+    }
+    if (username.length > 1000 || password.length > 10000) {
+      rejected.couldNotSave++;
+      continue;
+    }
+    values.push({ origin: origin.origin, username, password });
   }
-  const { added, updated, alreadySaved, couldNotSave } = savePasswordValues(
-    vault,
-    values,
-  );
-  skipped += alreadySaved + couldNotSave;
+  const saved = savePasswordValues(vault, values);
+  const counts = {
+    ...rejected,
+    ...saved,
+    couldNotSave: rejected.couldNotSave + saved.couldNotSave,
+  };
+  const { added, updated, alreadySaved } = counts;
+  const imported = added + updated + alreadySaved > 0;
   return {
-    status: added || updated || alreadySaved ? "imported" : "failed",
+    status: imported ? "imported" : "failed",
     added,
     updated,
-    skipped,
-    message: `Added ${added}, updated ${updated}, skipped ${skipped} logins.${skipped > 0 ? " Skipped records may be duplicates, invalid or protected. To bring over protected passwords, export them from your browser's password manager, then choose Import password CSV in Nestor. Imported passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed." : " Passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed."}`,
+    skipped: countSkippedPasswordImports(counts),
+    counts,
+    message: imported
+      ? "Passwords do not bring over signed-in sessions. Sign in to the site in Nestor when needed."
+      : "No logins were imported from this CSV.",
   };
 }

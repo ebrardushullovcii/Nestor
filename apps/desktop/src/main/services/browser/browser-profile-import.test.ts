@@ -142,6 +142,10 @@ describe("Windows profile passwords", () => {
       unreadable: 0,
       invalid: 0,
       unsupportedEncryption: 0,
+      insecureHttp: 0,
+      androidApp: 0,
+      unsupportedOrigin: 0,
+      couldNotSave: 0,
     });
   });
 
@@ -246,6 +250,10 @@ describe("Windows profile passwords", () => {
         unreadable: 2,
         invalid: 0,
         unsupportedEncryption: 1,
+        insecureHttp: 0,
+        androidApp: 0,
+        unsupportedOrigin: 0,
+        couldNotSave: 0,
       },
     });
     expect(dpapi).toHaveBeenCalledOnce();
@@ -602,7 +610,7 @@ test("an unreadable WAL fails the snapshot instead of silently importing an inco
   await expect(snapshotDatabase(file)).rejects.toThrow();
 });
 
-test("imports a cross-origin form under its saved site and rejects an invalid saved site", async () => {
+test("reports skipped password origins separately and imports under the saved site", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "nestor-password-import-"));
   temporary.push(home);
   const directory = path.join(home, ".config/google-chrome/Default");
@@ -621,27 +629,50 @@ test("imports a cross-origin form under its saved site and rejects an invalid sa
     encrypt(Buffer.from("synthetic-only"), key),
   );
   insert.run(
-    "http://remote.test",
-    "http://remote.test",
-    "synthetic",
-    encrypt(Buffer.from("synthetic-only"), key),
-  );
-  insert.run(
     "https://cross-origin.test/sign-in",
     "https://foreign.test",
     "synthetic",
     encrypt(Buffer.from("synthetic-only"), key),
   );
+  for (const origin of [
+    "http://localhost:8080/sign-in",
+    "http://remote.test",
+    "android://fixture@com.example.fixture/",
+    "ftp://example.test",
+    "malformed-origin",
+  ]) {
+    insert.run(
+      origin,
+      origin,
+      "synthetic",
+      encrypt(Buffer.from("synthetic-only"), key),
+    );
+  }
+  insert.run(
+    "https://long.test",
+    "https://long.test",
+    "synthetic",
+    encrypt(Buffer.from("x".repeat(10001)), key),
+  );
   db.close();
   const env: ImportEnvironment = { platform: "linux", home };
   const source = (await listBrowserImportSources(env)).sources[0]!;
   const result = await readBrowserPasswords(source.id, env);
-  expect(result.values.length).toBe(2);
-  expect(result.values[1]?.origin === "https://cross-origin.test").toBe(true);
+  expect(result.values.map((value) => value.origin)).toEqual([
+    "https://example.test",
+    "https://cross-origin.test",
+    "http://localhost:8080",
+  ]);
   expect(
     result.values.every((value) => value.password === "synthetic-only"),
   ).toBe(true);
-  expect(result.counts.invalid).toBe(1);
+  expect(result.counts).toMatchObject({
+    insecureHttp: 1,
+    androidApp: 1,
+    unsupportedOrigin: 1,
+    invalid: 1,
+    couldNotSave: 1,
+  });
   expect(result.unsupported).toBe(false);
   const fallback = await readBrowserPasswords(source.id, {
     platform: "win32",
