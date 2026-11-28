@@ -3888,6 +3888,26 @@ export function createBrowserAgentRuntime(
         }
 
         const searchMechanics = createPlaywrightApplyPageMechanics(page);
+        const fillCredential =
+          (fill: AgentDiscoveryOptions["fillSavedCredential"]) =>
+          async (ref: string, credentialId: string) => {
+            const raw = await searchMechanics.readPage();
+            const control = raw.controls.find(
+              (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+            );
+            return control && fill
+              ? fill({
+                  url: raw.url ?? "",
+                  credentialId,
+                  target: {
+                    controlIndex: control.index,
+                    id: control.id,
+                    name: control.name,
+                    ...(control.frame ? { frame: control.frame } : {}),
+                  },
+                })
+              : false;
+          };
         configureTaskPageOwner(page, agentOptions.onAutomationPage);
         const result = await runJobSearchAgent({
           modelContextWindowTokens:
@@ -3903,24 +3923,18 @@ export function createBrowserAgentRuntime(
                 credentials: [],
                 message: "The vault is unavailable.",
               },
-            fillSavedCredential: async (ref, credentialId) => {
-              const raw = await searchMechanics.readPage();
-              const c = raw.controls.find(
-                (entry) => (entry.ref ?? `c${entry.index}`) === ref,
-              );
-              return c && agentOptions.fillSavedCredential
-                ? agentOptions.fillSavedCredential({
-                    url: raw.url ?? "",
-                    credentialId,
-                    target: {
-                      controlIndex: c.index,
-                      id: c.id,
-                      name: c.name,
-                      ...(c.frame ? { frame: c.frame } : {}),
-                    },
-                  })
-                : false;
-            },
+            fillSavedCredential: fillCredential(
+              agentOptions.fillSavedCredential,
+            ),
+            listAccountDrafts: async () =>
+              agentOptions.listAccountDrafts?.(
+                (await searchMechanics.readPage()).url ?? "",
+              ) ?? {
+                available: false,
+                credentials: [],
+                message: "The vault is unavailable.",
+              },
+            fillAccountDraft: fillCredential(agentOptions.fillAccountDraft),
             generateAccountCredential: async ({ username, passwordRefs }) => {
               const raw = await searchMechanics.readPage();
               const targets = passwordRefs.flatMap((ref) => {

@@ -5,38 +5,20 @@ import type {
   WebContents,
   WebFrameMain,
 } from "electron";
-import type {
-  BrowserPasswordRepository,
-  EncryptedBrowserPassword,
-} from "@nestor/db";
+import { createBrowserPasswordRepository } from "@nestor/db";
 import { PasswordVault } from "./password-vault";
 import { BrowserPasswords } from "./browser-passwords";
 vi.mock("electron", () => ({ app: {}, safeStorage: {} }));
+const repositories: ReturnType<typeof createBrowserPasswordRepository>[] = [];
 afterEach(() => {
+  for (const repository of repositories.splice(0)) repository.close();
   vi.useRealTimers();
 });
 
 function setup() {
   vi.useFakeTimers();
-  const rows = new Map<string, EncryptedBrowserPassword>();
-  const repository: BrowserPasswordRepository = {
-    list: () =>
-      [...rows.values()].map((row) => ({
-        id: row.id,
-        origin: row.origin,
-        username: row.username,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })),
-    get: (id) => rows.get(id) ?? null,
-    put: (row) => {
-      rows.set(row.id, row);
-    },
-    delete: (id) => {
-      rows.delete(id);
-    },
-    close: () => undefined,
-  };
+  const repository = createBrowserPasswordRepository(":memory:");
+  repositories.push(repository);
   // Test transport only, never used by production or written to disk.
   const vault = new PasswordVault(repository, {
     isEncryptionAvailable: () => true,
@@ -154,13 +136,17 @@ it("keeps rejected signup drafts out of the vault and saves only accepted logins
   const created = await draft();
   expect(created.ok).toBe(true);
   const credentialId = created.credentialId!;
-  const secret = vault.readAccountDraft("tab", credentialId)!.password;
+  const secret = vault.readAccountDraft(capture.origin, credentialId)!.password;
   expect(secret.length).toBe(24);
   for (const pattern of [/[A-Z]/u, /[a-z]/u, /[0-9]/u, /[!@#$%*_-]/u])
     expect(pattern.test(secret)).toBe(true);
   expect(JSON.stringify(created)).not.toContain(secret);
   expect(frame.send.mock.calls).toHaveLength(2);
   expect(vault.read(credentialId)).toBeNull();
+  expect(await manager.autofill("tab", credentialId, true, targets[0])).toBe(
+    false,
+  );
+  expect(await manager.autofill("tab", credentialId)).toBe(false);
   expect(manager.list("tab").credentials.map(({ id }) => id)).toEqual([
     originalId,
   ]);
@@ -186,19 +172,22 @@ it("keeps rejected signup drafts out of the vault and saves only accepted logins
       outcome: "discarded",
     }),
   ).toBe(true);
-  expect(vault.readAccountDraft("tab", credentialId)).toBeUndefined();
+  expect(vault.readAccountDraft(capture.origin, credentialId)).toBeNull();
   expect(vault.read(originalId)?.password).toBe(capture.password);
 
   const accepted = (await draft()).credentialId!;
   expect(accepted).not.toBe(credentialId);
-  const acceptedPassword = vault.readAccountDraft("tab", accepted)!.password;
+  const acceptedPassword = vault.readAccountDraft(
+    capture.origin,
+    accepted,
+  )!.password;
   expect(
     manager.resolveAccountCredential("tab", {
       credentialId: accepted,
       outcome: "accepted",
     }),
   ).toBe(true);
-  expect(vault.readAccountDraft("tab", accepted)).toBeUndefined();
+  expect(vault.readAccountDraft(capture.origin, accepted)).toBeNull();
   expect(vault.read(originalId)?.password).toBe(acceptedPassword);
   expect(await manager.autofill("tab", originalId, true, targets[0])).toBe(
     true,

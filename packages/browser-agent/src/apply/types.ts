@@ -334,6 +334,8 @@ export interface ApplyPageHands {
   pointer?: ApplyRawPageHands["pointer"];
   generateAccountCredential?: ApplyRawPageHands["generateAccountCredential"];
   resolveAccountCredential?: ApplyRawPageHands["resolveAccountCredential"];
+  listAccountDrafts?: ApplyRawPageHands["listAccountDrafts"];
+  fillAccountDraft?: ApplyRawPageHands["fillAccountDraft"];
   openTab?: ApplyRawPageHands["openTab"];
   switchTab?: ApplyRawPageHands["switchTab"];
   closeTab?: ApplyRawPageHands["closeTab"];

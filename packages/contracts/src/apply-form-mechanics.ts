@@ -442,6 +442,8 @@ export interface ApplyRawPageHands {
   resolveAccountCredential?: (
     input: BrowserResolveAccountInput,
   ) => Promise<boolean>;
+  listAccountDrafts?: () => Promise<BrowserPasswordsList>;
+  fillAccountDraft?: (ref: string, credentialId: string) => Promise<boolean>;
   openTab?: (url: string) => Promise<ApplyNavigationResult>;
   switchTab?: (tabId: string) => Promise<ApplyNavigationResult>;
   closeTab?: (tabId: string) => Promise<ApplyNavigationResult>;

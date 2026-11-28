@@ -23,21 +23,22 @@ import {
   type ApplyAgentConfig,
 } from "@nestor/browser-agent";
 import { createPlaywrightApplyPageMechanics } from "@nestor/browser-runtime";
-import { PasswordVault } from "./password-vault";
+import { PasswordVault, type PasswordEncryption } from "./password-vault";
 import { BrowserPasswords } from "./browser-passwords";
 vi.mock("electron", () => ({ app: {}, safeStorage: {} }));
 
-test("a new-account replica accepts the vault-generated password and later signs in, without putting it in model transcripts or evidence", async () => {
+test("recovers an accepted signup after restarting before the draft was resolved", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vault-account-replica-"));
   vi.stubEnv("NESTOR_RUN_TRACE_DIR", dir);
   let server: ChildProcess | undefined;
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  let context = await browser.newContext();
+  let page = await context.newPage();
+  let tabId = "before-restart";
   const file = join(dir, "vault.sqlite");
-  const repository = createBrowserPasswordRepository(file);
+  let repository = createBrowserPasswordRepository(file);
   const key = randomBytes(32);
-  const vault = new PasswordVault(repository, {
+  const encryption: PasswordEncryption = {
     isEncryptionAvailable: () => true,
     encryptString: (value) => {
       const iv = randomBytes(12),
@@ -57,7 +58,8 @@ test("a new-account replica accepts the vault-generated password and later signs
         cipher.final(),
       ]).toString();
     },
-  });
+  };
+  let vault = new PasswordVault(repository, encryption);
   try {
     server = spawn(
       process.execPath,
@@ -128,25 +130,32 @@ test("a new-account replica accepts the vault-generated password and later signs
       isDestroyed: () => page.isClosed(),
       mainFrame: { framesInSubtree: [frame] },
     };
-    const passwords = new BrowserPasswords(
-      {
-        pages: () => [
-          { id: "tab", contents: contents as unknown as WebContents },
-        ],
-        changed: () => {},
-      },
-      () => vault,
-      () => true,
-    );
-    passwords.attach({
-      on: (
-        name: string,
-        handler: (event: IpcMainEvent, value: unknown) => void,
-      ) => listeners.set(name, handler),
-    } as unknown as IpcMain);
-    const mechanics = createPlaywrightApplyPageMechanics(page);
+    function createPasswordManager() {
+      const manager = new BrowserPasswords(
+        {
+          pages: () => [
+            { id: tabId, contents: contents as unknown as WebContents },
+          ],
+          changed: () => {},
+        },
+        () => vault,
+        () => true,
+      );
+      manager.attach({
+        on: (
+          name: string,
+          handler: (event: IpcMainEvent, value: unknown) => void,
+        ) => listeners.set(name, handler),
+      } as unknown as IpcMain);
+      return manager;
+    }
+    let passwords = createPasswordManager();
     const target = (
-      raw: Awaited<ReturnType<typeof mechanics.readPage>>,
+      raw: Awaited<
+        ReturnType<
+          ReturnType<typeof createPlaywrightApplyPageMechanics>["readPage"]
+        >
+      >,
       ref: string,
     ) => {
       const c = raw.controls.find((c) => c.ref === ref)!;
@@ -158,31 +167,41 @@ test("a new-account replica accepts the vault-generated password and later signs
       };
     };
     let draftId: string | null = null;
-    const hands = createApplyPageHands({
-      ...mechanics,
-      generateAccountCredential: async ({ username, passwordRefs }) => {
-        const raw = await mechanics.readPage();
-        const draft = await passwords.generateAccountCredential(
-          "tab",
-          username,
-          passwordRefs.map((ref) => target(raw, ref)),
-        );
-        draftId = draft.credentialId;
-        return draft;
-      },
-      resolveAccountCredential: (input) =>
-        Promise.resolve(passwords.resolveAccountCredential("tab", input)),
-      listSavedCredentials: () => Promise.resolve(passwords.list("tab")),
-      fillSavedCredential: async (ref, credentialId) =>
-        passwords.autofill(
-          "tab",
-          credentialId,
-          true,
-          target(await mechanics.readPage(), ref),
-        ),
-    });
-    const config: ApplyAgentConfig = {
-      hands,
+    function createHands() {
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      return createApplyPageHands({
+        ...mechanics,
+        generateAccountCredential: async ({ username, passwordRefs }) => {
+          const raw = await mechanics.readPage();
+          const draft = await passwords.generateAccountCredential(
+            tabId,
+            username,
+            passwordRefs.map((ref) => target(raw, ref)),
+          );
+          draftId = draft.credentialId;
+          return draft;
+        },
+        listAccountDrafts: () =>
+          Promise.resolve(passwords.listAccountDrafts(tabId)),
+        fillAccountDraft: async (ref, credentialId) =>
+          passwords.fillAccountDraft(
+            tabId,
+            credentialId,
+            target(await mechanics.readPage(), ref),
+          ),
+        resolveAccountCredential: (input) =>
+          Promise.resolve(passwords.resolveAccountCredential(tabId, input)),
+        listSavedCredentials: () => Promise.resolve(passwords.list(tabId)),
+        fillSavedCredential: async (ref, credentialId) =>
+          passwords.autofill(
+            tabId,
+            credentialId,
+            true,
+            target(await mechanics.readPage(), ref),
+          ),
+      });
+    }
+    const config: Omit<ApplyAgentConfig, "hands"> = {
       authority: {
         mode: "prepare_only",
         submitAuthorized: false,
@@ -228,88 +247,123 @@ test("a new-account replica accepts the vault-generated password and later signs
       },
     };
     const transcript: unknown[] = [];
-    const run = async (registration: boolean, duplicate = false) => {
+    const run = async (phase: "signup" | "resume" | "duplicate" | "saved") => {
       let turn = 0;
-      return runApplyAgent(config, {
-        chatWithTools: async (messages) => {
-          transcript.push(messages);
-          const raw = await hands.observe();
-          const ref = (label: string) =>
-            raw.controls.find((c) => c.label === label)!.ref;
-          const action = (label: string) =>
-            raw.actions.find((a) => a.label === label)!.ref;
-          turn++;
-          let name: string, args: Record<string, unknown>;
-          if (turn === 1) {
-            name = "type";
-            args = { ref: ref("Email"), text: username };
-          } else if (turn === 2 && registration) {
-            name = "generate_account_login";
-            args = {
-              username,
-              passwordRefs: [ref("Password"), ref("Confirm password")],
-            };
-          } else if (turn === 2) {
-            name = "list_saved_logins";
-            args = {};
-          } else if (turn === 3 && !registration) {
-            name = "fill_saved_login";
-            args = { ref: ref("Password"), credentialId: vault.list()[0]!.id };
-          } else if (turn === (registration ? 3 : 4)) {
-            name = "click";
-            args = { ref: action(registration ? "Create Account" : "Sign in") };
-            if (registration)
-              expect(vault.list()).toHaveLength(duplicate ? 1 : 0);
-          } else if (turn === 4 && registration) {
-            expect(await hands.readText()).toContain(
-              duplicate
-                ? "An account with that email already exists"
-                : "Your account was created",
-            );
-            expect(vault.list()).toHaveLength(duplicate ? 1 : 0);
-            name = "resolve_account_login";
-            args = {
-              credentialId: draftId,
-              outcome: duplicate ? "discarded" : "accepted",
-            };
-          } else {
-            name = "finish";
-            args = {
-              reason: registration
-                ? "The replica account was created."
-                : "The replica confirms sign-in.",
-            };
-          }
-          const response = {
-            toolCalls: [
-              {
-                id: `${registration}-${turn}`,
-                type: "function" as const,
-                function: { name, arguments: JSON.stringify(args) },
-              },
-            ],
-          };
-          transcript.push(response);
-          return response;
+      const registration = phase === "signup" || phase === "duplicate";
+      const hands = createHands();
+      return runApplyAgent(
+        {
+          ...config,
+          hands,
+          application: { ...config.application, startingUrl: page.url() },
         },
-      });
+        {
+          chatWithTools: async (messages) => {
+            transcript.push(messages);
+            const raw = await hands.observe();
+            const ref = (label: string) =>
+              raw.controls.find((c) => c.label === label)!.ref;
+            const action = (label: string) =>
+              raw.actions.find((a) => a.label === label)!.ref;
+            turn++;
+            let name: string, args: Record<string, unknown>;
+            if (turn === 1) {
+              if (phase === "resume") {
+                expect(JSON.stringify(messages)).toContain(
+                  "Pending signup drafts for the open site's origin",
+                );
+                expect(JSON.stringify(messages)).toContain(draftId);
+                expect(vault.list()).toHaveLength(0);
+              }
+              name = "type";
+              args = { ref: ref("Email"), text: username };
+            } else if (turn === 2 && registration) {
+              name = "generate_account_login";
+              args = {
+                username,
+                passwordRefs: [ref("Password"), ref("Confirm password")],
+              };
+            } else if (turn === 2 && phase === "resume") {
+              name = "list_account_drafts";
+              args = {};
+            } else if (turn === 2) {
+              name = "list_saved_logins";
+              args = {};
+            } else if (turn === 3 && !registration) {
+              name =
+                phase === "resume" ? "fill_account_draft" : "fill_saved_login";
+              args = {
+                ref: ref("Password"),
+                credentialId:
+                  phase === "resume" ? draftId : vault.list()[0]!.id,
+              };
+            } else if (turn === (registration ? 3 : 4)) {
+              name = "click";
+              args = {
+                ref: action(registration ? "Create Account" : "Sign in"),
+              };
+            } else if (turn === 4 && phase === "duplicate") {
+              expect(await hands.readText()).toContain(
+                "An account with that email already exists",
+              );
+              name = "resolve_account_login";
+              args = { credentialId: draftId, outcome: "discarded" };
+            } else if (turn === 5 && phase === "resume") {
+              expect(await hands.readText()).toContain("You are signed in");
+              name = "resolve_account_login";
+              args = { credentialId: draftId, outcome: "accepted" };
+            } else {
+              name = "finish";
+              args = { reason: "The replica has shown the account result." };
+            }
+            const response = {
+              toolCalls: [
+                {
+                  id: `${phase}-${turn}`,
+                  type: "function" as const,
+                  function: { name, arguments: JSON.stringify(args) },
+                },
+              ],
+            };
+            transcript.push(response);
+            return response;
+          },
+        },
+      );
     };
-    await run(true);
+    await run("signup");
     expect(
       await page
         .getByRole("heading", { name: "Your account was created" })
         .count(),
     ).toBe(1);
-    expect(vault.list()).toHaveLength(1);
-    const secret = vault.read(vault.list()[0]!.id)!.password;
+    expect(vault.list()).toHaveLength(0);
+    const secret = vault.readAccountDraft(base, draftId!)!.password;
     expect(readFileSync(file).includes(Buffer.from(secret))).toBe(false);
+
+    // The site already accepted the account. Simulate the app dying before
+    // resolution by dropping browser cookies, tab identity and vault memory.
+    await context.close();
+    repository.close();
+    repository = createBrowserPasswordRepository(file);
+    vault = new PasswordVault(repository, encryption);
+    context = await browser.newContext();
+    page = await context.newPage();
+    tabId = "after-restart";
+    passwords = createPasswordManager();
+    await page.goto(`${base}/verification-replica/login/${id}`);
+    await run("resume");
+    expect(vault.listAccountDrafts(base)).toEqual([]);
+    expect(vault.read(vault.list()[0]!.id)?.password).toBe(secret);
+
     await page.goto(`${base}/verification-replica/register/${id}`);
-    await run(true, true);
+    await run("duplicate");
+    expect(vault.listAccountDrafts(base)).toEqual([]);
     expect(vault.list()).toHaveLength(1);
     expect(vault.read(vault.list()[0]!.id)?.password).toBe(secret);
     await page.goto(`${base}/verification-replica/logout/${id}`);
     await page.goto(`${base}/verification-replica/login/${id}`);
-    await run(false);
+    await run("saved");
     expect(
       await page.getByRole("heading", { name: "You are signed in" }).count(),
     ).toBe(1);

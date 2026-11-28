@@ -8,7 +8,10 @@ import {
   redactVerificationData,
 } from "@nestor/core/run-trace";
 import { createTabTools, mailboxAccountFacts } from "../tab-tools";
-import { createAccountCredentialTools } from "../account-credential-tool";
+import {
+  accountDraftFacts,
+  createAccountCredentialTools,
+} from "../account-credential-tool";
 import {
   parseToolArguments,
   runAgentLoop,
@@ -1145,6 +1148,7 @@ async function runApplyAgentPrivate(
   });
   try {
     const mailbox = await mailboxAccountFacts(config.hands);
+    const drafts = await accountDraftFacts(config.hands);
     await refreshAnswers();
     const facts = applicationModelFactsMessages(
       runConfig.sources,
@@ -1225,6 +1229,7 @@ async function runApplyAgentPrivate(
           : []),
         { role: "user", content: facts.job },
         { role: "user", content: mailbox },
+        ...(drafts ? [{ role: "user" as const, content: drafts }] : []),
         { role: "user", content: createApplyUserPrompt(runConfig) },
         {
           role: "user",

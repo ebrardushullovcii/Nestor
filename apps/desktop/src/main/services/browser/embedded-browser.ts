@@ -161,6 +161,16 @@ export class EmbeddedBrowser {
   listAgentCredentials(tabId: string) {
     return this.passwords().list(tabId);
   }
+  listAccountDrafts(tabId: string) {
+    return this.passwords().listAccountDrafts(tabId);
+  }
+  fillAccountDraft(
+    tabId: string,
+    credentialId: string,
+    target: BrowserPasswordFieldTarget,
+  ) {
+    return this.passwords().fillAccountDraft(tabId, credentialId, target);
+  }
   fillAgentCredential(
     tabId: string,
     credentialId: string,

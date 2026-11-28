@@ -71,7 +71,104 @@ export function createSavedLoginTools(hands: ApplyPageHands): AgentLoopTool[] {
 export function createAccountCredentialTools(
   hands: ApplyPageHands,
 ): AgentLoopTool[] {
-  return [createAccountDraftTool(hands), resolveAccountDraftTool(hands)];
+  return [
+    createAccountDraftTool(hands),
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "list_account_drafts",
+          description:
+            "List pending signup drafts for the current site's origin, even after a restart. Only usernames and draft IDs are returned.",
+          parameters: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+      execute: async (raw) => {
+        const parsed = z.object({}).strict().safeParse(parseToolArguments(raw));
+        if (!parsed.success)
+          return {
+            kind: "ok",
+            status: "failed",
+            content: `list_account_drafts contract: ${parsed.error.message}`,
+          };
+        return {
+          kind: "ok",
+          content: JSON.stringify(
+            (await hands.listAccountDrafts?.()) ?? {
+              available: false,
+              credentials: [],
+              message: "Account drafts are unavailable in this browser.",
+            },
+          ),
+        };
+      },
+    },
+    fillAccountDraftTool(hands),
+    resolveAccountDraftTool(hands),
+  ];
+}
+
+export async function accountDraftFacts(
+  hands: ApplyPageHands,
+): Promise<string | null> {
+  if (!hands.listAccountDrafts) return null;
+  const list = await hands.listAccountDrafts().catch(() => null);
+  if (!list?.available)
+    return "Pending signup drafts could not be read at run start. Use list_account_drafts to retry when needed.";
+  if (!list.credentials.length) return null;
+  return `Pending signup drafts for the open site's origin: ${JSON.stringify(list.credentials)}. They survived from an earlier signup attempt. Inspect the current page. Use fill_account_draft to complete signup or test sign-in with the same password. Resolve the draft after observing the site's result.`;
+}
+
+function fillAccountDraftTool(hands: ApplyPageHands): AgentLoopTool {
+  return {
+    definition: {
+      type: "function",
+      function: {
+        name: "fill_account_draft",
+        description:
+          "Type a pending draft password into one observed password field on its site. Use this to finish signup or sign in after resuming. Type the username yourself from the draft metadata. The password is never returned and the draft stays pending.",
+        parameters: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+            credentialId: { type: "string" },
+          },
+          required: ["ref", "credentialId"],
+          additionalProperties: false,
+        },
+      },
+    },
+    failureKind: "browser",
+    describeError: () =>
+      "The vault could not fill the pending signup password. Inspect the page and draft metadata.",
+    execute: async (raw) => {
+      const parsed = z
+        .object({ ref: z.string(), credentialId: z.string() })
+        .strict()
+        .safeParse(parseToolArguments(raw));
+      if (!parsed.success)
+        return {
+          kind: "ok",
+          status: "failed",
+          content: `fill_account_draft contract: ${parsed.error.message}`,
+        };
+      const filled = await hands.fillAccountDraft?.(
+        parsed.data.ref,
+        parsed.data.credentialId,
+      );
+      return {
+        kind: "ok",
+        status: filled ? "done" : "failed",
+        content: filled
+          ? "The vault filled the pending signup password. Inspect the site's response after submitting the form."
+          : "That draft or password field is unavailable on this page. Inspect the page and draft metadata.",
+      };
+    },
+  };
 }
 
 function createAccountDraftTool(hands: ApplyPageHands): AgentLoopTool {
@@ -81,7 +178,7 @@ function createAccountDraftTool(hands: ApplyPageHands): AgentLoopTool {
       function: {
         name: "generate_account_login",
         description:
-          "For a new password account, have the vault draft a strong password and type it into every observed password/confirm field you name. Supply the username and passwordRefs. The result contains the draft credentialId and metadata, never the password. A retry on this tab reuses the draft. Press Create Account, observe what the site says, then call resolve_account_login to save or discard it.",
+          "For a new password account, have the vault draft a strong password and type it into every observed password/confirm field you name. Supply the username and passwordRefs. The result contains the draft credentialId and metadata, never the password. A retry for the same site and username reuses the encrypted draft even after restart. Press Create Account, observe what the site says, then call resolve_account_login to save or discard it.",
         parameters: {
           type: "object",
           properties: {

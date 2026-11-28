@@ -518,6 +518,8 @@ export interface AgentDiscoveryOptions {
     target: BrowserPasswordFieldTarget;
     credentialId: string;
   }) => Promise<boolean>;
+  listAccountDrafts?: (url: string) => Promise<BrowserPasswordsList>;
+  fillAccountDraft?: AgentDiscoveryOptions["fillSavedCredential"];
   generateAccountCredential?: (
     input: BrowserGenerateAccountInput,
   ) => Promise<BrowserGeneratedLoginResult>;
