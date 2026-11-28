@@ -14,6 +14,7 @@ import { ModelOutputLimitError } from "@nestor/agent-runtime";
 import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
 import type { ModelImageInput } from "@nestor/contracts";
 import { modelOutputLimit } from "./model-output-limit";
+import { splitPromptCachePrefix } from "./prompt-cache-prefix";
 import type {
   ChatCompletionsPayload,
   CompatibleMessage,
@@ -96,6 +97,10 @@ function imageBlock(url: string): BetaImageBlockParam {
 
 function textBlocks(text: string): BetaTextBlockParam[] {
   return text.length > 0 ? [{ type: "text", text }] : [];
+}
+
+function cachedText(text: string): BetaTextBlockParam {
+  return { type: "text", text, cache_control: { type: "ephemeral" } };
 }
 
 /** User or tool content: a string, or Chat Completions text/image parts. */
@@ -325,10 +330,10 @@ export function buildMessagesRequestBody(input: {
    * before the last, never the per-call material at its end.
    */
   oneShot?: boolean | undefined;
+  stableSystem?: string | undefined;
   /**
-   * Reusable text ahead of per-task data. One-shots split it from the final
-   * message. Conversations put it in the first user text block and also
-   * cache the evolving turn.
+   * Reusable text ahead of per-task data in the first user text block.
+   * Conversations also cache the evolving turn.
    */
   stableLead?: string | undefined;
   /** A later reusable text block in the opening, after the stable lead. */
@@ -340,14 +345,27 @@ export function buildMessagesRequestBody(input: {
   const system: BetaTextBlockParam[] = input.messages
     .slice(0, leading)
     .flatMap((message) => textBlocks(contentText(message.content)));
-  const lastSystem = system.at(-1);
-  if (lastSystem) lastSystem.cache_control = { type: "ephemeral" };
+  const firstSystem = system[0];
+  const stableSystem =
+    firstSystem &&
+    input.stableSystem &&
+    splitPromptCachePrefix(firstSystem.text, input.stableSystem);
+  if (stableSystem && stableSystem.cached.length) {
+    system.splice(
+      0,
+      1,
+      ...stableSystem.cached.map(cachedText),
+      ...textBlocks(stableSystem.suffix),
+    );
+  } else {
+    const lastSystem = system.at(-1);
+    if (lastSystem) lastSystem.cache_control = { type: "ephemeral" };
+  }
 
   const built: BuiltMessage[] = [];
   // The last block each message produced, so a message boundary is known
   // after consecutive user turns are joined.
   const endsOfMessages: BetaContentBlockParam[] = [];
-  let finalUserBlocks: BetaContentBlockParam[] = [];
   const noteEnd = (blocks: readonly BetaContentBlockParam[]) => {
     const last = blocks.at(-1);
     if (last) endsOfMessages.push(last);
@@ -373,7 +391,6 @@ export function buildMessagesRequestBody(input: {
       ];
       appendUserBlocks(built, blocks);
       noteEnd(blocks);
-      finalUserBlocks = message === input.messages.at(-1) ? blocks : [];
       continue;
     }
     if (message.role === "assistant") {
@@ -398,13 +415,6 @@ export function buildMessagesRequestBody(input: {
   const stableLead = input.stableLead ?? input.stableLeadBreakpoints?.[0];
   const first = built[0];
   const firstBlock = first?.role === "user" ? first.content[0] : undefined;
-  // A one-shot request may grow a tool turn. Keep its opening split at the
-  // same boundaries so reading another part can still hit that cache.
-  const opening = continuesConversation
-    ? input.oneShot
-      ? firstBlock
-      : undefined
-    : finalUserBlocks[0];
   if (
     continuesConversation &&
     stableLead &&
@@ -423,40 +433,25 @@ export function buildMessagesRequestBody(input: {
     );
     if (end?.type === "text") end.cache_control = { type: "ephemeral" };
   }
+  // Keep a split opening identical even when a tool turn adds more input.
   if (
-    stableLead &&
-    opening?.type === "text" &&
-    opening.text.length > stableLead.length &&
-    opening.text.startsWith(stableLead)
+    first?.role === "user" &&
+    firstBlock?.type === "text" &&
+    input.stableLead
   ) {
-    const holder = built.find(
-      (message) =>
-        message.role !== "system" && message.content.includes(opening),
+    const { cached, suffix } = splitPromptCachePrefix(
+      firstBlock.text,
+      input.stableLead,
+      input.stableLeadEnd,
     );
-    const rest = opening.text.slice(stableLead.length);
-    const second = input.stableLeadEnd;
-    const split =
-      second && rest.length > second.length && rest.startsWith(second)
-        ? [
-            {
-              type: "text" as const,
-              text: second,
-              cache_control: { type: "ephemeral" as const },
-            },
-          ]
-        : [];
-    if (holder && holder.role !== "system")
-      holder.content.splice(
-        holder.content.indexOf(opening),
+    if (cached.length && suffix) {
+      first.content.splice(
+        0,
         1,
-        {
-          type: "text",
-          text: stableLead,
-          cache_control: { type: "ephemeral" },
-        },
-        ...split,
-        { type: "text", text: rest.slice(split[0]?.text.length ?? 0) },
+        ...cached.map(cachedText),
+        ...textBlocks(suffix),
       );
+    }
   }
   // A mid-conversation system message must follow a user turn and be last
   // or followed by an assistant turn; elsewhere it is said in a user turn.

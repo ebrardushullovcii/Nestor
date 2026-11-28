@@ -110,6 +110,17 @@ import {
 const SEARCH_RESULTS_MAX_MODEL_JOBS = 60;
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
 
+function openAiPromptCacheKey(
+  url: string,
+  apiMode: ModelApiMode,
+  conversationKey: string,
+): string | undefined {
+  return apiMode !== "messages" &&
+    new URL(url).origin === "https://api.openai.com"
+    ? buildModelSessionId(conversationKey)
+    : undefined;
+}
+
 /** Sampling support was verified on this route, not on arbitrary models. */
 function isStableFitRoute(route: {
   model: string;
@@ -284,6 +295,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       /** Overrides the client's effort for this one request. */
       reasoningEffort?: ModelReasoningEffort | undefined;
       jsonSchema?: { name: string; schema: Record<string, unknown> };
+      promptCache?: { stableSystem?: string; stableLead?: string };
     },
   ): Promise<unknown> {
     if (!validatedOptions) {
@@ -312,15 +324,18 @@ export function createOpenAiCompatibleJobFinderAiClient(
 
     const apiMode = validatedOptions.apiMode ?? "chat_completions";
     try {
+      const url = buildModelUrl(validatedOptions.baseUrl, apiMode);
+      const conversationKey =
+        options?.conversationKey ?? instanceConversationKey;
       // Streaming, idle and total deadlines, and retries live in
       // model-request-transport; `timeoutMs` is the total budget.
       const payload = await performModelRequest({
         purpose: operation,
-        url: buildModelUrl(validatedOptions.baseUrl, apiMode),
+        url,
         headers: buildModelRequestHeaders({
           apiKey: validatedOptions.apiKey,
           baseUrl: validatedOptions.baseUrl,
-          conversationKey: options?.conversationKey ?? instanceConversationKey,
+          conversationKey,
         }),
         body: buildModelRequestBody({
           apiMode,
@@ -337,6 +352,17 @@ export function createOpenAiCompatibleJobFinderAiClient(
           reasoningSummary: resilience.streaming !== false,
           jsonOutput: true,
           jsonSchema: options?.jsonSchema,
+          ...(options?.promptCache
+            ? {
+                ...options.promptCache,
+                oneShot: true,
+                promptCacheKey: openAiPromptCacheKey(
+                  url,
+                  apiMode,
+                  conversationKey,
+                ),
+              }
+            : {}),
           messages: [
             {
               role: "system",
@@ -492,13 +518,21 @@ export function createOpenAiCompatibleJobFinderAiClient(
       });
     },
     async createResumeDraft(input) {
+      const request = buildGroundedResumeRewriteModelPayload(input);
+      const { baseResumeText, groundingEvidence } = request;
       const payload = await fetchModelJson(
         "createResumeDraft",
         buildResumeRewriteProposalPrompt(input.searchPreferences.tailoringMode),
-        buildGroundedResumeRewriteModelPayload(input),
+        request,
         {
           timeoutMs: validatedOptions?.requestTimeoutMs,
           conversationKey: modelConversationKeys.resumeWriting(input.profile),
+          promptCache: {
+            stableLead: JSON.stringify({
+              baseResumeText,
+              groundingEvidence,
+            }).slice(0, -1),
+          },
         },
       );
       return completeTailoredResumeDraft(payload, input);
@@ -636,12 +670,17 @@ export function createOpenAiCompatibleJobFinderAiClient(
           ...validatedOptions,
           apiMode: validatedOptions.apiMode ?? "chat_completions",
         });
+      const request = buildJobFitJudgingRequest({ ...rest, jobs });
+      const { person, goals } = request;
       const payload = await fetchModelJson(
         "judgeJobFits",
         buildJobFitJudgingPrompt(structured),
-        buildJobFitJudgingRequest({ ...rest, jobs }),
+        request,
         {
           conversationKey: modelConversationKeys.fitJudging(input.profile),
+          promptCache: {
+            stableLead: JSON.stringify({ person, goals }).slice(0, -1),
+          },
           ...(signal ? { signal } : {}),
           reasoningEffort: reasoningEffortFor("fit_batch"),
           ...(structured
@@ -717,18 +756,16 @@ export function createOpenAiCompatibleJobFinderAiClient(
           return "the configured job site";
         }
       })();
-      const systemPrompt =
-        buildJobsExtractionPrompt({
-          pageHostLabel,
-          pageType: input.pageType,
-          effectiveMaxJobs,
-        }) +
-        " When excludedCanonicalUrls is supplied, those jobs were already read from this same page. Return only remaining jobs, without repeating those URLs. Return fewer than the limit when no more remain.";
+      const prompt = buildJobsExtractionPrompt({
+        pageHostLabel,
+        pageType: input.pageType,
+        effectiveMaxJobs,
+      });
       const timeoutMs = validatedOptions?.requestTimeoutMs;
 
       const payload = await fetchModelJson(
         "extractJobsFromPage",
-        systemPrompt,
+        prompt.shared + prompt.page,
         {
           pageUrl: input.pageUrl,
           pageText: input.pageText,
@@ -742,7 +779,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
         {
           timeoutMs,
           ...(input.signal ? { signal: input.signal } : {}),
-          conversationKey: modelConversationKeys.pageExtraction(input.pageUrl),
+          conversationKey: modelConversationKeys.jobPageExtraction(
+            input.pageType,
+          ),
+          promptCache: { stableSystem: prompt.shared },
           ...(input.onStreamEvent
             ? { onStreamEvent: input.onStreamEvent }
             : {}),
@@ -778,10 +818,8 @@ export function createOpenAiCompatibleJobFinderAiClient(
         const conversationKey =
           options?.conversationKey ?? instanceConversationKey;
         const promptCacheKey =
-          apiMode === "responses" &&
-          options?.stableLeadBreakpoints?.length &&
-          new URL(url).origin === "https://api.openai.com"
-            ? buildModelSessionId(conversationKey)
+          options?.stableLead || options?.stableLeadBreakpoints?.length
+            ? openAiPromptCacheKey(url, apiMode, conversationKey)
             : undefined;
         const continuationRoute = createHash("sha256")
           .update(JSON.stringify([url, validatedOptions.model, apiMode]))

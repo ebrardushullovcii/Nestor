@@ -15,6 +15,66 @@ import {
 } from "./openai-compatible-transport";
 
 describe("Responses API transport", () => {
+  test("fit writes its resume and full context separately and reuses them on a tool turn", () => {
+    const stableLead = '{"person":{"resume":"Synthetic resume"';
+    const stableLeadEnd =
+      ',"currentLocation":"Berlin"},"goals":{"remote":true}';
+    const user = {
+      role: "user" as const,
+      content: stableLead + stableLeadEnd + ',"listings":[1]}',
+    };
+    const options = {
+      apiMode: "responses" as const,
+      model: "gpt-6.2-sol",
+      oneShot: true,
+      promptCacheKey: "fit-session",
+      stableLead,
+      stableLeadEnd,
+    };
+    const first = buildModelRequestBody({ ...options, messages: [user] });
+    const later = buildModelRequestBody({
+      ...options,
+      messages: [
+        user,
+        { role: "tool", tool_call_id: "part_1", content: "Listing detail" },
+      ],
+    });
+    expect(first.prompt_cache_options).toEqual({ mode: "explicit" });
+    expect(later.prompt_cache_options).toEqual({ mode: "implicit" });
+    expect(first.input).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: stableLead,
+            prompt_cache_breakpoint: { mode: "explicit" },
+          },
+          {
+            type: "input_text",
+            text: stableLeadEnd,
+            prompt_cache_breakpoint: { mode: "explicit" },
+          },
+          { type: "input_text", text: ',"listings":[1]}' },
+        ],
+      },
+    ]);
+    expect(later.input).toEqual([
+      ...(first.input as unknown[]),
+      {
+        type: "function_call_output",
+        call_id: "part_1",
+        output: "Listing detail",
+      },
+    ]);
+    expect(
+      buildModelRequestBody({
+        ...options,
+        messages: [{ ...user, content: "Different opening" }],
+      }),
+    ).not.toHaveProperty("prompt_cache_options");
+  });
+
   test.each([
     {
       endpoint: "api.openai.com",

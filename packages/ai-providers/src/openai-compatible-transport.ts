@@ -1,5 +1,6 @@
 import { modelOutputLimit } from "./model-output-limit";
 import { buildMessagesRequestBody } from "./anthropic-messages";
+import { splitPromptCachePrefix } from "./prompt-cache-prefix";
 import type { ModelTokenUsage, ModelImageInput } from "@nestor/contracts";
 
 /** `messages` is Anthropic's native Messages API (anthropic-messages.ts). */
@@ -372,10 +373,17 @@ function toResponsesContent(rawContent: unknown): unknown {
 
 function toResponsesInput(
   messages: readonly CompatibleMessage[],
-  breakpoints: readonly string[],
-): unknown[] {
+  options?: {
+    stableSystem?: string | undefined;
+    stableLead?: string | undefined;
+    stableLeadEnd?: string | undefined;
+    stableLeadBreakpoints?: readonly string[] | undefined;
+  },
+): { items: unknown[]; hasBreakpoints: boolean } {
   let inOpening = true;
-  return messages.flatMap((message) => {
+  let firstUser = true;
+  let hasBreakpoints = false;
+  const items = messages.flatMap((message) => {
     if (message.role === "assistant" || message.role === "tool")
       inOpening = false;
     if (message.role === "tool") {
@@ -391,24 +399,46 @@ function toResponsesInput(
     }
 
     const items: unknown[] = [];
-    const content =
+    const lead =
+      inOpening && message.role === "system" && firstUser
+        ? options?.stableSystem
+        : inOpening && message.role === "user" && firstUser
+          ? options?.stableLead
+          : undefined;
+    const next = message.role === "user" ? options?.stableLeadEnd : undefined;
+    const text = typeof message.content === "string" ? message.content : "";
+    const { cached, suffix } = splitPromptCachePrefix(
+      text,
       inOpening &&
-      message.role === "user" &&
-      typeof message.content === "string" &&
-      breakpoints.includes(message.content)
-        ? [
-            {
-              type: "input_text",
-              text: message.content,
-              prompt_cache_breakpoint: { mode: "explicit" },
-            },
-          ]
-        : toResponsesContent(message.content);
+        message.role === "user" &&
+        options?.stableLeadBreakpoints?.includes(text)
+        ? text
+        : lead,
+      next,
+    );
+    if (cached.length > 0) hasBreakpoints = true;
+    if (message.role === "user") firstUser = false;
+    const content = cached.length
+      ? [
+          ...cached.map((text) => ({
+            type: "input_text",
+            text,
+            prompt_cache_breakpoint: { mode: "explicit" },
+          })),
+          ...(suffix ? [{ type: "input_text", text: suffix }] : []),
+        ]
+      : toResponsesContent(message.content);
     if (
       (typeof content === "string" && content.length > 0) ||
       (Array.isArray(content) && content.length > 0)
     ) {
-      items.push({ role: message.role, content });
+      items.push({
+        role:
+          cached.length && message.role === "system"
+            ? "developer"
+            : message.role,
+        content,
+      });
     }
 
     for (const toolCall of message.tool_calls ?? []) {
@@ -422,6 +452,7 @@ function toResponsesInput(
 
     return items;
   });
+  return { items, hasBreakpoints };
 }
 
 /** GPT-5.6 and later support explicit breakpoints on native Responses. */
@@ -457,9 +488,11 @@ export function buildModelRequestBody(input: {
   includeStreamUsage?: boolean | undefined;
   /** Messages only: cache the request's stable lead, not its end. */
   oneShot?: boolean | undefined;
-  /** Messages only: the final message's repeating opening text. */
+  /** Exact reusable opening text in the leading system message. */
+  stableSystem?: string | undefined;
+  /** Exact reusable opening text in the first user message. */
   stableLead?: string | undefined;
-  /** Messages only: a later reusable text block in the conversation opening. */
+  /** Exact reusable text immediately after stableLead. */
   stableLeadEnd?: string | undefined;
   /** Reusable user blocks in opening order, from least to most likely to change. */
   stableLeadBreakpoints?: readonly string[] | undefined;
@@ -496,6 +529,9 @@ export function buildModelRequestBody(input: {
         ? { stream_options: { include_usage: true } }
         : {}),
       model: input.model,
+      ...(input.promptCacheKey
+        ? { prompt_cache_key: input.promptCacheKey }
+        : {}),
       ...(input.temperature !== undefined
         ? { temperature: input.temperature }
         : !input.reasoningEffort
@@ -523,17 +559,30 @@ export function buildModelRequestBody(input: {
     };
   }
 
-  const breakpoints =
-    input.promptCacheKey && supportsResponsesCacheBreakpoints(input.model)
-      ? (input.stableLeadBreakpoints ?? [])
-      : [];
+  const cacheOptions =
+    input.promptCacheKey &&
+    supportsResponsesCacheBreakpoints(input.model) &&
+    (input.stableSystem ||
+      input.stableLead ||
+      input.stableLeadBreakpoints?.length)
+      ? input
+      : undefined;
+  const { items, hasBreakpoints } = toResponsesInput(messages, cacheOptions);
+  const explicitOnly =
+    input.oneShot &&
+    messages.every(({ role }) => role === "system" || role === "user");
   return {
     model: input.model,
     store: false,
     ...(input.promptCacheKey ? { prompt_cache_key: input.promptCacheKey } : {}),
-    // Keep the implicit end-of-turn checkpoint alongside the shared opening.
-    ...(breakpoints.length
-      ? { prompt_cache_options: { mode: "implicit" } }
+    // Write only the shared opening for a one-shot, and keep the implicit
+    // turn checkpoint when the model needs tools or a follow-up.
+    ...(hasBreakpoints
+      ? {
+          prompt_cache_options: {
+            mode: explicitOnly ? "explicit" : "implicit",
+          },
+        }
       : {}),
     ...(input.temperature !== undefined
       ? { temperature: input.temperature }
@@ -542,7 +591,7 @@ export function buildModelRequestBody(input: {
       effort: input.reasoningEffort ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
       ...(input.reasoningSummary ? { summary: "auto" } : {}),
     },
-    input: toResponsesInput(messages, breakpoints),
+    input: items,
     ...(input.jsonSchema
       ? {
           text: {
