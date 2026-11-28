@@ -1,4 +1,5 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
 import {
   buildModelRequestBody,
   buildModelUrl,
@@ -14,6 +15,47 @@ import {
 } from "./openai-compatible-transport";
 
 describe("Responses API transport", () => {
+  test("a Responses tool reply asks the runtime to keep history append-only", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        status: "completed",
+        output: [
+          {
+            type: "function_call",
+            call_id: "call_1",
+            name: "observe",
+            arguments: "{}",
+          },
+        ],
+      }),
+    );
+    try {
+      const client = createOpenAiCompatibleJobFinderAiClient({
+        baseUrl: "https://provider.example/v1",
+        apiKey: "synthetic",
+        model: "gpt-6.2-sol",
+        apiMode: "responses",
+      });
+      const reply = await client.chatWithTools(
+        [{ role: "user", content: "Read the current application page." }],
+        [
+          {
+            type: "function",
+            function: {
+              name: "observe",
+              description: "Read the page.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+        ],
+      );
+      expect(reply.toolCalls?.[0]?.function.name).toBe("observe");
+      expect(reply.appendOnlyHistory).toBe(true);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   test.each(["chat_completions", "responses"] as const)(
     "%s attaches tool images after all tool replies without losing their text",
     (apiMode) => {

@@ -533,7 +533,7 @@ it("a confirmation after quitting during Submit settles the original call when f
         pageBefore: observation.page,
         pageAfter: observation.page,
         urlChanged: false,
-        requestsObservedDuringAction: 1,
+        requestsObservedDuringAction: 0,
         requestsAfterClick: [],
       },
     };
@@ -545,11 +545,14 @@ it("a confirmation after quitting during Submit settles the original call when f
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  await preparation.submitApplication!({
+  const sent = await preparation.submitApplication!({
     callId: "submit-before-quit",
     actionRef: "submit",
     actionLabel: "Submit",
   });
+  expect(sent.content).toContain(
+    "Network requests the harness observed during the press: []. An empty list means only that the harness observed no requests during the press.",
+  );
   const [original] = await guards.listSubmissionOutcomeRecords();
   expect(original).toMatchObject({
     outcome: "outcome_uncertain",

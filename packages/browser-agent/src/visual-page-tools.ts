@@ -112,7 +112,7 @@ export function createVisualPageTools(
         kind: "ok",
         status: result.ok ? "done" : "failed",
         progress: result.ok,
-        content: `${result.ok ? `Pointer ${input.action} at (${input.x}, ${input.y}).` : result.error}${result.clickFacts ? `\nBrowser press facts: ${JSON.stringify(result.clickFacts)}` : ""}\n\n${describe(await observe())}`,
+        content: `${result.ok ? `Pointer ${input.action} at (${input.x}, ${input.y}).` : result.error}${result.clickFacts ? `\nBrowser press facts (requestsAfterClick lists only requests the harness observed): ${JSON.stringify(result.clickFacts)}` : ""}\n\n${describe(await observe())}`,
       };
     },
   }));

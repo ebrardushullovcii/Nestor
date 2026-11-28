@@ -54,12 +54,18 @@ test.each([
   expect(parseFillFields(input).ok).toBe(false);
 });
 
-test("thenContinue accepts a ref and rejects malformed refs before any field is run", () => {
+test("thenContinue accepts a ref or a blank string and rejects non-strings", () => {
   const fields = [{ tool: "type", ref: "c0", text: "Robin Ashford" }];
   expect(
-    parseFillFields(JSON.stringify({ fields, thenContinue: "a0" })),
+    parseFillFields(JSON.stringify({ fields, thenContinue: " a0 " })),
   ).toEqual({ ok: true, fields, thenContinue: "a0" });
-  for (const thenContinue of [true, 12, null, {}, "", "   "]) {
+  for (const thenContinue of ["", "   "]) {
+    expect(parseFillFields(JSON.stringify({ fields, thenContinue }))).toEqual({
+      ok: true,
+      fields,
+    });
+  }
+  for (const thenContinue of [true, 12, null, {}]) {
     expect(parseFillFields(JSON.stringify({ fields, thenContinue })).ok).toBe(
       false,
     );
@@ -97,7 +103,9 @@ test("stored fact references survive single-field and batch parsing", () => {
 test("finishing a fill batch is explicit and cannot also advance a step", () => {
   const fields = [{ tool: "type", ref: "c0", text: "Robin Ashford" }];
   expect(
-    parseFillFields(JSON.stringify({ fields, finishWhenReady: true })),
+    parseFillFields(
+      JSON.stringify({ fields, finishWhenReady: true, thenContinue: "" }),
+    ),
   ).toEqual({ ok: true, fields, finishWhenReady: true });
   expect(
     parseFillFields(JSON.stringify({ fields, finishWhenReady: "true" })).ok,

@@ -1270,11 +1270,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             });
             const receipt = "outcome" in sent ? sent.outcome : null;
             if (receipt) retainSend(receipt);
+            const requests = receipt?.browserAction?.requestsAfterClick;
+            const networkObservation =
+              requests === undefined
+                ? "No network observation was recorded for this press."
+                : `Network requests the harness observed during the press: ${JSON.stringify(requests)}. An empty list means only that the harness observed no requests during the press.`;
             return {
               ...(receipt ? { sendCallId: receipt.idempotencyKey } : {}),
               outcome: receipt?.outcome ?? null,
               content: receipt
-                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Browser action: ${receipt.browserAction?.reason ?? "unknown"}. ${receipt.browserAction?.detail ?? ""} Requests after the click: ${JSON.stringify(receipt.browserAction?.requestsAfterClick ?? [])}. Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
+                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Browser action: ${receipt.browserAction?.reason ?? "unknown"}. ${receipt.browserAction?.detail ?? ""} ${networkObservation} Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
                 : "detail" in sent
                   ? sent.detail
                   : "The send did not execute; observe again.",
