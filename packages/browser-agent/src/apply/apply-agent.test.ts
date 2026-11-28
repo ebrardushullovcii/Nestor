@@ -7,7 +7,7 @@ import {
 } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { randomBytes } from "node:crypto";
-import { createApplySystemPrompt } from "./apply-prompts";
+import { createApplySystemPrompt, describeObservation } from "./apply-prompts";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
 import { buildApplyFormObservation } from "./page-hands";
@@ -354,6 +354,12 @@ test.each([
     ])
       expect(prompt).not.toContain(removed);
     expect(prompt).toContain("including arbitration");
+    expect(prompt).toContain(
+      "such as an attestation you will not make yourself, use one forPerson item with onPage: other",
+    );
+    expect(prompt).toContain(
+      "Use that same handoff when a saved answer already shows what they would choose.",
+    );
     const call = vi.mocked(client.chatWithTools).mock.calls[0];
     expect(JSON.stringify(call[0])).toContain("synthetic@example.test");
     expect(JSON.stringify(call[0])).toContain("Google accounts are signed in");
@@ -1585,6 +1591,80 @@ test("keeps the model's site-step instructions on the observed checkout page", a
       {
         question: null,
         summary: instructions,
+        blocker: { code: "person_step_required", detail: instructions },
+      },
+    ],
+  });
+});
+
+test("presents experience questions and declarations with the site's own wording", () => {
+  const experience = "Diagnosed service incidents using distributed traces";
+  const declaration = "I certify that my answers are accurate";
+  const source = page({
+    controls: [experience, declaration].map((label, index) => ({
+      ...nameControl(),
+      index,
+      id: `question${index}`,
+      name: `question${index}`,
+      label,
+      inputType: "checkbox",
+      value: "on",
+    })),
+  });
+  const view = describeObservation(
+    buildApplyFormObservation(source, "2026-09-14T10:00:00.000Z"),
+  );
+  expect(view).toContain(`c0 [checkbox] · ${experience} · required · empty`);
+  expect(view).toContain(`c1 [checkbox] · ${declaration} · required · empty`);
+  expect(view).not.toContain("a declaration:");
+});
+
+test("hands an attestation the model leaves to the person back as one site step", async () => {
+  const url = "https://apply.example.test/review";
+  const label = "I certify that I prepared and submitted this form myself";
+  const instructions =
+    "The site asks you to certify personal preparation and submission. Review the statement on this page and choose your answer.";
+  const source = page({
+    url,
+    controls: [
+      {
+        ...nameControl(),
+        tagName: "select",
+        inputType: "",
+        label,
+        options: ["I Agree", "I Disagree"],
+        value: "",
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.reusableAnswers = [
+    CandidateReusableAnswerSchema.parse({
+      id: "prior-answer",
+      label,
+      question: label,
+      answer: "I Agree",
+    }),
+  ];
+  const client = model([
+    {
+      name: "finish",
+      args: {
+        reason: "The person must complete the attestation on the review page.",
+        needsPerson: true,
+        forPerson: [{ onPage: "other", instructions }],
+      },
+    },
+  ]);
+  const result = await runApplyAgent(input, client);
+
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  expect(result).toMatchObject({
+    outcome: "paused",
+    finalUrl: url,
+    pauses: [
+      {
+        question: null,
         blocker: { code: "person_step_required", detail: instructions },
       },
     ],

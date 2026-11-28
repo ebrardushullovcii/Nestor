@@ -1,7 +1,4 @@
-import {
-  cleanFormQuestionPrompt,
-  normalizeFormQuestionPrompt,
-} from "@nestor/contracts";
+import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { normalizeSignal } from "./control-classification";
 import type { ApplyFormControl } from "./types";
 
@@ -11,8 +8,7 @@ export function questionLabel(control: ApplyFormControl): string {
   if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
   const label = control.label.trim();
   const group =
-    control.attestationKind === null &&
-    (control.kind === "radio" || control.answerControlType === "multi_choice")
+    control.kind === "radio" || control.answerControlType === "multi_choice"
       ? (
           control.sectionPath?.at(-1) ??
           control.groupLabel.split(" — ").at(-1) ??
@@ -31,24 +27,16 @@ export function questionLabel(control: ApplyFormControl): string {
         control.answerControlType === "multi_choice")) &&
     group.length > 0
   )
-    return control.attestationKind !== null
-      ? cleanFormQuestionPrompt(group) || group
-      : group;
+    return group;
   const groupAddsSomething =
     normalizedGroup.length > 0 &&
     normalizedLabel.length > 0 &&
     !normalizedLabel.includes(normalizedGroup) &&
     !normalizedGroup.includes(normalizedLabel);
   const prompt = groupAddsSomething ? `${group} — ${label}` : label || group;
-  const described =
-    prompt ||
-    control.placeholder.trim() ||
-    "A question on the application form";
-  // A declaration's section can change what "I agree" means. Keep that
-  // context for both its saved answer and the model's permission check.
-  return control.attestationKind !== null
-    ? cleanFormQuestionPrompt(described) || described
-    : described;
+  return (
+    prompt || control.placeholder.trim() || "A question on the application form"
+  );
 }
 
 /** One whole question for asking, remembering, matching and checking. A hint

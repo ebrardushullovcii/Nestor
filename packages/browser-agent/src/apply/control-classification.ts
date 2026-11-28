@@ -1,5 +1,4 @@
 import type {
-  ApplicationAttestationKind,
   ApplicationQuestionControlType,
   ApplicationQuestionKind,
 } from "@nestor/contracts";
@@ -187,7 +186,6 @@ export function inferQuestionKind(
   >,
 ): ApplicationQuestionKind {
   const signal = controlSignalText(control);
-  if (inferAttestationKind(control) !== null) return "other";
   // Choice labels are sometimes observed together with every option. A
   // job-source question can therefore contain "Company website" even though
   // it is not asking for the candidate's portfolio URL. Keep that question
@@ -212,107 +210,6 @@ export function inferQuestionKind(
   // does not name). Calling it a resume hid Profile › Files from the person
   // and kept a restored transcript from continuing the application.
   return "other";
-}
-
-const ATTESTATION_SIGNALS: ReadonlyArray<
-  readonly [ApplicationAttestationKind, readonly string[]]
-> = [
-  [
-    "equal_opportunity_self_identification",
-    [
-      "equal opportunity",
-      "equal employment",
-      "self identify",
-      "self identification",
-      "voluntary self",
-      "race ethnicity",
-      "gender identity",
-      "veteran status",
-      "disability status",
-      "protected veteran",
-      // The bare words a form actually prints above these lists. Without
-      // them a self-identification question reads as an ordinary question and
-      // is put to the person, which is exactly what it must never be.
-      "gender",
-      "race",
-      "ethnicity",
-      "hispanic",
-      "latino",
-      "veteran",
-      "disability",
-      "sexual orientation",
-      "transgender",
-    ],
-  ],
-  [
-    "background_check_consent",
-    [
-      "background check",
-      "background screening",
-      "criminal record check",
-      "consent to a background",
-      "reference check consent",
-    ],
-  ],
-  [
-    "truthfulness_certification",
-    [
-      "i certify",
-      "i confirm that the information",
-      "i declare",
-      "information is true",
-      "accurate and complete",
-      "to the best of my knowledge",
-      "under penalty",
-    ],
-  ],
-  [
-    "terms_acceptance",
-    [
-      "terms and conditions",
-      "terms of service",
-      "terms of use",
-      "agree to the terms",
-      "applicant agreement",
-    ],
-  ],
-  [
-    "privacy_notice_acknowledgement",
-    [
-      "privacy policy",
-      "privacy notice",
-      "data protection",
-      "processing of my personal data",
-      "consent to the processing",
-      "candidate privacy",
-    ],
-  ],
-  [
-    "marketing_contact_consent",
-    [
-      "marketing",
-      "newsletter",
-      "future opportunities",
-      "keep me informed",
-      "contact me about other",
-      "talent community",
-    ],
-  ],
-];
-
-export function inferAttestationKind(
-  control: Pick<
-    ApplyFormControl,
-    "label" | "groupLabel" | "placeholder" | "kind"
-  >,
-): ApplicationAttestationKind | null {
-  const signal = controlSignalText(control);
-  for (const [kind, needles] of ATTESTATION_SIGNALS) {
-    if (containsAny(signal, needles)) {
-      return kind;
-    }
-  }
-  return null;
 }
 
 export function toAnswerControlType(

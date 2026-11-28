@@ -147,7 +147,7 @@ export function createStepReceiptTracker(
               required: control.required,
               readOnly: control.readOnly,
               questionKind: control.questionKind,
-              attestationKind: control.attestationKind,
+              attestationKind: null,
               repeatedQuestion: control.repeatedQuestion
                 ? {
                     prompt: fullText(control.repeatedQuestion.prompt),

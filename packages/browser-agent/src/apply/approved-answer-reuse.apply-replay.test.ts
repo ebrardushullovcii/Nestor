@@ -38,7 +38,6 @@ const field = (ref: string, groupLabel = question): ApplyFormControl => ({
   validationMessage: "",
   questionKind: "other",
   answerControlType: "text",
-  attestationKind: null,
   answered: false,
 });
 

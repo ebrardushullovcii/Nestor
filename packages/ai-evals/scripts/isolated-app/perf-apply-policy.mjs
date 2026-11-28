@@ -44,7 +44,7 @@ function catalog(messages) {
 
 function parseView(view) {
   const fields = [
-    ...view.matchAll(/^(?:  )?- ([ac]\S*) \[([^\]]+)\] · (.+)$/gmu),
+    ...view.matchAll(/^(?: {2})?- ([ac]\S*) \[([^\]]+)\] · (.+)$/gmu),
   ].map(([, ref, kind, rest]) => {
     const parts = rest.split(" · ");
     return {
@@ -53,7 +53,6 @@ function parseView(view) {
       label: parts[0] ?? "",
       required: parts.includes("required"),
       empty: parts.includes("empty"),
-      declaration: rest.includes("a declaration"),
       editable: !rest.includes("cannot be edited"),
     };
   });
@@ -118,9 +117,8 @@ export function decideApplyAction(messages) {
       else if (field.required) leftForPerson.push(field);
       continue;
     }
-    // A required box is ticked like a person would; Job Finder's own gate
-    // decides whether it may be.
-    if (field.kind === "checkbox" && (field.declaration || field.required)) {
+    // The replica scenario ticks required boxes.
+    if (field.kind === "checkbox" && field.required) {
       entries.push({ tool: "set_checkbox", ref: field.ref, checked: true });
       continue;
     }

@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 
+// Scripted answers to the exact checkbox labels in the local replica forms.
+const REPLICA_CHECKBOX_ANSWERS = new Set([
+  "I certify the information is true",
+  "I certify that the information is true",
+  "I acknowledge the privacy notice",
+  "I agree to the terms and conditions",
+  "I consent to the terms and conditions",
+  "I consent to a background check",
+]);
+
 // A scripted model for browser mechanics checks, never a production fallback.
 // It asks the real answer resolver for values and uses the real apply tools.
 export function decideReplicaAction(messages) {
@@ -24,7 +34,7 @@ export function decideReplicaAction(messages) {
   let group;
   const fields = seen.split("\n").flatMap((line, index) => {
     if (/^- \[(?:radio|checkbox) group\] · /u.test(line)) group = index;
-    const match = /^(  - [ac]|- c)(\S*) \[([^\]]+)\] · (.+)$/u.exec(line);
+    const match = /^( {2}- [ac]|- c)(\S*) \[([^\]]+)\] · (.+)$/u.exec(line);
     if (!match) return [];
     const [, prefix, number, kind, detail] = match;
     return [
@@ -106,8 +116,14 @@ export function decideReplicaAction(messages) {
       assert.ok(document, "The synthetic application must have a resume");
       return { name: "upload", args: { ref: field.ref, documentId: document } };
     }
-    if (field.kind === "checkbox" && field.detail.includes("a declaration"))
-      return { name: "set_checkbox", args: { ref: field.ref, checked: true } };
+    if (field.kind === "checkbox") {
+      const label = field.detail.split(" · ")[0].split(" — ").at(-1);
+      if (REPLICA_CHECKBOX_ANSWERS.has(label.replace(/\s*\*$/u, "")))
+        return {
+          name: "set_checkbox",
+          args: { ref: field.ref, checked: true },
+        };
+    }
     return { name: "suggest_answer", args: { ref: field.ref } };
   }
   const facts = messages

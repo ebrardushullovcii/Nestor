@@ -8,7 +8,6 @@ import { isVerificationCodeControl } from "@nestor/contracts";
 
 import {
   inferActionKind,
-  inferAttestationKind,
   inferQuestionKind,
   isControlAnswered,
   normalizeSignal,
@@ -291,7 +290,7 @@ export function buildApplyFormObservation(
           : null;
     const base: Omit<
       ApplyFormControl,
-      "questionKind" | "answerControlType" | "attestationKind" | "answered"
+      "questionKind" | "answerControlType" | "answered"
     > = {
       ref: rawControl.ref ?? `c${rawControl.index}`,
       ...(rawControl.frame ? { frame: { ...rawControl.frame } } : {}),
@@ -401,7 +400,6 @@ export function buildApplyFormObservation(
       ...base,
       questionKind: inferQuestionKind(base),
       answerControlType: toAnswerControlType(kind, rawControl.multiple),
-      attestationKind: inferAttestationKind(base),
       answered: false,
     };
     return {

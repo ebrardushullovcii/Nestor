@@ -1,27 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { ApplyFormControl } from "./types";
-import {
-  inferAttestationKind,
-  inferQuestionKind,
-  isControlAnswered,
-} from "./control-classification";
-
-describe("application declarations", () => {
-  test.each(["I agree to the terms", "I have read and agree to the terms"])(
-    "recognizes the terms checkbox: %s",
-    (label) => {
-      expect(
-        inferAttestationKind({
-          kind: "checkbox",
-          label,
-          groupLabel: "Review",
-          placeholder: "",
-        }),
-      ).toBe("terms_acceptance");
-    },
-  );
-});
+import { inferQuestionKind, isControlAnswered } from "./control-classification";
 
 function selectControl(
   input: Partial<ApplyFormControl> = {},
@@ -45,7 +25,6 @@ function selectControl(
     validationMessage: "Please select an item in the list.",
     questionKind: "location",
     answerControlType: "single_choice",
-    attestationKind: null,
     answered: false,
     ...input,
   };
@@ -142,14 +121,13 @@ describe("answered controls", () => {
   });
 });
 
-test("privacy notice acknowledgement is a declaration, never a notice period", () => {
+test("a privacy notice stays separate from a notice period", () => {
   const control = {
     kind: "checkbox" as const,
     label: "I acknowledge the privacy notice",
     groupLabel: "Review and send",
     placeholder: "",
   };
-  expect(inferAttestationKind(control)).toBe("privacy_notice_acknowledgement");
   expect(inferQuestionKind(control)).toBe("other");
   expect(
     inferQuestionKind({
