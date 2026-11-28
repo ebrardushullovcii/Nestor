@@ -217,6 +217,17 @@ function createAbortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
 
+/**
+ * An error the service reported inside a 200 answer or its stream. An empty
+ * balance there is the account's refusal, as a 402 would be: OpenAI's
+ * Responses stream answers 200, then `insufficient_quota` (R14, live).
+ */
+function reportedError(message: string): Error {
+  return ACCOUNT_REFUSAL_PATTERN.test(message)
+    ? new ModelRequestHttpError(message, 402, null)
+    : new Error(message);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -623,7 +634,7 @@ async function readStreamedPayload(
     observeUsage?.(parsed);
     const errorMessage = readErrorMessage(parsed);
     if (errorMessage && isRecord(parsed) && parsed.type !== "response.failed") {
-      throw new Error(errorMessage);
+      throw reportedError(errorMessage);
     }
     if (apiMode === "chat_completions") {
       foldChatCompletionsChunk(parsed, chat, emit);
@@ -634,14 +645,14 @@ async function readStreamedPayload(
     }
     const type = typeof parsed.type === "string" ? parsed.type : "";
     if (type === "error") {
-      throw new Error(
+      throw reportedError(
         (typeof parsed.message === "string" && parsed.message) ||
           "The AI service reported an error while streaming.",
       );
     }
     if (type === "response.failed") {
       const failure = isRecord(parsed.response) ? parsed.response : null;
-      throw new Error(
+      throw reportedError(
         (failure && readErrorMessage(failure)) ??
           "The AI service reported a failed response.",
       );
@@ -1317,7 +1328,7 @@ async function performModelRequestAttempts(
       }
       const payloadError = readErrorMessage(rawPayload);
       if (payloadError) {
-        throw new Error(payloadError);
+        throw reportedError(payloadError);
       }
       rejectIncompleteOutput(rawPayload, input.apiMode);
       const payload = normalizeModelPayload(
