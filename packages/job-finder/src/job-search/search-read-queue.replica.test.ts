@@ -128,6 +128,7 @@ function scriptedModel(log: {
                 company: "Broadfield Employer",
                 location: "Remote",
                 workModes: ["remote"],
+                fullListingRead: true,
                 sourceJobId: null,
                 employmentType: null,
                 seniority: null,

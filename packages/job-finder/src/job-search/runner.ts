@@ -480,19 +480,25 @@ export function createJobSearchRunner(
         return;
       source.counted = true;
       if (!settledState(source.row.state))
-        source.row.state = source.row.failedReads ? "partial" : "done";
+        source.row.state =
+          source.row.failedReads || source.row.partialReads
+            ? "partial"
+            : "done";
       // Inventory alone is not proof of access: the selected details must
       // also have finished, without an access or read failure.
       if (
         (source.row.state === "done" || source.row.state === "partial") &&
-        source.row.failedReads === 0
+        source.row.failedReads === 0 &&
+        !source.row.partialReads
       )
         source.completeAccess?.();
       source.row.phase = null;
       if (source.row.state === "partial" || source.row.state === "needs_you")
         source.failure ??=
-          source.notes.join(" ") ||
           source.readFailures[0] ||
+          (source.row.partialReads
+            ? "Some saved postings still need their full descriptions."
+            : source.notes.join(" ")) ||
           "Some of this site's work remains.";
       source.row.message =
         `${source.row.cards} listings; ${source.row.related} related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
@@ -501,6 +507,9 @@ export function createJobSearchRunner(
           : "") +
         (source.row.failedReads
           ? ` ${source.row.failedReads} listing reads need attention.`
+          : "") +
+        (source.row.partialReads
+          ? ` ${source.row.partialReads} listing reads stopped at partial text.`
           : "") +
         (source.notes.length ? ` ${source.notes.join(" ")}` : "") +
         (source.readFailures.length
@@ -780,9 +789,13 @@ export function createJobSearchRunner(
       else if (run.enqueue) update(run, { sourcesTotal: 1 });
       const source = sourceWork(target, full);
       source.earlierFailure = resultRows.failure(run.record!.id, target.id);
-      // This run already screened what a failed attempt had queued; the new
-      // attempt starts afresh rather than waiting on cards it has handled.
-      if (before?.counted) resultRows.clearProgress(run.record!.id, target.id);
+      // Keep reading continues the same inventory. Retrying a changed
+      // source or explicitly starting it over makes a fresh attempt.
+      if (
+        before?.counted &&
+        (!full || before.target.startingUrl !== target.startingUrl)
+      )
+        resultRows.clearProgress(run.record!.id, target.id);
       // Keep saved-result counts when restarting an interrupted source; URL
       // identity in the job store keeps already saved postings out of reads.
       const previous = resultRows.get(run.record!.id, target.id);
@@ -794,7 +807,18 @@ export function createJobSearchRunner(
       resultRows.plan(run.record!.id, target, full);
       states.set(target.id, source);
       pipeline.restore(source);
+      const previousNavigation = source.navigation?.read(target.startingUrl);
+      if (previousNavigation?.outcome?.notes.length) {
+        source.notes = previousNavigation.outcome.notes;
+        source.notesRead = previousNavigation.collected > 0;
+      }
       write(source);
+      if (previousNavigation) {
+        browserTask(source, (browserSignal) =>
+          collect(source, "browser", browserSignal),
+        );
+        return;
+      }
       void http
         .run(new URL(target.startingUrl).hostname, signal, async () => {
           if (!current(source)) return;

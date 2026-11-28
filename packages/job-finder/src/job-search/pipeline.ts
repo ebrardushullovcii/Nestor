@@ -11,6 +11,7 @@ import { createCardWaves } from "./card-waves";
 import { abortable, concurrency } from "./async";
 import { createSearchSourcesStore } from "@nestor/db/job-store";
 import { traceEvent } from "@nestor/core/run-trace";
+import { getRejectedModelRequest } from "@nestor/ai-providers";
 
 /** Quick gathers smaller screening waves; acceptance never waits on screening. */
 const QUICK_REVIEW_INTERVAL = 100;
@@ -117,8 +118,20 @@ export function createSearchPipeline(input: {
         bySource.set(card.sourceId, group);
       }
       const jobs = new Map<string, number>();
-      for (const job of result.jobs)
+      const details = new Map<string, boolean>();
+      for (const job of result.jobs) {
         jobs.set(job.sourceId, (jobs.get(job.sourceId) ?? 0) + 1);
+        const key = `${job.sourceId}\n${job.listingCardEvidence?.url ?? job.url}`;
+        if (job.facts?.fullListingRead === true) details.set(key, true);
+        else if (
+          job.facts?.fullListingRead === false &&
+          !job.hiddenReason?.startsWith("Closed:") &&
+          !details.has(key)
+        )
+          details.set(key, false);
+      }
+      const quality = (card: ListingCard) =>
+        details.get(`${card.sourceId}\n${card.url}`);
       const failures = new Map(
         result.failures.map((failure) => [failure.url, failure]),
       );
@@ -128,10 +141,16 @@ export function createSearchPipeline(input: {
         durable.acknowledgeCards(
           input.searchId,
           cards
-            .filter((card) => !failures.has(card.url))
+            .filter(
+              (card) => !failures.has(card.url) && quality(card) !== false,
+            )
             .map((card) => ({
               card,
-              outcome: closed.has(card.url) ? "related_removed" : "related",
+              outcome: closed.has(card.url)
+                ? "related_removed"
+                : quality(card) === true
+                  ? "related_full"
+                  : "related",
             })),
         );
       for (const [id, group] of bySource) {
@@ -139,6 +158,11 @@ export function createSearchPipeline(input: {
         source.processed += group.length;
         source.row.found += jobs.get(id) ?? 0;
         for (const card of group) {
+          const full = quality(card);
+          if (full === true)
+            source.row.fullReads = (source.row.fullReads ?? 0) + 1;
+          if (full === false)
+            source.row.partialReads = (source.row.partialReads ?? 0) + 1;
           if (closed.has(card.url)) source.removed++;
           const failure = failures.get(card.url);
           if (failure) {
@@ -198,11 +222,90 @@ export function createSearchPipeline(input: {
       });
     }
   };
+  const readInBrowser = (source: SourceWork, group: readonly ListingCard[]) => {
+    input.browser(source, async (browserSignal) => {
+      // Each listing is kept as soon as its browser read ends, so a
+      // restart does not lose the reads a long group had finished.
+      const handled = new Set<ListingCard>();
+      const keep = (
+        cards: readonly ListingCard[],
+        result: ReadListingResult,
+      ) => {
+        signal.throwIfAborted();
+        browserSignal.throwIfAborted();
+        const own = group.filter(
+          (card) =>
+            !handled.has(card) &&
+            cards.some(
+              (read) =>
+                read.url === card.url && read.sourceId === card.sourceId,
+            ),
+        );
+        for (const card of own) handled.add(card);
+        const indexes = new Map(
+          result.indexes?.map(({ requestedUrl, indexUrl }) => [
+            requestedUrl,
+            indexUrl,
+          ]),
+        );
+        finishRead(
+          own.filter((card) => !indexes.has(card.url)),
+          result,
+        );
+        for (const card of own) {
+          const indexUrl = indexes.get(card.url);
+          if (indexUrl) queueIndex(card, indexUrl);
+        }
+      };
+      let result: ReadListingResult;
+      try {
+        result = await deps.engine.readListings({
+          cards: group,
+          context,
+          signal: browserSignal,
+          lane: "browser",
+          onRead: (cards, read) => {
+            keep(cards, read);
+            return Promise.resolve();
+          },
+        });
+      } catch (error) {
+        signal.throwIfAborted();
+        if (getRejectedModelRequest(error)) throw error;
+        const rest = group.filter((card) => !handled.has(card));
+        result = {
+          jobs: [],
+          failures: rest.map((card) => ({
+            url: card.url,
+            reason: error instanceof Error ? error.message : String(error),
+          })),
+        };
+        keep(rest, result);
+      }
+      // A reader that does not hand listings over returns them all.
+      if (handled.size === 0) keep(group, result);
+    });
+  };
   const waves = createCardWaves(
     signal,
     async (incomingCards) => {
-      const { cards, refreshUrls } =
-        deps.store.prepareListingCards(incomingCards);
+      const prepared = deps.store.prepareListingCards(incomingCards);
+      const cards: ListingCard[] = [];
+      const deferred: ListingCard[] = [];
+      for (const card of prepared.cards) {
+        const source = sources.get(card.sourceId)!;
+        if (source.browserReads.has(card.url)) {
+          source.browserReads.delete(card.url);
+          source.screened++;
+          source.row.related++;
+          deferred.push(card);
+        } else cards.push(card);
+      }
+      // Waves contain one source. Resume its queued browser reads directly.
+      if (deferred.length)
+        readInBrowser(sources.get(deferred[0]!.sourceId)!, deferred);
+      if (!cards.length) return;
+      const { refreshUrls } = prepared;
       const touched = new Set(cards.map((card) => card.sourceId));
       for (const id of touched) {
         const source = sources.get(id)!;
@@ -245,6 +348,7 @@ export function createSearchPipeline(input: {
           });
         } catch (error) {
           signal.throwIfAborted();
+          if (getRejectedModelRequest(error)) throw error;
           const reason = error instanceof Error ? error.message : String(error);
           const rest = relatedCards.filter((card) => !handled.has(card));
           result = {
@@ -303,69 +407,8 @@ export function createSearchPipeline(input: {
             deferred.set(card.sourceId, group);
           }
         for (const [id, group] of deferred) {
-          const source = sources.get(id)!;
-          input.browser(source, async (browserSignal) => {
-            // Each listing is kept as soon as its browser read ends, so a
-            // restart does not lose the reads a long group had finished.
-            const handled = new Set<ListingCard>();
-            const keep = (
-              cards: readonly ListingCard[],
-              result: ReadListingResult,
-            ) => {
-              signal.throwIfAborted();
-              browserSignal.throwIfAborted();
-              const own = group.filter(
-                (card) =>
-                  !handled.has(card) &&
-                  cards.some(
-                    (read) =>
-                      read.url === card.url && read.sourceId === card.sourceId,
-                  ),
-              );
-              for (const card of own) handled.add(card);
-              const indexes = new Map(
-                result.indexes?.map(({ requestedUrl, indexUrl }) => [
-                  requestedUrl,
-                  indexUrl,
-                ]),
-              );
-              finishRead(
-                own.filter((card) => !indexes.has(card.url)),
-                result,
-              );
-              for (const card of own) {
-                const indexUrl = indexes.get(card.url);
-                if (indexUrl) queueIndex(card, indexUrl);
-              }
-            };
-            let result: ReadListingResult;
-            try {
-              result = await deps.engine.readListings({
-                cards: group,
-                context,
-                signal: browserSignal,
-                lane: "browser",
-                onRead: (cards, read) => {
-                  keep(cards, read);
-                  return Promise.resolve();
-                },
-              });
-            } catch (error) {
-              signal.throwIfAborted();
-              const rest = group.filter((card) => !handled.has(card));
-              result = {
-                jobs: [],
-                failures: rest.map((card) => ({
-                  url: card.url,
-                  reason:
-                    error instanceof Error ? error.message : String(error),
-                })),
-              };
-              keep(rest, result);
-            }
-            // A reader that does not hand listings over returns them all.
-            if (handled.size === 0) keep(group, result);
-          });
+          durable.deferBrowserReads(input.searchId, group);
+          readInBrowser(sources.get(id)!, group);
         }
       };
       // Hand each proven match to its source's read queue as soon as it is
@@ -596,7 +639,10 @@ export function createSearchPipeline(input: {
         save: (startUrl, progress) =>
           durable.saveNavigation(input.searchId, id, startUrl, progress),
       };
-      const urls = durable.cardUrls(input.searchId, source.target.id);
+      source.browserReads = new Set(
+        durable.deferredBrowserUrls(input.searchId, id),
+      );
+      const urls = durable.cardUrls(input.searchId, id);
       for (const url of urls) source.urls.add(url);
       if (urls.length) restored.set(source.target.id, urls);
       source.row.cards = source.urls.size;
@@ -606,8 +652,14 @@ export function createSearchPipeline(input: {
       )) {
         source.processed += total;
         source.screened += total;
-        if (outcome === "related" || outcome === "related_removed")
+        if (
+          outcome === "related" ||
+          outcome === "related_full" ||
+          outcome === "related_removed"
+        )
           source.row.related += total;
+        if (outcome === "related_full" && source.row.fullReads != null)
+          source.row.fullReads += total;
         if (outcome === "unrelated") source.row.unrelated += total;
         if (outcome === "seen") source.row.seen += total;
         if (outcome === "removed" || outcome === "related_removed")

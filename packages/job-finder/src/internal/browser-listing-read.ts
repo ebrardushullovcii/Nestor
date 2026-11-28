@@ -8,6 +8,7 @@ import {
   type CandidateProfile,
   type DiscoveryRunResult,
   type JobDetail,
+  type JobListingFactsInput,
   type JobPosting,
   type JobFinderSettings,
   type JobSearchPreferences,
@@ -27,6 +28,25 @@ export interface BrowserListingReadContext {
 export interface BrowserListingReadDeps {
   browserRuntime: Pick<BrowserSessionRuntime, "runAgentDiscovery">;
   aiClient: JobFinderAiClient;
+}
+
+export function listingFactsFromPosting(
+  posting: JobPosting,
+  fullListingRead: boolean,
+): JobListingFactsInput {
+  if (!fullListingRead) return { fullListingRead };
+  return {
+    fullListingRead,
+    keySkills: posting.keySkills,
+    responsibilities: posting.responsibilities,
+    minimumQualifications: posting.minimumQualifications,
+    preferredQualifications: posting.preferredQualifications,
+    benefits: posting.benefits,
+    department: posting.department,
+    team: posting.team,
+    employerDomain: posting.employerDomain,
+    atsProvider: posting.atsProvider,
+  };
 }
 
 /**

@@ -143,6 +143,13 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   // Why the source's last attempt failed; a resume tries it again.
   { table: "search_source_queue", column: "failure", definition: "TEXT" },
   { table: "search_listing_queue", column: "completed_as", definition: "TEXT" },
+  {
+    table: "search_listing_queue",
+    column: "browser_read",
+    definition: "INTEGER NOT NULL DEFAULT 0",
+  },
+  { table: "search_sources", column: "full_reads", definition: "INTEGER" },
+  { table: "search_sources", column: "partial_reads", definition: "INTEGER" },
   { table: "fit_context", column: "scoring_fingerprint", definition: "TEXT" },
   // The person's work rule in their own words; empty in older files.
   {

@@ -283,4 +283,16 @@ test("site counts read in plain words", () => {
   ).toBe(
     "1 new match for your search · 3 not a match · 3 found before · 1 page couldn’t be read",
   );
+  expect(
+    describeCounts({
+      related: 4,
+      unrelated: 3,
+      seen: 0,
+      fullReads: 2,
+      partialReads: 1,
+      failedReads: 1,
+    }),
+  ).toContain(
+    "2 full postings read · 1 posting read in part · 1 page couldn’t be read",
+  );
 });

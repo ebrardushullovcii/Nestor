@@ -62,7 +62,7 @@ function resumedCollection(config: AgentConfig): string[] {
   const collected = resume.collectedEarlier ?? resume.collectedJobs.length;
   return [
     [
-      `This collection of ${config.promptContext.siteLabel} was interrupted (the app was closed or restarted) and is continuing from where it stopped. The earlier run had collected ${collected} listing card${collected === 1 ? "" : "s"} from this site; they are kept, and saving one again adds nothing.`,
+      `This collection of ${config.promptContext.siteLabel} is continuing from where the previous attempt stopped. It had collected ${collected} listing card${collected === 1 ? "" : "s"} from this site; they are kept, and saving one again adds nothing.`,
       resume.currentUrl
         ? `It had reached ${resume.currentUrl}${resume.currentUrl === config.startingUrls[0] ? ", where this run starts" : ""}.`
         : "",
@@ -71,6 +71,9 @@ function resumedCollection(config: AgentConfig): string[] {
         : "",
       resume.remainingWork?.length
         ? `Work still to do, recorded by the previous attempt:\n${resume.remainingWork.join("\n")}`
+        : "",
+      resume.unreadPages?.length
+        ? `Page reads that reported unread parts:\n${resume.unreadPages.map(({ url, parts }) => `${url} (${parts} unread)`).join("\n")}`
         : "",
       "Continue with what it had not read yet: the next pages, batches or directories after where it stopped. If the current page's cards might not have been collected, read them before advancing. Only reopen other pages if needed to reach unread results.",
     ]
@@ -113,6 +116,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
           : "Search depth: Quick. The person chose a quick look at the newest listings on each site; Keep reading collects the rest later. Choose useful search directories and location filters from the person's navigation goals rather than walking every location portal.",
         "Read the inventory once and follow observed Next or Load more controls until exhausted. After a stale pagination control, use the fresh page view to choose its current handle or an observed page link. When a press loads results asynchronously, look for the new batch before pressing again. Size and duplicate cards are not the end of a results list. Do not repeat keyword searches over an inventory already collected.",
         "Continue a relevant API or feed through its observed page parameters, next links or cursors; one response is not the whole source when more remain. Button-only cards can expose identifiers and click targets in read_text or extract_jobs. Click a card to obtain its posting URL when needed. Slow one-card-at-a-time collection is fine and never a question for the person. Keep the visible card facts for existing postings too: the engine reuses unchanged saved records and refreshes changed or incomplete ones.",
+        "Refresh remainingWork on extract_jobs or save_jobs_from_data as you collect. Include any observed cursor, next address or current filter and control when the URL alone cannot recover your place after a restart. State which batch was just read and what is still unread.",
         "At finish, set coverageComplete to your coverage judgment and list remainingWork with unread pages, cards, queries or cursors. Include observed addresses, control labels or cursors so a resumed search can continue. Explain how far you got (for example, pages 1 to 14 of 14) and what remains in your reason.",
         `Navigation goals: ${JSON.stringify({ targetRoles: searchPreferences.targetRoles, relatedRoles: searchPreferences.jobFamilies, locations: searchPreferences.locations, workModes: searchPreferences.workModes, excludedLocations: searchPreferences.excludedLocations, remoteCountsAsAnyLocation: searchPreferences.remoteCountsAsAnyLocation, request: promptContext.searchRequest?.intent })}`,
         `Where the person lives, may work and would move: ${JSON.stringify(wherePersonCanWork(config))}. These are facts for choosing where to look, alongside the navigation goals: places they may work in (workEligibility.authorizedWorkCountries), places they would move to (preferredRelocationRegions, when willingToRelocate is true) and, when remoteEligible is true, remote work from where they live can all hold jobs they could take, also outside their saved locations. Fit weighs each listing against these facts afterwards.`,

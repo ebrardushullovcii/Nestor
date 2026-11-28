@@ -12,6 +12,8 @@ export interface SourceWork {
   full: boolean;
   row: JobSearchSourceRow;
   urls: Set<string>;
+  /** Related cards already assigned to the browser detail reader. */
+  browserReads: Set<string>;
   /** Index page addresses this run has read on the site, requested and landed. */
   indexPages: Set<string>;
   /** Index pages this search finished on the site, kept across restarts. */
@@ -64,6 +66,7 @@ export function sourceWork(
     target,
     full,
     urls: new Set(),
+    browserReads: new Set(),
     indexPages: new Set(),
     processed: 0,
     removed: 0,
@@ -88,6 +91,8 @@ export function sourceWork(
       unrelated: 0,
       seen: 0,
       failedReads: 0,
+      fullReads: 0,
+      partialReads: 0,
       found: 0,
       added: 0,
       hidden: 0,

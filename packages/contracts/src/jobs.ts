@@ -439,6 +439,10 @@ export const JobSearchSourceRowSchema = JobSearchSourceStateSchema.extend({
   unrelated: z.number().int().nonnegative(),
   seen: z.number().int().nonnegative(),
   failedReads: z.number().int().nonnegative(),
+  /** Detail reads the reader confirmed complete; absent on older searches. */
+  fullReads: z.number().int().nonnegative().nullish(),
+  /** Saved postings whose detail reads are still partial. */
+  partialReads: z.number().int().nonnegative().nullish(),
 });
 export type JobSearchSourceRow = z.infer<typeof JobSearchSourceRowSchema>;
 export const JobSearchSourceQuerySchema = z

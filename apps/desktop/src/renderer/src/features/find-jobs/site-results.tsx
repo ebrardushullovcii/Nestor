@@ -87,11 +87,19 @@ export function describeCounts(source: {
   unrelated: number;
   seen: number;
   failedReads: number;
+  fullReads?: number | null | undefined;
+  partialReads?: number | null | undefined;
 }): string {
   return [
     `${source.related.toLocaleString()} new ${source.related === 1 ? "match" : "matches"} for your search`,
     `${source.unrelated.toLocaleString()} not a match`,
     `${source.seen.toLocaleString()} found before`,
+    ...(source.fullReads == null
+      ? []
+      : [`${plural(source.fullReads, "full posting")} read`]),
+    ...(source.partialReads
+      ? [`${plural(source.partialReads, "posting")} read in part`]
+      : []),
     ...(source.failedReads
       ? [`${plural(source.failedReads, "page")} couldn’t be read`]
       : []),

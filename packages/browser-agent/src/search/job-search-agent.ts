@@ -399,7 +399,8 @@ async function runJobSearchAgentPrivate(
     config.inventoryOnly &&
     input.page &&
     !isSourceCheck &&
-    !config.resumeCheckpoint?.remainingWork?.length
+    !config.resumeCheckpoint?.remainingWork?.length &&
+    !config.resumeCheckpoint?.unreadPages?.length
   ) {
     const postings = new Map<string, JobPosting>();
     // A mechanical read that fails (an ad frame detaching mid-read, a page
@@ -519,7 +520,9 @@ async function runJobSearchAgentPrivate(
   // Different filter routes can show identical cards. Reuse only exact text
   // and absolute link evidence, with every returned posting linked there.
   const linkedPartReads = new Map<string, ExtractedJobs>();
-  const pendingPageReads = new Map<string, number>();
+  const pendingPageReads = new Map(
+    config.resumeCheckpoint?.unreadPages?.map(({ url, parts }) => [url, parts]),
+  );
   const seenPageContent = new Set<string>();
   const seenPartContent = new Set<string>();
   const seenLinkReads = new Set<string>();
@@ -690,6 +693,9 @@ async function runJobSearchAgentPrivate(
       collectedJobs: [...collected],
       visitedUrls: [...safeVisitedUrls],
       remainingWork: remainingWork.map((work) => String(traceSafe(work))),
+      unreadPages: [...pendingPageReads]
+        .filter(([url]) => /^https?:/iu.test(url) && traceSafe(url) === url)
+        .map(([url, parts]) => ({ url, parts })),
       phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
     };
     await config.onCheckpoint(snapshot);
@@ -750,6 +756,12 @@ async function runJobSearchAgentPrivate(
     return lines.filter((line): line is string => line !== null).join("\n");
   };
 
+  const remainingWorkProperty = {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "Optional restart notes for this collection. Record the next observed page, query, filter, control or API cursor and what is left to read. When supplied, this replaces your previous restart notes.",
+  };
   const extractTool: AgentLoopTool = {
     definition: {
       type: "function",
@@ -757,10 +769,15 @@ async function runJobSearchAgentPrivate(
         name: "extract_jobs",
         description: config.inventoryOnly
           ? "Collect every genuine vacancy card on this page, including off-screen items. Return its observed listing URL and facts. Do not assess fit, read details or reject cards for preferences; the next engine steps screen and judge them."
-          : "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known.",
+          : config.requestedListing
+            ? "Read the requested vacancy on this page, including its full description, facts and application link. For a board, use the observed links to reach the requested posting, or report the board address with finish.listingIndexUrl when the vacancy is absent."
+            : "Read every job posting on the current page and save the suitable ones. Supply rejected listing URLs with a reason category and a plain reason for every listing you ruled out; those decisions are recorded, not saved as matches. Tells you what was saved, rejected and already known.",
         parameters: {
           type: "object",
           properties: {
+            ...(config.inventoryOnly
+              ? { remainingWork: remainingWorkProperty }
+              : {}),
             pageType: {
               type: "string",
               enum: ["search_results", "job_detail"],
@@ -910,6 +927,7 @@ async function runJobSearchAgentPrivate(
           });
         }, context.signal);
       emit("extract_jobs", `Reading the jobs on ${observation.url}.`);
+      const retryingPage = pendingPageReads.has(observation.url);
       pendingPageReads.set(observation.url, 1);
       const pageRead = await (async () =>
         pageType === "job_detail"
@@ -1006,7 +1024,15 @@ async function runJobSearchAgentPrivate(
           added.push(posting);
         }
       }
-      if (added.length > 0) await checkpoint();
+      const updatedWork =
+        config.inventoryOnly && Array.isArray(args.remainingWork);
+      if (updatedWork) remainingWork = asStringList(args.remainingWork);
+      if (
+        added.length > 0 ||
+        updatedWork ||
+        (config.inventoryOnly && (unread > 0 || retryingPage))
+      )
+        await checkpoint();
       emit(
         "extract_jobs",
         describeSave(added, found.length).split("\n")[0] ?? "Saved.",
@@ -1168,6 +1194,11 @@ async function runJobSearchAgentPrivate(
     },
   };
 
+  const postingTextList = z.array(z.string().trim().min(1)).default([]);
+  const postingTextListProperty = {
+    type: "array",
+    items: { type: "string", minLength: 1, pattern: "\\S" },
+  };
   const dataJobSchema = z.object({
     canonicalUrl: z.string().url(),
     title: z.string().trim().min(1),
@@ -1181,6 +1212,11 @@ async function runJobSearchAgentPrivate(
       .optional(),
     sourceJobId: z.string().trim().min(1).nullable().optional(),
     salaryText: z.string().trim().min(1).nullable().optional(),
+    keySkills: postingTextList,
+    responsibilities: postingTextList,
+    minimumQualifications: postingTextList,
+    preferredQualifications: postingTextList,
+    benefits: postingTextList,
     postedAt: z.string().datetime().nullable().optional(),
     closedReason: z.string().trim().min(1).optional(),
     requestedListingMatch: z
@@ -1193,10 +1229,13 @@ async function runJobSearchAgentPrivate(
       function: {
         name: "save_jobs_from_data",
         description:
-          "Save listings you read from API JSON, feeds or other page data. Give each listing its own URL, its description as the data gives it, and its facts. Say with fullPostingText whether that description is the posting's complete text; a card or summary is read from its own URL before it is judged. For unknown company or location use 'Company not stated' or 'Location not stated'. Omit optional unknown fields. This records your decisions; it does not reread the rendered page or assess fit.",
+          "Save listings you read from API JSON, feeds or other page data. Give each listing its own URL and its published description. Say with fullPostingText whether that description is the posting's complete text; a card or summary is read from its own URL before it is judged. Include the published pay wording and any skills, duties, qualifications or benefits stated by the employer. For unknown company or location use 'Company not stated' or 'Location not stated'. Omit optional unknown fields. This records your decisions; it does not reread the rendered page or assess fit.",
         parameters: {
           type: "object",
           properties: {
+            ...(config.inventoryOnly
+              ? { remainingWork: remainingWorkProperty }
+              : {}),
             jobs: {
               type: "array",
               items: {
@@ -1230,6 +1269,11 @@ async function runJobSearchAgentPrivate(
                     minLength: 1,
                     pattern: "\\S",
                   },
+                  keySkills: postingTextListProperty,
+                  responsibilities: postingTextListProperty,
+                  minimumQualifications: postingTextListProperty,
+                  preferredQualifications: postingTextListProperty,
+                  benefits: postingTextListProperty,
                   postedAt: {
                     type: ["string", "null"],
                     format: "date-time",
@@ -1277,7 +1321,10 @@ async function runJobSearchAgentPrivate(
     execute: async (raw, context) => {
       context.signal?.throwIfAborted();
       const parsed = z
-        .object({ jobs: z.array(dataJobSchema) })
+        .object({
+          jobs: z.array(dataJobSchema),
+          remainingWork: z.array(z.string()).optional(),
+        })
         .safeParse(parseToolArguments(raw));
       if (!parsed.success) return { kind: "ok", content: parsed.error.message };
       const added: JobPosting[] = [];
@@ -1291,7 +1338,6 @@ async function runJobSearchAgentPrivate(
           postedAt: facts.postedAt ?? null,
           applicationUrl: facts.applicationUrl ?? null,
           summary: null,
-          keySkills: [],
           applyPath: "unknown",
           easyApplyEligible: false,
           ...(closedReason
@@ -1329,7 +1375,9 @@ async function runJobSearchAgentPrivate(
           added.push(posting);
         } else if (keep(posting)) added.push(posting);
       }
-      if (added.length) await checkpoint();
+      const updatedWork = config.inventoryOnly && parsed.data.remainingWork;
+      if (updatedWork) remainingWork = updatedWork;
+      if (added.length || updatedWork) await checkpoint();
       return {
         kind: "ok",
         content: describeSave(added, parsed.data.jobs.length),

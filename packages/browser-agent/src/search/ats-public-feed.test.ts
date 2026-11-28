@@ -307,6 +307,8 @@ test("a provider detail tolerates a title suffix, and an uncorroborated detail f
               seniority: null,
               salaryText: null,
               closed: false,
+              // The reader saw the vacancy's complete published text.
+              fullListingRead: true,
             },
           ],
         }),

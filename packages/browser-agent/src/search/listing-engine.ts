@@ -1078,6 +1078,7 @@ const fieldsSchema = z.object({
   closed: z.boolean().default(false),
   isListing: z.boolean().optional(),
   index: z.boolean().optional(),
+  fullListingRead: z.boolean().default(false),
 });
 
 /** Full text is extracted mechanically once, then metadata for many bodies is read in one model call. No fit judgment here. */
@@ -1154,7 +1155,7 @@ export async function readListings(
           }
           if (!body.text)
             throw new Error("The page did not contain readable listing text.");
-          return { card, page, body, structured, publishedOnly };
+          return { card, page, body, structured };
         } catch (error) {
           input.signal?.throwIfAborted();
           // The site's own answer that the posting was removed: recorded
@@ -1231,6 +1232,8 @@ export async function readListings(
               salaryText: read.structured.salaryText,
               validThrough: read.structured.validThrough,
               directApplyUrl: read.structured.directApplyUrl,
+              descriptionLikelyTruncated:
+                read.structured.descriptionLikelyTruncated,
             }
           : null,
       })),
@@ -1242,8 +1245,15 @@ export async function readListings(
     fields: Omit<Fields, "id">,
     into: FoundJob[] = jobs,
   ): void => {
-    const { closed, isListing, index, canonicalUrl, applyUrl, ...facts } =
-      fields;
+    const {
+      closed,
+      isListing,
+      index,
+      canonicalUrl,
+      applyUrl,
+      fullListingRead,
+      ...facts
+    } = fields;
     // An index of vacancies is never saved as one.
     if (isListing === false || index === true) return;
     const hiddenReason = closed
@@ -1276,8 +1286,8 @@ export async function readListings(
         null,
       description: read.body.text,
       facts: {
-        fullListingRead:
-          !read.publishedOnly || !read.structured?.descriptionLikelyTruncated,
+        ...read.card.providerFacts?.facts,
+        fullListingRead,
       },
       summary: null,
       salaryMin: null,
@@ -1295,6 +1305,7 @@ export async function readListings(
         sourceJobId: read.card.sourceJobId ?? null,
         seniority: null,
         closed: read.card.closed ?? false,
+        fullListingRead: true,
       });
       continue;
     }
@@ -1323,7 +1334,7 @@ export async function readListings(
     const { data, lead } = pageReadInput(batch);
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. A pageText array holds ordered pieces of that page: join its string pieces and the exact textOnEveryPage blocks selected by its zero-based numeric references, without inserting separators. A string pageText is already complete. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete page text; its description is the body extracted from that page, sent only when it holds text the page text lacks, and a block the page repeated verbatim appears once. A pageText array holds ordered pieces of that page: join its string pieces and the exact textOnEveryPage blocks selected by its zero-based numeric references, without inserting separators. A string pageText is already complete. linksOnEveryPage, when present, are the links found on every page in this request, such as site navigation; each listing\'s links are its other links. Never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. When the page is an index of several vacancies, such as a category, directory or search-results page, also set index=true: its vacancies are collected from it under their own URLs. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean,"index":boolean,"fullListingRead":boolean}]}. Set fullListingRead=true only if the description supplied for this id is the vacancy’s complete published text. Use false for preview or card text, a description with sections missing, or a page that still needs to render or be opened on the employer’s site. Use the card to identify the vacancy. The card cannot supply proof of its full text. A partial vacancy will be passed to the browser reader. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
       data,
       z.object({ jobs: z.array(z.unknown()) }),
       Math.max(2000, batch.length * 220),
@@ -1361,6 +1372,19 @@ export async function readListings(
         });
         continue;
       }
+      if (
+        !fields.fullListingRead &&
+        !fields.closed &&
+        input.lane !== "browser"
+      ) {
+        failures.push({
+          url: read.card.url,
+          reason:
+            "The reader did not find the vacancy's complete published text on this page.",
+          requiresBrowser: true,
+        });
+        continue;
+      }
       append(
         read,
         {
@@ -1377,6 +1401,7 @@ export async function readListings(
             ? { applyUrl: fields.applyUrl }
             : {}),
           closed: fields.closed,
+          fullListingRead: fields.fullListingRead,
         },
         part.jobs,
       );

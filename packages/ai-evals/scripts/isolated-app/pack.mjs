@@ -1135,6 +1135,8 @@ async function writePack(options) {
           listingsRead: row?.cards ?? null,
           listingsScreened: row ? row.related + row.unrelated : null,
           listingsAlreadySeen: row?.seen ?? null,
+          fullPostingsRead: row?.full_reads ?? null,
+          partialPostingsRead: row?.partial_reads ?? null,
           listingsSaved: row?.added ?? null,
           sightedThisSearch: saved.length,
           newThisSearch: saved.filter((s) => s.newThisSearch).length,
@@ -1437,13 +1439,13 @@ async function writePack(options) {
           "",
           "## Sources",
           "",
-          "| Source | State | Lane | Cards | Related | Unrelated | Seen | Failed reads | Found | Added | Pages fetched | Model calls | Tool calls | Ours | Errors | Section |",
-          "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+          "| Source | State | Lane | Cards | Related | Unrelated | Seen | Full reads | Partial reads | Failed reads | Found | Added | Pages fetched | Model calls | Tool calls | Ours | Errors | Section |",
+          "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
           ...perSource.map((s) => {
             const row = sourceRows.find(
               (r) => String(r.source_id) === s.sourceId,
             );
-            return `| ${cell(s.label ?? s.sourceId)} | ${cell(row?.state)} | ${cell(row?.lane)} | ${row?.cards ?? ""} | ${row?.related ?? ""} | ${row?.unrelated ?? ""} | ${row?.seen ?? ""} | ${row?.failed_reads ?? ""} | ${row?.found ?? ""} | ${row?.added ?? ""} | ${s.trace.pagesFetched} | ${s.trace.modelCalls} | ${s.trace.toolCalls} | ${s.trace.ours} | ${s.errors.events.length} | [${s.section}](${s.section}) |`;
+            return `| ${cell(s.label ?? s.sourceId)} | ${cell(row?.state)} | ${cell(row?.lane)} | ${row?.cards ?? ""} | ${row?.related ?? ""} | ${row?.unrelated ?? ""} | ${s.listingsAlreadySeen ?? ""} | ${s.fullPostingsRead ?? ""} | ${s.partialPostingsRead ?? ""} | ${row?.failed_reads ?? ""} | ${row?.found ?? ""} | ${row?.added ?? ""} | ${s.trace.pagesFetched} | ${s.trace.modelCalls} | ${s.trace.toolCalls} | ${s.trace.ours} | ${s.errors.events.length} | [${s.section}](${s.section}) |`;
           }),
           "",
           ...perSource.flatMap((s) => [

@@ -2637,6 +2637,7 @@ export interface BrowserAgentRunCheckpoint {
   collectedEarlier?: number | undefined;
   visitedUrls: string[];
   remainingWork?: string[] | undefined;
+  unreadPages?: { url: string; parts: number }[] | undefined;
   phaseEvidence: z.infer<typeof SourceDebugPhaseEvidenceSchema>;
 }
 
@@ -2654,6 +2655,11 @@ export const BrowserAgentRunCheckpointSchema: z.ZodType<
   collectedEarlier: z.number().int().nonnegative().optional(),
   visitedUrls: z.array(UrlStringSchema).default([]),
   remainingWork: z.array(z.string()).optional(),
+  unreadPages: z
+    .array(
+      z.object({ url: UrlStringSchema, parts: z.number().int().positive() }),
+    )
+    .optional(),
   phaseEvidence: SourceDebugPhaseEvidenceSchema,
 });
 

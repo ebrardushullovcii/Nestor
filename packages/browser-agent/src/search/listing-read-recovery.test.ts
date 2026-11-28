@@ -207,6 +207,7 @@ test("listing metadata also retries truncation and accounts for both model turns
             company: "Synthetic Employer",
             location: "Berlin",
             workModes: [],
+            fullListingRead: true,
             sourceJobId: null,
             employmentType: null,
             seniority: null,

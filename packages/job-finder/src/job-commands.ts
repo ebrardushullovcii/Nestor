@@ -1,4 +1,5 @@
 import { createProfileCommandHandlers } from "./profile-commands";
+import { listingFactsFromPosting } from "./internal/browser-listing-read";
 import {
   JOB_COMMANDS,
   type JobPosting,
@@ -71,20 +72,7 @@ export function savePageJobs(
         description: posting.description,
         // A results card is saved as one, so the resume writer reads its
         // posting first; a full page read carries its facts.
-        facts: input.fullListingRead
-          ? {
-              fullListingRead: true,
-              keySkills: posting.keySkills,
-              responsibilities: posting.responsibilities,
-              minimumQualifications: posting.minimumQualifications,
-              preferredQualifications: posting.preferredQualifications,
-              benefits: posting.benefits,
-              department: posting.department,
-              team: posting.team,
-              employerDomain: posting.employerDomain,
-              atsProvider: posting.atsProvider,
-            }
-          : { fullListingRead: false },
+        facts: listingFactsFromPosting(posting, input.fullListingRead === true),
       })),
     });
     const [posting] = input.postings;
