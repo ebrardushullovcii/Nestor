@@ -607,16 +607,20 @@ export function TaskPane(props: {
                     ? "Sign in to continue"
                     : task.kind === "captcha"
                       ? "Complete the CAPTCHA"
-                      : "Complete verification"}
+                      : task.kind === "other"
+                        ? "Continue on the site"
+                        : "Complete verification"}
               </h2>
               <p className="whitespace-pre-wrap text-sm text-foreground-soft">
                 {task.prompt}
               </p>
-              <p className="text-sm text-foreground-muted">
-                {task.blockedUrl
-                  ? "Open this posting in your browser to finish the application by hand."
-                  : "Finish this step in the browser. Waiting applications continue automatically once their pages are accessible."}
-              </p>
+              {task.kind !== "other" ? (
+                <p className="text-sm text-foreground-muted">
+                  {task.blockedUrl
+                    ? "Open this posting in your browser to finish the application by hand."
+                    : "Finish this step in the browser. Waiting applications continue automatically once their pages are accessible."}
+                </p>
+              ) : null}
               {task.scope.siteOrigin ? (
                 <p className="break-all text-sm">{task.scope.siteOrigin}</p>
               ) : null}
@@ -673,7 +677,9 @@ export function TaskPane(props: {
                   })
                 }
               >
-                {task.blockedUrl ? "Open in Nestor" : "Open in browser"}
+                {task.blockedUrl || task.kind === "other"
+                  ? "Open in Nestor"
+                  : "Open in browser"}
               </Button>
               {task.blockedUrl ? (
                 <p className="text-sm break-all">{task.blockedUrl}</p>
@@ -705,7 +711,9 @@ export function TaskPane(props: {
                             now.applications.some((application) =>
                               ["queued", "running"].includes(application.state),
                             )
-                              ? "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
+                              ? task.kind === "other"
+                                ? "Job Finder is checking where the application can continue."
+                                : "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
                               : "The page is still waiting. Finish the browser step, then check again.",
                           );
                       }

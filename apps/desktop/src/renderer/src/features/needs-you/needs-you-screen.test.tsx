@@ -1026,6 +1026,41 @@ it("shows each same-site challenge's instructions and opens the selected applica
   }
 });
 
+it("shows a site step in the model's words and opens it in Nestor", async () => {
+  const prompt = "Decide whether to subscribe before applying.";
+  const [row] = claimed;
+  const requested = applications.needsYou.request({
+    applicationId: row!.id,
+    attempt: row!.attempt,
+    fieldKey: "site_access",
+    key: "site_access",
+    kind: "other",
+    scope: { siteOrigin: "https://jobs.example.test" },
+    pageUrl: "https://jobs.example.test/checkout",
+    prompt,
+    input: "text",
+    options: [],
+  });
+  if (requested.status !== "needs_you") throw new Error("Missing task");
+  const open = vi.spyOn(window.nestor.needsYou, "run");
+  show();
+  const pane = within(
+    await screen.findByRole("region", { name: "Task details" }),
+  );
+  expect(
+    await pane.findByRole("heading", { name: "Continue on the site" }),
+  ).toBeTruthy();
+  expect(pane.getByText(prompt)).toBeTruthy();
+  expect(
+    pane.queryByRole("heading", { name: /captcha|verification/i }),
+  ).toBeNull();
+  expect(pane.queryByRole("button", { name: "Open in my browser" })).toBeNull();
+  fireEvent.click(pane.getByRole("button", { name: "Open in Nestor" }));
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith("open_need", { id: requested.task.id }),
+  );
+});
+
 it("keeps a resumed sign-in application's context and reports checking as status", async () => {
   const row = claimed[0]!;
   const requested = applications.needsYou.request({

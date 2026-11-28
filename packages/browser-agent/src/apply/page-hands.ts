@@ -572,6 +572,15 @@ export function createApplyPageHands(
     ...(mechanics.generateAccountCredential
       ? { generateAccountCredential: mechanics.generateAccountCredential }
       : {}),
+    ...(mechanics.resolveAccountCredential
+      ? { resolveAccountCredential: mechanics.resolveAccountCredential }
+      : {}),
+    ...(mechanics.listAccountDrafts
+      ? { listAccountDrafts: mechanics.listAccountDrafts }
+      : {}),
+    ...(mechanics.fillAccountDraft
+      ? { fillAccountDraft: mechanics.fillAccountDraft }
+      : {}),
     ...(mechanics.openTab ? { openTab: mechanics.openTab } : {}),
     ...(mechanics.switchTab ? { switchTab: mechanics.switchTab } : {}),
     ...(mechanics.closeTab ? { closeTab: mechanics.closeTab } : {}),

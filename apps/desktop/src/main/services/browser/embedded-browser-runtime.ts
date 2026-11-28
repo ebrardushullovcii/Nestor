@@ -4,6 +4,7 @@ import type {
 } from "@nestor/browser-runtime";
 import type {
   BrowserGenerateAccountInput,
+  BrowserResolveAccountInput,
   ApplyExecutionResult,
   BrowserSessionState,
   DiscoveryRunResult,
@@ -63,18 +64,28 @@ export function withEmbeddedBrowserActivity(
   browser: EmbeddedBrowser,
 ): BrowserSessionRuntime {
   const applicationSources = new Map<string, JobSource>();
+  const ownedTab = async (
+    claimedTabs: () => Promise<string[]>,
+    url: string,
+  ) => {
+    const owned = new Set(await claimedTabs());
+    const displayUrl = browserDisplayUrl(url);
+    return browser
+      .getState()
+      .tabs.find(
+        (tab) => owned.has(tab.id) && browserDisplayUrl(tab.url) === displayUrl,
+      );
+  };
+  const missingTab = {
+    available: false,
+    credentials: [],
+    message: "The owned account tab is unavailable.",
+  };
   const generateOwnedAccount = async (
     claimedTabs: () => Promise<string[]>,
     input: BrowserGenerateAccountInput,
   ) => {
-    const owned = new Set(await claimedTabs());
-    const tab = browser
-      .getState()
-      .tabs.find(
-        (t) =>
-          owned.has(t.id) &&
-          browserDisplayUrl(t.url) === browserDisplayUrl(input.url),
-      );
+    const tab = await ownedTab(claimedTabs, input.url);
     return tab
       ? browser.generateAccountCredential(tab.id, input.username, input.targets)
       : {
@@ -84,6 +95,14 @@ export function withEmbeddedBrowserActivity(
           username: input.username,
           message: "The owned account tab is unavailable; observe again.",
         };
+  };
+  const resolveOwnedAccount = async (
+    claimedTabs: () => Promise<string[]>,
+    input: BrowserResolveAccountInput,
+  ) => {
+    for (const tabId of await claimedTabs())
+      if (browser.resolveAccountCredential(tabId, input)) return true;
+    return false;
   };
   const prepareOwnedCredentials = async (
     claimedTabs: () => Promise<string[]>,
@@ -558,25 +577,38 @@ export function withEmbeddedBrowserActivity(
                                 "A named password field changed; observe again.",
                             };
                       },
+                      resolveAccountCredential: (input) =>
+                        resolveOwnedAccount(claimedTabs, input),
+                      listAccountDrafts: async () => {
+                        const raw = await formInput.session.readPage();
+                        const tab = await ownedTab(claimedTabs, raw.url ?? "");
+                        return tab
+                          ? browser.listAccountDrafts(tab.id)
+                          : missingTab;
+                      },
+                      fillAccountDraft: async (ref, credentialId) => {
+                        const raw = await formInput.session.readPage();
+                        const control = raw.controls.find(
+                          (c) => (c.ref ?? `c${c.index}`) === ref,
+                        );
+                        const tab = await ownedTab(claimedTabs, raw.url ?? "");
+                        return control && tab
+                          ? browser.fillAccountDraft(tab.id, credentialId, {
+                              controlIndex: control.index,
+                              id: control.id,
+                              name: control.name,
+                              ...(control.frame
+                                ? { frame: control.frame }
+                                : {}),
+                            })
+                          : false;
+                      },
                       listSavedCredentials: async () => {
                         const raw = await formInput.session.readPage();
-                        const owned = new Set(await claimedTabs());
-                        const tab = browser
-                          .getState()
-                          .tabs.find(
-                            (t) =>
-                              owned.has(t.id) &&
-                              browserDisplayUrl(t.url) ===
-                                browserDisplayUrl(raw.url ?? ""),
-                          );
+                        const tab = await ownedTab(claimedTabs, raw.url ?? "");
                         return tab
                           ? browser.listAgentCredentials(tab.id)
-                          : {
-                              available: false,
-                              message:
-                                "The owned application tab is unavailable.",
-                              credentials: [],
-                            };
+                          : missingTab;
                       },
                       fillSavedCredential: async (ref, credentialId) => {
                         const raw = await formInput.session.readPage();
@@ -584,15 +616,7 @@ export function withEmbeddedBrowserActivity(
                           (c) => (c.ref ?? `c${c.index}`) === ref,
                         );
                         if (!control) return false;
-                        const owned = new Set(await claimedTabs());
-                        const tab = browser
-                          .getState()
-                          .tabs.find(
-                            (t) =>
-                              owned.has(t.id) &&
-                              browserDisplayUrl(t.url) ===
-                                browserDisplayUrl(raw.url ?? ""),
-                          );
+                        const tab = await ownedTab(claimedTabs, raw.url ?? "");
                         return tab
                           ? browser.fillAgentCredential(tab.id, credentialId, {
                               controlIndex: control.index,
@@ -688,36 +712,30 @@ export function withEmbeddedBrowserActivity(
                     prepareOwnedCredentials(claimedTabs, url),
                   generateAccountCredential: (input) =>
                     generateOwnedAccount(claimedTabs, input),
+                  resolveAccountCredential: (input) =>
+                    resolveOwnedAccount(claimedTabs, input),
+                  listAccountDrafts: async (url) => {
+                    const tab = await ownedTab(claimedTabs, url);
+                    return tab ? browser.listAccountDrafts(tab.id) : missingTab;
+                  },
+                  fillAccountDraft: async ({ url, target, credentialId }) => {
+                    const tab = await ownedTab(claimedTabs, url);
+                    return tab
+                      ? browser.fillAccountDraft(tab.id, credentialId, target)
+                      : false;
+                  },
                   listSavedCredentials: async (url) => {
-                    const owned = new Set(await claimedTabs());
-                    const tab = browser
-                      .getState()
-                      .tabs.find(
-                        (tab) =>
-                          owned.has(tab.id) &&
-                          browserDisplayUrl(tab.url) === browserDisplayUrl(url),
-                      );
+                    const tab = await ownedTab(claimedTabs, url);
                     return tab
                       ? browser.listAgentCredentials(tab.id)
-                      : {
-                          available: false,
-                          credentials: [],
-                          message: "The owned sign-in tab is unavailable.",
-                        };
+                      : missingTab;
                   },
                   fillSavedCredential: async ({
                     url,
                     target,
                     credentialId,
                   }) => {
-                    const owned = new Set(await claimedTabs());
-                    const tab = browser
-                      .getState()
-                      .tabs.find(
-                        (tab) =>
-                          owned.has(tab.id) &&
-                          browserDisplayUrl(tab.url) === browserDisplayUrl(url),
-                      );
+                    const tab = await ownedTab(claimedTabs, url);
                     return tab
                       ? browser.fillAgentCredential(
                           tab.id,

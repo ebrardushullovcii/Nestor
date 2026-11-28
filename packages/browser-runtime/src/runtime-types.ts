@@ -4,6 +4,7 @@ import type {
   BrowserPasswordFieldTarget,
   BrowserGenerateAccountInput,
   BrowserGeneratedLoginResult,
+  BrowserResolveAccountInput,
   ApplicationPageState,
   ApplicationPageReopenProgress,
   PreparedApplicationForm,
@@ -517,9 +518,14 @@ export interface AgentDiscoveryOptions {
     target: BrowserPasswordFieldTarget;
     credentialId: string;
   }) => Promise<boolean>;
+  listAccountDrafts?: (url: string) => Promise<BrowserPasswordsList>;
+  fillAccountDraft?: AgentDiscoveryOptions["fillSavedCredential"];
   generateAccountCredential?: (
     input: BrowserGenerateAccountInput,
   ) => Promise<BrowserGeneratedLoginResult>;
+  resolveAccountCredential?: (
+    input: BrowserResolveAccountInput,
+  ) => Promise<boolean>;
   requestedListing?: { url: string; title: string; text: string };
   /** Main-owned exact-site autofill; returns no credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;

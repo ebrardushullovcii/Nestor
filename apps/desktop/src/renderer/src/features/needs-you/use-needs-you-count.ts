@@ -15,7 +15,11 @@ export function useNeedsYouCount(): number {
         const counts = await window.nestor.needsYou.run("needs_you_counts", {});
         if (live)
           setCount(
-            counts.question + counts.sign_in + counts.captcha + counts.mfa,
+            counts.question +
+              counts.sign_in +
+              counts.captcha +
+              counts.mfa +
+              counts.other,
           );
       } catch {
         /* A later store event retries the read. */

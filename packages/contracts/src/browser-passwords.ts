@@ -41,6 +41,10 @@ export interface BrowserGenerateAccountInput {
   username: string;
   targets: BrowserPasswordFieldTarget[];
 }
+export interface BrowserResolveAccountInput {
+  credentialId: string;
+  outcome: "accepted" | "discarded";
+}
 export const BrowserPasswordPromptInputSchema = z
   .object({ promptId: Id })
   .strict();

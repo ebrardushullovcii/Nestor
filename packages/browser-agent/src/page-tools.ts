@@ -9,7 +9,7 @@ import { createVisualPageTools } from "./visual-page-tools";
 import { createKeyboardTools } from "./keyboard-tools";
 import { createTabTools } from "./tab-tools";
 import {
-  createAccountCredentialTool,
+  createAccountCredentialTools,
   createSavedLoginTools,
 } from "./account-credential-tool";
 import { rememberVerificationSecret } from "@nestor/core/run-trace";
@@ -531,7 +531,7 @@ export function createPageTools(
     tools: [
       ...tools,
       ...createTabTools(hands, remember, describe),
-      createAccountCredentialTool(hands),
+      ...createAccountCredentialTools(hands),
       ...createSavedLoginTools(hands),
     ].map((tool) => ({
       ...tool,

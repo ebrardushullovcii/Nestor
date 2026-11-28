@@ -49,6 +49,7 @@ function bridge(needs: AiAccountNeed[]) {
             sign_in: 0,
             captcha: 0,
             mfa: 0,
+            other: 0,
             saved: 0,
           }),
         ),

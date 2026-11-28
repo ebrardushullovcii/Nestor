@@ -1,6 +1,9 @@
 import { randomUUID, randomInt } from "node:crypto";
 import type { BrowserPasswordMetadata } from "@nestor/contracts";
-import type { BrowserPasswordRepository } from "@nestor/db";
+import type {
+  BrowserPasswordRepository,
+  EncryptedBrowserPassword,
+} from "@nestor/db";
 import { passwordOrigin } from "./password-origin";
 
 export interface PasswordEncryption {
@@ -15,7 +18,6 @@ export interface PasswordValue {
   password: string;
 }
 export class PasswordVault {
-  private readonly generatedAccounts = new Set<string>();
   constructor(
     private readonly repository: BrowserPasswordRepository,
     private readonly encryption: PasswordEncryption,
@@ -44,7 +46,11 @@ export class PasswordVault {
   }
   read(id: string): PasswordValue | null {
     this.requireEncryption();
-    const row = this.repository.get(id);
+    return this.readEncrypted(this.repository.get(id));
+  }
+  private readEncrypted(
+    row: EncryptedBrowserPassword | null,
+  ): PasswordValue | null {
     if (!row) return null;
     try {
       const value: unknown = JSON.parse(
@@ -73,21 +79,16 @@ export class PasswordVault {
       );
     }
   }
-  /** Generate once per origin/account so a retry reuses the saved login. */
-  generateAccount(origin: string, username: string): BrowserPasswordMetadata {
+  /** Persist the encrypted draft before filling any field that can be submitted. */
+  generateAccountDraft(origin: string, username: string): string {
+    this.requireEncryption();
     const normalized = passwordOrigin(origin);
-    if (!normalized || !username.trim())
+    if (!normalized || !username.trim() || username.length > 1000)
       throw new Error("The new login needs its site and username.");
-    const existing = this.list(normalized).find(
-      (row) => row.username === username,
-    );
-    const accountKey = JSON.stringify([normalized, username]);
-    if (
-      existing &&
-      this.generatedAccounts.has(accountKey) &&
-      this.read(existing.id)
-    )
-      return existing;
+    const existing = this.repository
+      .listDrafts(normalized)
+      .find((draft) => draft.username === username);
+    if (existing) return existing.id;
     const groups = [
       "ABCDEFGHJKLMNPQRSTUVWXYZ",
       "abcdefghijkmnopqrstuvwxyz",
@@ -101,14 +102,49 @@ export class PasswordVault {
       const target = randomInt(index + 1);
       [chars[index], chars[target]] = [chars[target]!, chars[index]!];
     }
-    this.save({ origin: normalized, username, password: chars.join("") });
-    this.generatedAccounts.add(accountKey);
-    return this.list(normalized).find((row) => row.username === username)!;
+    const now = new Date().toISOString();
+    return this.repository.putDraft({
+      id: randomUUID(),
+      origin: normalized,
+      username,
+      createdAt: now,
+      updatedAt: now,
+      ciphertext: this.encrypt({
+        origin: normalized,
+        username,
+        password: chars.join(""),
+      }),
+    });
+  }
+  listAccountDrafts(origin: string): BrowserPasswordMetadata[] {
+    return this.repository.listDrafts(origin);
+  }
+  readAccountDraft(origin: string, id: string): PasswordValue | null {
+    this.requireEncryption();
+    return this.readEncrypted(this.repository.getDraft(id, origin));
+  }
+  hasDraftPassword(origin: string, password: string): boolean {
+    for (const { id } of this.listAccountDrafts(origin)) {
+      try {
+        if (this.readAccountDraft(origin, id)?.password === password)
+          return true;
+      } catch {
+        // An unreadable draft cannot match a password the person entered.
+      }
+    }
+    return false;
+  }
+  resolveAccountDraft(origin: string, id: string, accepted: boolean): boolean {
+    if (accepted && !this.readAccountDraft(origin, id)) return false;
+    return this.repository.resolveDraft(id, origin, accepted);
+  }
+  private encrypt(value: PasswordValue): Buffer {
+    // Bind ciphertext to its origin and account, for saved credentials and drafts.
+    return this.encryption.encryptString(JSON.stringify(value));
   }
   save(value: PasswordValue): "added" | "updated" | "skipped" {
     this.requireEncryption();
     const origin = passwordOrigin(value.origin);
-    this.generatedAccounts.delete(JSON.stringify([origin, value.username]));
     if (
       !origin ||
       value.username.length > 1000 ||
@@ -130,9 +166,7 @@ export class PasswordVault {
     const now = new Date().toISOString();
     // Encrypt the binding too, so replacing metadata cannot redirect a credential.
     try {
-      const ciphertext = this.encryption.encryptString(
-        JSON.stringify({ ...value, origin }),
-      );
+      const ciphertext = this.encrypt({ ...value, origin });
       this.repository.put({
         id: existing?.id ?? randomUUID(),
         origin,
@@ -147,6 +181,7 @@ export class PasswordVault {
     return existing ? "updated" : "added";
   }
   clear(): void {
+    this.repository.clearDrafts();
     for (const record of this.repository.list())
       this.repository.delete(record.id);
   }

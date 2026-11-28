@@ -40,7 +40,11 @@ export async function buildDiagnosticsFileExport() {
       shortlistedJobs: stages.shortlisted,
       applications: getApplicationStore().stateCounts(),
       unresolvedActions:
-        needsYou.question + needsYou.sign_in + needsYou.captcha + needsYou.mfa,
+        needsYou.question +
+        needsYou.sign_in +
+        needsYou.captcha +
+        needsYou.mfa +
+        needsYou.other,
       approvedResumes: createResumeStore(store).approvedJobIds().length,
       originalResumeReady,
       siteChecks: siteChecks.length,

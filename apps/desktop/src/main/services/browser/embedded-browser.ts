@@ -161,6 +161,16 @@ export class EmbeddedBrowser {
   listAgentCredentials(tabId: string) {
     return this.passwords().list(tabId);
   }
+  listAccountDrafts(tabId: string) {
+    return this.passwords().listAccountDrafts(tabId);
+  }
+  fillAccountDraft(
+    tabId: string,
+    credentialId: string,
+    target: BrowserPasswordFieldTarget,
+  ) {
+    return this.passwords().fillAccountDraft(tabId, credentialId, target);
+  }
   fillAgentCredential(
     tabId: string,
     credentialId: string,
@@ -174,6 +184,12 @@ export class EmbeddedBrowser {
     targets: BrowserPasswordFieldTarget[],
   ) {
     return this.passwords().generateAccountCredential(tabId, username, targets);
+  }
+  resolveAccountCredential(
+    tabId: string,
+    input: Parameters<BrowserPasswords["resolveAccountCredential"]>[1],
+  ) {
+    return this.passwords().resolveAccountCredential(tabId, input);
   }
   private window: BrowserWindow | null = null;
   private backstage: BaseWindow | null = null;

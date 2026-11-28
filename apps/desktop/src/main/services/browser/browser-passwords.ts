@@ -17,6 +17,7 @@ import {
   type BrowserPasswordFieldTarget,
   type BrowserPasswordsList,
   type BrowserGeneratedLoginResult,
+  type BrowserResolveAccountInput,
 } from "@nestor/contracts";
 import { createBrowserPasswordRepository } from "@nestor/db";
 import {
@@ -25,7 +26,7 @@ import {
 } from "@nestor/db/job-store";
 import { getJobStore } from "../job-store";
 import { resolveDesktopUserDataDirectory } from "../../setup/user-data-directory";
-import { PasswordVault } from "./password-vault";
+import { PasswordVault, type PasswordValue } from "./password-vault";
 import { passwordOrigin, passwordOriginsMatch } from "./password-origin";
 import { readPasswordForms } from "./password-form";
 
@@ -41,6 +42,8 @@ interface PendingPassword {
 }
 export class BrowserPasswords {
   private vaultInstance: PasswordVault | null = null;
+  // Remember which origin offered a draft if signup redirects this tab.
+  private readonly draftOrigins = new Map<string, Map<string, string>>();
   private readonly pending = new Map<string, PendingPassword>();
   private readonly fills = new Map<
     string,
@@ -136,7 +139,8 @@ export class BrowserPasswords {
         value.action,
         value.origin,
       ) ||
-      !this.vault().available()
+      !this.vault().available() ||
+      this.vault().hasDraftPassword(value.origin, value.password)
     )
       return;
     const digest = createHash("sha256")
@@ -192,6 +196,10 @@ export class BrowserPasswords {
     return pending.metadata;
   }
   forget(tabId: string): void {
+    this.draftOrigins.delete(tabId);
+    this.clearCapture(tabId);
+  }
+  private clearCapture(tabId: string): void {
     this.pending.delete(tabId);
     this.dismissed.delete(tabId);
     for (const fill of this.fills.values())
@@ -200,7 +208,7 @@ export class BrowserPasswords {
   navigation(tabId: string, url: string): void {
     const pending = this.pending.get(tabId);
     if (pending && pending.metadata.origin !== passwordOrigin(url))
-      this.forget(tabId);
+      this.clearCapture(tabId);
   }
   save(promptId: string): void {
     const entry = [...this.pending.entries()].find(
@@ -216,7 +224,7 @@ export class BrowserPasswords {
       username: value.metadata.username,
       password: value.password,
     });
-    this.forget(tabId);
+    this.clearCapture(tabId);
     this.host.changed();
   }
   dismiss(promptId: string): void {
@@ -262,16 +270,50 @@ export class BrowserPasswords {
       credentials: origin === null ? [] : vault.list(origin),
     };
   }
-  async autofill(
+  listAccountDrafts(tabId: string): BrowserPasswordsList {
+    const origin = passwordOrigin(this.page(tabId)?.contents.getURL() ?? "");
+    const credentials = origin ? this.vault().listAccountDrafts(origin) : [];
+    for (const entry of credentials)
+      this.rememberDraftOrigin(tabId, entry.id, entry.origin);
+    return { available: true, message: null, credentials };
+  }
+  private rememberDraftOrigin(tabId: string, id: string, origin: string): void {
+    const origins = this.draftOrigins.get(tabId) ?? new Map<string, string>();
+    origins.set(id, origin);
+    this.draftOrigins.set(tabId, origins);
+  }
+  autofill(
     tabId: string,
     credentialId: string,
     agent = false,
     target?: BrowserPasswordFieldTarget,
   ): Promise<boolean> {
+    return this.fillCredential(tabId, credentialId, agent, target);
+  }
+  async fillAccountDraft(
+    tabId: string,
+    credentialId: string,
+    target: BrowserPasswordFieldTarget,
+  ): Promise<boolean> {
+    const origin = passwordOrigin(this.page(tabId)?.contents.getURL() ?? "");
+    const draft = origin && this.vault().readAccountDraft(origin, credentialId);
+    if (!origin || !draft) return false;
+    this.rememberDraftOrigin(tabId, credentialId, origin);
+    return this.fillCredential(tabId, credentialId, true, target, draft);
+  }
+  private async fillCredential(
+    tabId: string,
+    credentialId: string,
+    agent: boolean,
+    target?: BrowserPasswordFieldTarget,
+    draft?: PasswordValue,
+  ): Promise<boolean> {
     const page = this.page(tabId);
-    const saved = this.vault()
-      .list()
-      .find((row) => row.id === credentialId);
+    const saved =
+      draft ??
+      this.vault()
+        .list()
+        .find((row) => row.id === credentialId);
     if (!page || !saved || (agent && !target && !this.agentSignInAllowed()))
       return false;
     for (const frame of page.contents.mainFrame.framesInSubtree) {
@@ -342,7 +384,7 @@ export class BrowserPasswords {
         /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
           ? email
           : undefined;
-      const value = this.vault().read(credentialId);
+      const value = draft ?? this.vault().read(credentialId);
       if (!value || value.origin !== saved.origin) return false;
       const requestId = randomUUID();
       return new Promise<boolean>((resolve) => {
@@ -415,7 +457,7 @@ export class BrowserPasswords {
       return false;
     }
   }
-  /** Model-named exact fields, encrypted persistence, metadata-only result. */
+  /** Fill the model-named fields from an encrypted draft and return its metadata. */
   async generateAccountCredential(
     tabId: string,
     username: string,
@@ -435,29 +477,51 @@ export class BrowserPasswords {
         "The account page or named password fields are unavailable; observe again.",
       );
     try {
-      const saved = this.vault().generateAccount(origin, username);
+      const credentialId = this.vault().generateAccountDraft(origin, username);
+      this.rememberDraftOrigin(tabId, credentialId, origin);
       for (const target of targets)
-        if (!(await this.autofill(tabId, saved.id, true, target)))
+        if (!(await this.fillAccountDraft(tabId, credentialId, target)))
           return {
-            ...saved,
-            credentialId: saved.id,
+            credentialId,
+            origin,
+            username,
             ok: false,
             message:
-              "The vault saved this login but a named field changed. Observe and use fill_saved_login with its credentialId to finish.",
+              "The vault kept the login as a draft, but a named field changed. Observe and call generate_account_login again with the current refs to reuse the draft.",
           };
-      this.host.changed();
       return {
         ok: true,
-        credentialId: saved.id,
-        origin: saved.origin,
-        username: saved.username,
+        credentialId,
+        origin,
+        username,
         message:
-          "The vault generated and saved the login and filled all named password fields. No password is returned. Press the site's account-creation control yourself.",
+          "The vault filled the named fields from a draft. Press the site's account-creation control, observe the result, and use resolve_account_login to save an accepted login or discard a rejected one.",
       };
     } catch {
       return failed(
-        "The vault could not generate, securely save or fill this login. Retry the tool or report the vault error; no secret was returned.",
+        "The vault could not generate or fill this login. Retry the tool or report the vault error; no secret was returned.",
       );
     }
+  }
+  resolveAccountCredential(
+    tabId: string,
+    { credentialId, outcome }: BrowserResolveAccountInput,
+  ): boolean {
+    const page = this.page(tabId);
+    if (!page) return false;
+    const origins = this.draftOrigins.get(tabId);
+    const origin =
+      origins?.get(credentialId) ?? passwordOrigin(page.contents.getURL());
+    if (!origin) return false;
+    const resolved = this.vault().resolveAccountDraft(
+      origin,
+      credentialId,
+      outcome === "accepted",
+    );
+    if (resolved) {
+      origins?.delete(credentialId);
+      if (outcome === "accepted") this.host.changed();
+    }
+    return resolved;
   }
 }

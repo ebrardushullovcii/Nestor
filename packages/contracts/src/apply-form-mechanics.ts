@@ -1,6 +1,7 @@
 import type {
   BrowserPasswordsList,
   BrowserGeneratedLoginResult,
+  BrowserResolveAccountInput,
 } from "./browser-passwords";
 import type {
   BrowserPageImage,
@@ -438,6 +439,11 @@ export interface ApplyRawPageHands {
     username: string;
     passwordRefs: string[];
   }) => Promise<BrowserGeneratedLoginResult>;
+  resolveAccountCredential?: (
+    input: BrowserResolveAccountInput,
+  ) => Promise<boolean>;
+  listAccountDrafts?: () => Promise<BrowserPasswordsList>;
+  fillAccountDraft?: (ref: string, credentialId: string) => Promise<boolean>;
   openTab?: (url: string) => Promise<ApplyNavigationResult>;
   switchTab?: (tabId: string) => Promise<ApplyNavigationResult>;
   closeTab?: (tabId: string) => Promise<ApplyNavigationResult>;

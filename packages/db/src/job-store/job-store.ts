@@ -39,6 +39,7 @@ import {
   type AddedColumn,
 } from "./schema";
 import { createSearches, type JobSearches } from "./searches";
+import { migrateNeedsYouKinds } from "./application-schema";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
 import {
@@ -244,13 +245,16 @@ export function openJobStore(
     db = openDatabase(filePath);
   }
   const sql = closingOnFailure(db, () => {
+    // SQLite table replacement must keep rows whose foreign keys name it.
+    db.exec("PRAGMA foreign_keys = OFF");
     db.exec("BEGIN IMMEDIATE");
     // Columns first: a new index in the schema may cover a new column.
     addMissingColumns(db, JOB_STORE_ADDED_COLUMNS);
+    migrateNeedsYouKinds(db);
     for (const ddl of JOB_STORE_SCHEMA) db.exec(ddl);
     if (found.version < JOB_STORE_KEPT_FROM_VERSION)
       db.exec(`PRAGMA user_version = ${JOB_STORE_KEPT_FROM_VERSION}`);
-    db.exec("COMMIT");
+    db.exec("COMMIT; PRAGMA foreign_keys = ON");
     if (!inMemory && process.platform !== "win32") {
       for (const suffix of ["", "-wal", "-shm"]) {
         try {

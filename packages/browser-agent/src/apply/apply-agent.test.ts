@@ -353,13 +353,14 @@ test.each([
     expect(prompt).toContain("including arbitration");
     const call = vi.mocked(client.chatWithTools).mock.calls[0];
     expect(JSON.stringify(call[0])).toContain("synthetic@example.test");
-    expect(JSON.stringify(call[0])).toContain("are signed in in this browser");
+    expect(JSON.stringify(call[0])).toContain("Google accounts are signed in");
     expect(call[1].map((tool) => tool.function.name)).toEqual(
       expect.arrayContaining([
         "open_tab",
         "switch_tab",
         "close_tab",
         "generate_account_login",
+        "resolve_account_login",
       ]),
     );
   },
@@ -1538,6 +1539,35 @@ test("the model can hand a refused submission to the person's own browser", asyn
       },
     },
   ]);
+});
+
+test("keeps the model's site-step instructions on the observed checkout page", async () => {
+  const url = "https://board.example.test/checkout";
+  const instructions =
+    "Decide whether to subscribe before opening the application.";
+  const result = await runApplyAgent(
+    config(page({ url })),
+    model([
+      {
+        name: "finish",
+        args: {
+          reason: "The board requires a subscription to apply.",
+          forPerson: [{ onPage: "other", instructions }],
+        },
+      },
+    ]),
+  );
+  expect(result).toMatchObject({
+    outcome: "paused",
+    finalUrl: url,
+    pauses: [
+      {
+        question: null,
+        summary: instructions,
+        blocker: { code: "person_step_required", detail: instructions },
+      },
+    ],
+  });
 });
 
 test("a restarted application request includes the previous form step, fields and attachment before the fresh view", async () => {

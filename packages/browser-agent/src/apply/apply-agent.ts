@@ -8,7 +8,10 @@ import {
   redactVerificationData,
 } from "@nestor/core/run-trace";
 import { createTabTools, mailboxAccountFacts } from "../tab-tools";
-import { createAccountCredentialTool } from "../account-credential-tool";
+import {
+  accountDraftFacts,
+  createAccountCredentialTools,
+} from "../account-credential-tool";
 import {
   parseToolArguments,
   runAgentLoop,
@@ -404,7 +407,9 @@ async function runApplyAgentPrivate(
                   ? "multi_factor_required"
                   : kind === "own_browser"
                     ? "browser_blocked"
-                    : "security_challenge",
+                    : kind === "other"
+                      ? "person_step_required"
+                      : "security_challenge",
             requiresPerson: true,
             summary: detail,
             detail,
@@ -698,7 +703,7 @@ async function runApplyAgentPrivate(
     }),
   );
   domainTools.push(...createTabTools(config.hands, observe, describeView));
-  domainTools.push(createAccountCredentialTool(config.hands));
+  domainTools.push(...createAccountCredentialTools(config.hands));
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
     execute: async (raw, context) =>
@@ -1143,6 +1148,7 @@ async function runApplyAgentPrivate(
   });
   try {
     const mailbox = await mailboxAccountFacts(config.hands);
+    const drafts = await accountDraftFacts(config.hands);
     await refreshAnswers();
     const facts = applicationModelFactsMessages(
       runConfig.sources,
@@ -1223,6 +1229,7 @@ async function runApplyAgentPrivate(
           : []),
         { role: "user", content: facts.job },
         { role: "user", content: mailbox },
+        ...(drafts ? [{ role: "user" as const, content: drafts }] : []),
         { role: "user", content: createApplyUserPrompt(runConfig) },
         {
           role: "user",

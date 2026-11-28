@@ -86,6 +86,7 @@ const EMPTY_COUNTS: NeedsYouCounts = {
   sign_in: 0,
   captcha: 0,
   mfa: 0,
+  other: 0,
   saved: 0,
 };
 const KIND = {
@@ -93,6 +94,7 @@ const KIND = {
   sign_in: "Sign in",
   captcha: "CAPTCHA",
   mfa: "Verification",
+  other: "Site step",
 };
 /** What a `?kind=` link (from Home) narrows the list to. */
 const KIND_FILTER_LABEL: Record<NeedsYouKind, string> = {
@@ -100,6 +102,7 @@ const KIND_FILTER_LABEL: Record<NeedsYouKind, string> = {
   sign_in: "Site sign-ins",
   captcha: "CAPTCHA checks",
   mfa: "Verification codes",
+  other: "Steps to finish on a site",
 };
 
 /** The company and role waiting on a task, and how many more wait too. */
@@ -649,7 +652,11 @@ export function NeedsYouScreen() {
     workThrough.start(items);
   }
   const totalTasks =
-    counts.question + counts.sign_in + counts.captcha + counts.mfa;
+    counts.question +
+    counts.sign_in +
+    counts.captcha +
+    counts.mfa +
+    counts.other;
   const openReady = (id: number) =>
     void openPreparedApplication(id, showToast)
       .then((opened) => {

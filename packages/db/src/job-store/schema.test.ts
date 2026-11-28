@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { addMissingColumns, openJobStore } from "./job-store";
-import { JOB_STORE_ADDED_COLUMNS } from "./schema";
+import { JOB_STORE_ADDED_COLUMNS, JOB_STORE_SCHEMA } from "./schema";
 
 /**
  * Every column a store file people use can have: the layout their files were
@@ -347,6 +347,60 @@ describe("job store schema", () => {
       check.close();
       for (const { table, column } of JOB_STORE_ADDED_COLUMNS)
         expect(columns.get(table)).toContain(column);
+    });
+  });
+
+  it("keeps existing Needs you IDs, drafts, search and counts when adding site steps", () => {
+    withFile((file) => {
+      const old = new DatabaseSync(file);
+      for (const ddl of JOB_STORE_SCHEMA)
+        old.exec(
+          ddl
+            .replace("  page_url TEXT,\n", "")
+            .replace("'mfa', 'other'", "'mfa'")
+            .replace("('other',0),", ""),
+        );
+      old.exec(`
+        PRAGMA user_version = 6;
+        INSERT INTO needs_you(id,kind,answer_key,country,site_origin,prompt,input,options_json,opened_at)
+          VALUES (10,'question','notice','','','Notice period?','text','[]',1),
+                 (20,'captcha','deleted','','https://example.test','Challenge','text','[]',1);
+        INSERT INTO needs_you_drafts VALUES (10,'Two weeks',0,1);
+        DELETE FROM needs_you WHERE id=20;
+      `);
+      old.close();
+
+      const store = openJobStore(file);
+      expect(
+        store.sql("SELECT task_id,answer FROM needs_you_drafts").get(),
+      ).toEqual({ task_id: 10, answer: "Two weeks" });
+      expect(
+        store
+          .sql(
+            "SELECT rowid FROM needs_you_text WHERE needs_you_text MATCH 'notice'",
+          )
+          .get(),
+      ).toEqual({ rowid: 10 });
+      const added = store
+        .sql(
+          `INSERT INTO needs_you
+        (kind,answer_key,country,site_origin,prompt,input,options_json,opened_at,page_url)
+        VALUES ('other','step','','https://example.test','Choose a plan','text','[]',1,'https://example.test/plans')`,
+        )
+        .run();
+      expect(Number(added.lastInsertRowid)).toBe(21);
+      expect(
+        store
+          .sql(
+            "SELECT kind,n FROM needs_you_counts WHERE kind IN ('question','other') ORDER BY kind",
+          )
+          .all(),
+      ).toEqual([
+        { kind: "other", n: 1 },
+        { kind: "question", n: 1 },
+      ]);
+      expect(store.sql("PRAGMA foreign_key_check").all()).toEqual([]);
+      store.close();
     });
   });
 

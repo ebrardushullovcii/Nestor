@@ -94,6 +94,8 @@ export async function handleVerificationReplica(
   } else if (route === "register" && req.method === "POST") {
     if (!fields.password || fields.password !== fields.confirm)
       send(400, html("<h1>Passwords must match</h1>"));
+    else if (accounts.has(`${id}:${fields.email}`))
+      send(409, html("<h1>An account with that email already exists</h1>"));
     else {
       const salt = randomBytes(16);
       accounts.set(`${id}:${fields.email}`, {
