@@ -530,6 +530,8 @@ export interface ApplyFilledControl {
   fieldKey?: string;
   ref: string;
   label: string;
+  /** The control the answer went into; the review shows a choice as one. */
+  control?: ApplyControlKind;
   questionKind: ApplicationQuestionKind;
   answer: ApplyAnswer;
   at: string;

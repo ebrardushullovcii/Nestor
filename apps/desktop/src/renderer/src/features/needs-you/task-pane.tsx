@@ -26,6 +26,7 @@ import {
 import { ActionNeededLine } from "@renderer/features/applications/action-needed-line";
 import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { AnswerField } from "./answer-field";
+import { OwnBrowserFinish } from "./own-browser-finish";
 import { SourceNeedPane } from "./source-need-pane";
 import { siteCheck, useWorkThrough } from "./work-through";
 
@@ -297,6 +298,49 @@ export function TaskPane(props: {
       ? details.applications[0]!
       : null;
   const record = useWaitingApplication(single);
+  /** Opens the waiting page in Nestor's browser; a run under way owns it. */
+  async function openInNestor(blocked: boolean) {
+    if (
+      await window.nestor.needsYou.run(
+        "open_need",
+        blocked ? { id, browser: "nestor" } : { id },
+      )
+    )
+      return;
+    // A run already under way owns its page; it comes back here only if the
+    // site still needs the person.
+    const now = await window.nestor.needsYou.run("get_need", { id });
+    if (!now) {
+      onResolved(id, "The browser step is complete. Applications continue.");
+    } else if (
+      now.applications.some((application) =>
+        ["queued", "running"].includes(application.state),
+      )
+    ) {
+      setStatus(
+        "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+      );
+    } else {
+      throw new Error("This application tab could not be opened. Try again.");
+    }
+  }
+  /** The person finished it in their own browser and says how it went. */
+  async function settle(applicationId: number, sent: boolean) {
+    const done = await window.nestor.jobFinder.reportApplicationSend({
+      id: applicationId,
+      sent,
+    });
+    if (!done)
+      throw new Error(
+        "This application had already moved on. Check it in Applications.",
+      );
+    onResolved(
+      id,
+      sent
+        ? "Moved to Applied."
+        : "Marked as not sent. Apply won't send it again by itself.",
+    );
+  }
   return (
     <section
       id="list-detail"
@@ -598,131 +642,96 @@ export function TaskPane(props: {
                 {busy ? "Saving…" : "Save and continue"}
               </Button>
             </>
+          ) : task.blockedUrl ? (
+            <>
+              <h2 className="font-medium">Finish it in your own browser</h2>
+              <p className="whitespace-pre-wrap text-sm text-foreground-soft">
+                {task.prompt}
+              </p>
+              <OwnBrowserFinish
+                blockedUrl={task.blockedUrl}
+                disabled={busy}
+                onOpen={(browser) =>
+                  void act(async () => {
+                    if (browser === "nestor") return openInNestor(true);
+                    if (
+                      !(await window.nestor.needsYou.run("open_need", { id }))
+                    )
+                      throw new Error("This job link could not be opened.");
+                  })
+                }
+                onSettle={
+                  single
+                    ? (sent) => void act(() => settle(single.id, sent))
+                    : null
+                }
+                record={single ? record : null}
+              />
+            </>
           ) : (
             <>
               <h2 className="font-medium">
-                {task.blockedUrl
-                  ? "This site blocked the browser"
-                  : task.kind === "sign_in"
-                    ? "Sign in to continue"
-                    : task.kind === "captcha"
-                      ? "Complete the CAPTCHA"
-                      : task.kind === "other"
-                        ? "Continue on the site"
-                        : "Complete verification"}
+                {task.kind === "sign_in"
+                  ? "Sign in to continue"
+                  : task.kind === "captcha"
+                    ? "Complete the CAPTCHA"
+                    : task.kind === "other"
+                      ? "Continue on the site"
+                      : "Complete verification"}
               </h2>
               <p className="whitespace-pre-wrap text-sm text-foreground-soft">
                 {task.prompt}
               </p>
               {task.kind !== "other" ? (
                 <p className="text-sm text-foreground-muted">
-                  {task.blockedUrl
-                    ? "Open this posting in your browser to finish the application by hand."
-                    : "Finish this step in the browser. Waiting applications continue automatically once their pages are accessible."}
+                  Finish this step in the browser. Waiting applications continue
+                  automatically once their pages are accessible.
                 </p>
               ) : null}
               {task.scope.siteOrigin ? (
                 <p className="break-all text-sm">{task.scope.siteOrigin}</p>
               ) : null}
-              {task.blockedUrl ? (
-                <Button
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      if (
-                        !(await window.nestor.needsYou.run("open_need", { id }))
-                      )
-                        throw new Error("This job link could not be opened.");
-                    })
-                  }
-                >
-                  Open in my browser
-                </Button>
-              ) : null}
               <Button
                 disabled={busy}
-                variant={task.blockedUrl ? "outline" : undefined}
+                onClick={() => void act(() => openInNestor(false))}
+              >
+                {task.kind === "other" ? "Open in Nestor" : "Open in browser"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy}
                 onClick={() =>
                   void act(async () => {
-                    if (
-                      !(await window.nestor.needsYou.run(
-                        "open_need",
-                        task.blockedUrl ? { id, browser: "nestor" } : { id },
-                      ))
-                    ) {
-                      // A run already under way owns its page; it comes back
-                      // here only if the site still needs the person.
+                    if (await window.nestor.needsYou.run("check_need", { id }))
+                      onResolved(
+                        id,
+                        "The browser step is complete. Applications continue.",
+                      );
+                    else {
                       const now = await window.nestor.needsYou.run("get_need", {
                         id,
                       });
-                      if (!now) {
+                      if (!now)
                         onResolved(
                           id,
                           "The browser step is complete. Applications continue.",
                         );
-                      } else if (
-                        now.applications.some((application) =>
-                          ["queued", "running"].includes(application.state),
-                        )
-                      ) {
+                      else
                         setStatus(
-                          "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+                          now.applications.some((application) =>
+                            ["queued", "running"].includes(application.state),
+                          )
+                            ? task.kind === "other"
+                              ? "Job Finder is checking where the application can continue."
+                              : "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
+                            : "The page is still waiting. Finish the browser step, then check again.",
                         );
-                      } else {
-                        throw new Error(
-                          "This application tab could not be opened. Try again.",
-                        );
-                      }
                     }
                   })
                 }
               >
-                {task.blockedUrl || task.kind === "other"
-                  ? "Open in Nestor"
-                  : "Open in browser"}
+                Check again
               </Button>
-              {task.blockedUrl ? (
-                <p className="text-sm break-all">{task.blockedUrl}</p>
-              ) : (
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      if (
-                        await window.nestor.needsYou.run("check_need", { id })
-                      )
-                        onResolved(
-                          id,
-                          "The browser step is complete. Applications continue.",
-                        );
-                      else {
-                        const now = await window.nestor.needsYou.run(
-                          "get_need",
-                          { id },
-                        );
-                        if (!now)
-                          onResolved(
-                            id,
-                            "The browser step is complete. Applications continue.",
-                          );
-                        else
-                          setStatus(
-                            now.applications.some((application) =>
-                              ["queued", "running"].includes(application.state),
-                            )
-                              ? task.kind === "other"
-                                ? "Job Finder is checking where the application can continue."
-                                : "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
-                              : "The page is still waiting. Finish the browser step, then check again.",
-                          );
-                      }
-                    })
-                  }
-                >
-                  Check again
-                </Button>
-              )}
             </>
           )}
         </div>

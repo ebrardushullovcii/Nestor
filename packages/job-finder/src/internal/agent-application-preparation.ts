@@ -1341,6 +1341,7 @@ export function buildApplyReviewCard(input: {
       ).values(),
     ].map((entry) => ({
       ...(entry.fieldKey ? { fieldKey: entry.fieldKey } : {}),
+      ...(entry.control ? { control: entry.control } : {}),
       question: fullText(entry.label),
       answer: fullText(entry.answer.value),
       source: fullText(entry.answer.provenanceLabel),

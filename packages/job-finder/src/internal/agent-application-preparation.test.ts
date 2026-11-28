@@ -2745,3 +2745,57 @@ test("production preparation gives recorded interview history to the model with 
     "Absence of a record is not a negative fact",
   );
 });
+
+test("the review keeps the control each answer went into, so a hand finish picks the same option", () => {
+  const card = buildApplyReviewCard({
+    preparedAt: "2026-09-14T10:05:00.000Z",
+    siteLabel: "Replica careers",
+    result: {
+      outcome: "awaiting_your_review",
+      reason: "Ready.",
+      steps: 2,
+      finalUrl: "https://apply.example.test/form",
+      filled: [
+        {
+          ref: "c1",
+          label: "Are you authorized to work in the US?",
+          control: "radio",
+          questionKind: "work_authorization",
+          answer: {
+            value: "Yes",
+            kind: "work_authorization",
+            sourceKind: "profile",
+            sourceId: "profile.workAuthorization",
+            provenanceLabel: "your work authorization",
+            groundedIn: [],
+          },
+          at: "2026-09-14T10:00:00.000Z",
+        },
+        {
+          ref: "c2",
+          label: "Email",
+          questionKind: "personal_info",
+          answer: {
+            value: "robin@example.test",
+            kind: "personal_info",
+            sourceKind: "profile",
+            sourceId: "profile.email",
+            provenanceLabel: "your email address",
+            groundedIn: [],
+          },
+          at: "2026-09-14T10:00:00.000Z",
+        },
+      ],
+      attachments: [],
+      pauses: [],
+      notes: [],
+      timeline: [],
+      modelTurns: 1,
+      readyToSend: null,
+    },
+  });
+  expect(card.answers.map((answer) => answer.control)).toEqual([
+    "radio",
+    undefined,
+  ]);
+});

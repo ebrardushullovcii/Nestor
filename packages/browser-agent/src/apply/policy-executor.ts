@@ -611,6 +611,7 @@ export async function executeApplyProposal(
       filled: {
         ref: control.ref,
         label: questionPrompt(control),
+        control: control.kind,
         questionKind: control.questionKind,
         answer,
         at,

@@ -230,6 +230,7 @@ async function runApplyAgentPrivate(
         fieldKey,
         ref: control.ref,
         label: questionPrompt(control),
+        control: control.kind,
         questionKind: control.questionKind,
         at: now().toISOString(),
         answer: {
