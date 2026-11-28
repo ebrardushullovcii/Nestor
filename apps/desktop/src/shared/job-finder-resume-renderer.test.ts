@@ -56,6 +56,34 @@ const document: ResumeRenderDocument = {
 };
 
 describe("ATS resume rendering", () => {
+  it.each([
+    "feb. 2018 - jul. 2019",
+    "nov. 2021 – actualidad",
+    "2024年4月〜現在",
+  ])("keeps the supplied display dates %s", (dateRange) => {
+    const localized = structuredClone(document);
+    localized.sections[3]!.entries.push({
+      id: "role",
+      title: "Developer",
+      subtitle: null,
+      location: null,
+      dateRange,
+      startDate: "2021-11",
+      endDate: null,
+      isCurrent: true,
+      heading: null,
+      summary: null,
+      bullets: [],
+    });
+    for (const mode of ["preview", "export"] as const) {
+      const html = renderResumeTemplateHtml(
+        { renderDocument: localized, settings, templateId: "classic_ats" },
+        { mode },
+      );
+      expect(html).toContain(`>${dateRange}</span>`);
+    }
+  });
+
   it("renders skills as a plain list without the app's Core/Additional labels", () => {
     const html = renderResumeTemplateHtml({
       renderDocument: document,

@@ -101,6 +101,74 @@ async function wrappedLists(html: string) {
 
 const isGlyph = (content: string) => content !== "none" && content !== "normal";
 
+test("classic ATS gives Languages the same section gap as Education in print", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.emulateMedia({ media: "print" });
+    await page.setContent(
+      renderResumeTemplateHtml({
+        renderDocument: {
+          ...resume,
+          sections: [
+            ...resume.sections,
+            {
+              id: "section_education",
+              kind: "education",
+              label: "Education",
+              text: null,
+              bullets: [],
+              entries: [
+                {
+                  id: "degree",
+                  title: "Example College",
+                  subtitle: "BSc",
+                  location: null,
+                  dateRange: "2018 - 2022",
+                  startDate: "2018",
+                  endDate: "2022",
+                  isCurrent: false,
+                  heading: null,
+                  summary: null,
+                  bullets: [],
+                },
+              ],
+            },
+            {
+              id: "section_languages",
+              kind: "skills",
+              label: "Languages",
+              text: null,
+              bullets: [{ id: "en", text: "English" }],
+              entries: [],
+            },
+          ],
+        },
+        settings,
+        templateId: "classic_ats",
+      }),
+    );
+    const gaps = await page.locator(".body-grid-classic").evaluate((body) => {
+      const education = [...body.querySelectorAll("h3")]
+        .find((heading) => heading.textContent === "Education")!
+        .closest(".section-block")!;
+      const languages = [...body.querySelectorAll("h3")]
+        .find((heading) => heading.textContent === "Languages")!
+        .closest(".section-block")!;
+      const firstSection = body.firstElementChild!;
+      const gap = (next: Element, previous: Element) =>
+        next.getBoundingClientRect().top -
+        previous.getBoundingClientRect().bottom;
+      return {
+        education: gap(education, firstSection),
+        languages: gap(languages, education),
+      };
+    });
+    expect(gaps.languages).toBeCloseTo(gaps.education, 0);
+  } finally {
+    await page.close();
+  }
+});
+
 test.each(listLocalResumeTemplates().map((template) => template.id))(
   "no wrapped contact or skill line in %s starts with a separator",
   async (templateId) => {

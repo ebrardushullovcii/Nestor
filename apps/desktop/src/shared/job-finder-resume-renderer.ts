@@ -158,37 +158,13 @@ function formatDateSegment(value: string | null | undefined): string | null {
   return trimmed;
 }
 
-function normalizeDisplayDateRange(
-  value: string | null | undefined,
-): string | null {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) {
-    return null;
-  }
-
-  const parts = trimmed
-    .split(/\s*[–—]\s*|\s+-\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  if (parts.length >= 2) {
-    const rawStart = parts[0] ?? trimmed;
-    const rawEnd = parts.at(-1) ?? trimmed;
-    const start = formatDateSegment(rawStart) ?? rawStart;
-    const end = formatDateSegment(rawEnd) ?? rawEnd;
-    return start === end ? start : `${start} – ${end}`;
-  }
-
-  return formatDateSegment(trimmed) ?? trimmed;
-}
-
 function formatEntryDateRange(input: {
   dateRange: string | null;
   endDate?: string | null | undefined;
   isCurrent?: boolean | undefined;
   startDate?: string | null | undefined;
 }): string | null {
-  const displayDateRange = normalizeDisplayDateRange(input.dateRange);
+  const displayDateRange = input.dateRange?.trim();
   if (displayDateRange) {
     return displayDateRange;
   }
@@ -1319,8 +1295,8 @@ function buildSwissMinimalStandardLayout(
           context.mode,
         ),
         ...context.remainingSectionContent,
-        renderLanguagesSection(context.catalog.languageSection, context.mode),
       ]),
+      renderLanguagesSection(context.catalog.languageSection, context.mode),
     ]),
   };
 }
