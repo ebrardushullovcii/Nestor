@@ -620,7 +620,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
         thenContinue: {
           type: "string",
           description:
-            "Optional ref of this step’s Continue or Next control. Use only when every required field is answered.",
+            "Optional ref of this step’s Continue or Next control. Omit or leave blank to stay on this page. Use a ref only when every required field is answered.",
         },
         finishWhenReady: {
           type: "boolean",
@@ -700,25 +700,25 @@ export function parseFillFields(rawArguments: string):
     };
   }
   const record = asRecord(parsed);
-  const thenContinue = record.thenContinue;
+  if (
+    record.thenContinue !== undefined &&
+    typeof record.thenContinue !== "string"
+  ) {
+    return {
+      ok: false,
+      error: "thenContinue needs the ref of Continue or Next.",
+    };
+  }
+  const thenContinue = record.thenContinue?.trim();
   if (
     (record.finishWhenReady !== undefined &&
       typeof record.finishWhenReady !== "boolean") ||
-    (record.finishWhenReady === true && thenContinue !== undefined)
+    (record.finishWhenReady === true && thenContinue)
   ) {
     return {
       ok: false,
       error:
         "Use finishWhenReady: true on the final page, or thenContinue on an earlier step, never both.",
-    };
-  }
-  if (
-    thenContinue !== undefined &&
-    (typeof thenContinue !== "string" || !thenContinue.trim())
-  ) {
-    return {
-      ok: false,
-      error: "thenContinue needs the ref of Continue or Next.",
     };
   }
   const entries = record.fields;
@@ -767,8 +767,6 @@ export function parseFillFields(rawArguments: string):
     ok: true,
     fields,
     ...(record.finishWhenReady === true ? { finishWhenReady: true } : {}),
-    ...(typeof thenContinue === "string"
-      ? { thenContinue: thenContinue.trim() }
-      : {}),
+    ...(thenContinue ? { thenContinue } : {}),
   };
 }

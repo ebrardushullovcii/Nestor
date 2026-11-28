@@ -636,7 +636,7 @@ export async function executeApplyProposal(
       pressNote += ` Result: ${written.ok ? written.observedValue : written.error}.${writeFacts(written)}`;
     }
     if ("clickFacts" in result && result.clickFacts)
-      pressNote += ` Press facts (descriptive only): ${JSON.stringify(result.clickFacts)}.`;
+      pressNote += ` Press facts (requestsAfterClick lists only requests the harness observed): ${JSON.stringify(result.clickFacts)}.`;
     if (!result.ok)
       return {
         ...failed(result.error + pressNote),

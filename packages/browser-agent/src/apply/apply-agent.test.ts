@@ -629,7 +629,7 @@ test("the model's chosen value wins even when it names a saved answer with diffe
   );
   expect(source.controls[0]?.value).toBe("Company website");
 });
-test("fill_fields writes every planned field despite value and step-shape changes", async () => {
+test("fill_fields writes every planned field with a blank thenContinue despite step-shape changes", async () => {
   const source = page({
     controls: [0, 1, 2].map((index) => ({
       ...nameControl(),
@@ -639,6 +639,7 @@ test("fill_fields writes every planned field despite value and step-shape change
     })),
   });
   const input = config(source);
+  input.hands.clickElement = vi.fn(input.hands.clickElement);
   const fill = input.hands.fillText;
   input.hands.fillText = async (ref, value) => {
     const result = await fill(ref, value);
@@ -656,6 +657,7 @@ test("fill_fields writes every planned field despite value and step-shape change
       {
         name: "fill_fields",
         args: {
+          thenContinue: "",
           fields: [0, 1, 2].map((index) => ({
             tool: "type",
             ref: `c${index}`,
@@ -672,6 +674,7 @@ test("fill_fields writes every planned field despite value and step-shape change
     "Value 2",
   ]);
   expect(result.filled).toHaveLength(3);
+  expect(input.hands.clickElement).not.toHaveBeenCalled();
 });
 test("a label change on a resolving ref does not stop fill_fields", async () => {
   const source = page({
@@ -1284,7 +1287,9 @@ test.each([
     const returned = JSON.stringify(
       vi.mocked(client.chatWithTools).mock.calls[1]?.[0],
     );
-    expect(returned).toContain("Press facts");
+    expect(returned).toContain(
+      "Press facts (requestsAfterClick lists only requests the harness observed)",
+    );
     expect(returned).toContain("urlChanged");
     expect(returned).toContain("requestsAfterClick");
   },
