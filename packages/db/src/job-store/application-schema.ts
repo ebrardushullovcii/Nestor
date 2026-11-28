@@ -1,3 +1,54 @@
+import type { DatabaseSync } from "node:sqlite";
+
+const NEEDS_YOU_TABLE = `CREATE TABLE IF NOT EXISTS needs_you (
+  ask_reason_json TEXT,
+  blocked_url TEXT,
+  page_url TEXT,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL CHECK (kind IN ('question', 'sign_in', 'captcha', 'mfa', 'other')),
+  answer_key TEXT NOT NULL,
+  country TEXT NOT NULL,
+  site_origin TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  prompt_key TEXT NOT NULL DEFAULT '',
+  reuse_prompt INTEGER NOT NULL DEFAULT 0,
+  input TEXT NOT NULL CHECK (input IN ('text', 'boolean', 'choice', 'number', 'file')),
+  -- A "choice" that takes several options (multi_choice).
+  multiple INTEGER NOT NULL DEFAULT 0,
+  options_json TEXT NOT NULL,
+  opened_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  answer TEXT
+);`;
+
+/** Widen the released kind constraint, retaining row IDs for links, drafts and FTS. */
+export function migrateNeedsYouKinds(db: DatabaseSync): void {
+  const table = db
+    .prepare(
+      "SELECT sql FROM sqlite_schema WHERE type='table' AND name='needs_you'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!table || table.sql.includes("'other'")) return;
+  const columns = `ask_reason_json, blocked_url, page_url, id, kind, answer_key,
+    country, site_origin, prompt, prompt_key, reuse_prompt, input, multiple,
+    options_json, opened_at, resolved_at, answer`;
+  db.exec(`
+    ${NEEDS_YOU_TABLE.replace("IF NOT EXISTS needs_you", "needs_you_expanded")}
+    INSERT INTO needs_you_expanded (${columns}) SELECT ${columns} FROM needs_you;
+    INSERT INTO sqlite_sequence(name,seq)
+      SELECT 'needs_you_expanded',seq FROM sqlite_sequence WHERE name='needs_you'
+        AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='needs_you_expanded');
+    UPDATE sqlite_sequence SET seq=MAX(seq,COALESCE(
+      (SELECT seq FROM sqlite_sequence WHERE name='needs_you'),0
+    )) WHERE name='needs_you_expanded';
+    -- Other tables' triggers still name needs_you while it is being replaced.
+    PRAGMA legacy_alter_table = ON;
+    DROP TABLE needs_you;
+    ALTER TABLE needs_you_expanded RENAME TO needs_you;
+    PRAGMA legacy_alter_table = OFF;
+  `);
+}
+
 export const APPLICATION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS applications (
   posting_closed INTEGER NOT NULL DEFAULT 0,
@@ -62,26 +113,7 @@ CREATE TABLE IF NOT EXISTS application_origins (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS application_origins_by_site ON application_origins(origin, application_id);
 
-CREATE TABLE IF NOT EXISTS needs_you (
-  ask_reason_json TEXT,
-  blocked_url TEXT,
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL CHECK (kind IN ('question', 'sign_in', 'captcha', 'mfa')),
-  answer_key TEXT NOT NULL,
-  country TEXT NOT NULL,
-  site_origin TEXT NOT NULL,
-  prompt TEXT NOT NULL,
-  prompt_key TEXT NOT NULL DEFAULT '',
-  reuse_prompt INTEGER NOT NULL DEFAULT 0,
-  input TEXT NOT NULL CHECK (input IN ('text', 'boolean', 'choice', 'number', 'file')),
-  -- A "choice" that takes several options (multi_choice): the CHECK above
-  -- was released without it, and a released constraint is never redefined.
-  multiple INTEGER NOT NULL DEFAULT 0,
-  options_json TEXT NOT NULL,
-  opened_at INTEGER NOT NULL,
-  resolved_at INTEGER,
-  answer TEXT
-);
+${NEEDS_YOU_TABLE}
 CREATE UNIQUE INDEX IF NOT EXISTS needs_you_open_key
   ON needs_you(kind, answer_key, country, site_origin) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_site_access ON needs_you(site_origin,id)
@@ -90,7 +122,7 @@ CREATE INDEX IF NOT EXISTS needs_you_open ON needs_you(id) WHERE resolved_at IS 
 CREATE INDEX IF NOT EXISTS needs_you_by_kind ON needs_you(kind, id) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS needs_you_by_prompt ON needs_you(prompt_key,country,site_origin) WHERE kind='question' AND resolved_at IS NULL AND reuse_prompt=1;
 CREATE TABLE IF NOT EXISTS needs_you_counts (kind TEXT PRIMARY KEY, n INTEGER NOT NULL) WITHOUT ROWID;
-INSERT OR IGNORE INTO needs_you_counts (kind, n) VALUES ('question',0),('sign_in',0),('captcha',0),('mfa',0),('saved',0);
+INSERT OR IGNORE INTO needs_you_counts (kind, n) VALUES ('question',0),('sign_in',0),('captcha',0),('mfa',0),('other',0),('saved',0);
 CREATE TRIGGER IF NOT EXISTS needs_you_count_insert AFTER INSERT ON needs_you WHEN NEW.resolved_at IS NULL BEGIN
   UPDATE needs_you_counts SET n = n + 1 WHERE kind = NEW.kind;
 END;

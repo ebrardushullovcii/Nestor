@@ -76,6 +76,7 @@ type Task = {
   waiting_title?: string | null;
   waiting_count?: number | null;
   blocked_url?: string | null;
+  page_url?: string | null;
 };
 
 type SavedLookup = {
@@ -192,6 +193,7 @@ function toTask(row: Task): NeedsYouTask {
     options,
     openedAt: toIso(row.opened_at),
     ...(row.blocked_url ? { blockedUrl: row.blocked_url } : {}),
+    ...(row.page_url ? { pageUrl: row.page_url } : {}),
     ...(row.source_id != null
       ? {
           source: {
@@ -397,7 +399,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
   };
 
   const counts = (): NeedsYouCounts => {
-    const value = { question: 0, sign_in: 0, captcha: 0, mfa: 0, saved: 0 };
+    const value = {
+      question: 0,
+      sign_in: 0,
+      captcha: 0,
+      mfa: 0,
+      other: 0,
+      saved: 0,
+    };
     for (const row of sql(
       "SELECT kind, n FROM needs_you_counts",
     ).all() as Array<{ kind: keyof NeedsYouCounts; n: number }>)
@@ -1294,8 +1303,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           ).find((candidate) => compatibleYesNoQuestion(candidate, value));
         if (task && value.kind !== "question") {
           sql(
-            `UPDATE needs_you SET kind=?,prompt=?,blocked_url=? WHERE id=?`,
-          ).run(value.kind, value.prompt, value.blockedUrl ?? null, task.id);
+            `UPDATE needs_you SET kind=?,prompt=?,blocked_url=?,page_url=? WHERE id=?`,
+          ).run(
+            value.kind,
+            value.prompt,
+            value.blockedUrl ?? null,
+            value.pageUrl ?? null,
+            task.id,
+          );
           task = get(task.id)!;
         }
         if (task && !sameFormat(task, value)) {
@@ -1315,8 +1330,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (!task) {
           const created = sql(
             `INSERT INTO needs_you
-             (kind, answer_key, country, site_origin, prompt, input, multiple, options_json, opened_at, prompt_key, reuse_prompt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (kind, answer_key, country, site_origin, prompt, input, multiple, options_json, opened_at, prompt_key, reuse_prompt, blocked_url, page_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             value.kind,
             taskKey,
@@ -1329,6 +1344,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             Date.now(),
             normalizeFormQuestionPrompt(value.prompt),
             value.reusePrompt ? 1 : 0,
+            value.kind !== "question" ? (value.blockedUrl ?? null) : null,
+            value.kind !== "question" ? (value.pageUrl ?? null) : null,
           );
           task = get(Number(created.lastInsertRowid))!;
         }
@@ -1354,14 +1371,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               : value.askReason;
           sql("UPDATE needs_you SET ask_reason_json=? WHERE id=?").run(
             JSON.stringify(askReason),
-            task.id,
-          );
-          task = get(task.id)!;
-        }
-        if (value.blockedUrl) {
-          sql("UPDATE needs_you SET blocked_url=?,prompt=? WHERE id=?").run(
-            value.blockedUrl,
-            value.prompt,
             task.id,
           );
           task = get(task.id)!;
@@ -1411,7 +1420,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             : countsNow.question +
               countsNow.sign_in +
               countsNow.captcha +
-              countsNow.mfa;
+              countsNow.mfa +
+              countsNow.other;
       return {
         rows,
         nextCursor: records.length > limit ? rows.at(-1)!.id : null,

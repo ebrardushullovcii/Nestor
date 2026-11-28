@@ -272,6 +272,7 @@ const BLOCKER_CODES: Record<
   account_creation_required: "requires_manual_review",
   security_challenge: "requires_manual_review",
   multi_factor_required: "requires_manual_review",
+  person_step_required: "requires_manual_review",
   application_closed: "application_closed",
   application_page_unreachable: "application_page_unreachable",
   site_saves_as_you_go: "site_saves_as_you_go",
@@ -321,10 +322,12 @@ function toBlocker(
     return {
       code: BLOCKER_CODES[blocked.blocker.code],
       userActionKind:
-        blocked.blocker.code === "security_challenge" &&
-        blocked.blocker.requiresPerson === true
-          ? "captcha"
-          : null,
+        blocked.blocker.code === "person_step_required"
+          ? "other"
+          : blocked.blocker.code === "security_challenge" &&
+              blocked.blocker.requiresPerson === true
+            ? "captcha"
+            : null,
       // The agent's own sentence is the report the person acts on. Keep the
       // page-derived blocker detail as supporting evidence, but do not replace
       // the agent's explanation with a generic wrapper.

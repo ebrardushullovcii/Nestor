@@ -175,6 +175,12 @@ export class EmbeddedBrowser {
   ) {
     return this.passwords().generateAccountCredential(tabId, username, targets);
   }
+  resolveAccountCredential(
+    tabId: string,
+    input: Parameters<BrowserPasswords["resolveAccountCredential"]>[1],
+  ) {
+    return this.passwords().resolveAccountCredential(tabId, input);
+  }
   private window: BrowserWindow | null = null;
   private backstage: BaseWindow | null = null;
   private browserSession: Session | null = null;

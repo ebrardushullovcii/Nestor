@@ -75,6 +75,7 @@ const preparation = vi.hoisted(() => ({
   >[],
   /** The file field the run saw accepted on the form, if any. */
   attachedField: "Resume" as string | null,
+  finalUrl: null as string | null,
   readAnswers:
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
   recordSendOutcome:
@@ -133,7 +134,8 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
             : {}),
           reason: "Ready",
           steps: 1,
-          finalUrl: input.executionInput.job.canonicalUrl,
+          finalUrl:
+            preparation.finalUrl ?? input.executionInput.job.canonicalUrl,
           filled: [],
           attachments: [],
           pauses: blocker
@@ -671,6 +673,7 @@ it("records a posting the model found already sent as not sent, with no Send and
 });
 afterEach(async () => {
   preparation.blocker = null;
+  preparation.finalUrl = null;
   preparation.blockersByListing.clear();
   preparation.notReadyToSend = false;
   preparation.technicalFailure = false;
@@ -3055,6 +3058,7 @@ it.each([
   ["site_login_required", "sign_in"],
   ["account_creation_required", "sign_in"],
   ["multi_factor_required", "mfa"],
+  ["person_step_required", "other"],
 ] as const)(
   "shows the model-selected %s handoff once, then resumes when the person continues",
   async (code, kind) => {
@@ -3117,6 +3121,58 @@ it.each([
     expect(f.authorizeSending).not.toHaveBeenCalled();
   },
 );
+
+it("reopens a site step at the recorded checkout when its retained tab is gone", async () => {
+  const f = await setup(1, undefined, { onDisk: true });
+  const checkout = "https://replica.test/plans/checkout";
+  const instructions = "Decide whether to subscribe before applying.";
+  preparation.finalUrl = checkout;
+  preparation.blocker = {
+    code: "person_step_required",
+    requiresPerson: true,
+    summary: instructions,
+    detail: instructions,
+    nextActionLabel: "Open the application",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      replay: { lastUrl: "https://replica.test/onboarding" },
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.needsYou.list().rows).toMatchObject([
+      {
+        kind: "other",
+        pageUrl: checkout,
+        prompt: instructions,
+      },
+    ]),
+  );
+  const [task] = f.applications.needsYou.list().rows;
+  expect(task?.blockedUrl).toBeFalsy();
+  expect(f.applications.needsYou.counts()).toMatchObject({
+    captcha: 0,
+    other: 1,
+  });
+  const row = f.applications.listApplications().rows[0]!;
+  await expect(f.service.open(row.id)).resolves.toEqual({
+    opened: true,
+    retained: false,
+  });
+  expect(f.browser.openSession).toHaveBeenCalledWith("target_site", {
+    targetUrl: checkout,
+  });
+  f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+  await f.service.checkAccess(task!.id);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.execute.mock.calls[1]?.[1].startingUrl).toBe(checkout);
+  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+});
 
 it.each(["missing", "failed"] as const)(
   "keeps a CAPTCHA item usable when showing its page %s",

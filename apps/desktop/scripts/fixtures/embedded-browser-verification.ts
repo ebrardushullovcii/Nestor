@@ -112,6 +112,8 @@ async function main() {
               username,
               await Promise.all(passwordRefs.map(target)),
             ),
+          resolveAccountCredential: (input) =>
+            Promise.resolve(host.resolveAccountCredential(tab().id, input)),
           listSavedCredentials: async () => host.listAgentCredentials(tab().id),
           fillSavedCredential: async (ref, id) =>
             host.fillAgentCredential(tab().id, id, await target(ref)),
@@ -143,17 +145,25 @@ async function main() {
           ref: r.control("Email"),
           text: "synthetic@example.test",
         });
-        await call("generate_account_login", {
+        const draft = await call("generate_account_login", {
           username: "synthetic@example.test",
           passwordRefs: [r.control("Password"), r.control("Confirm password")],
         });
+        assert.equal(draft.kind, "ok");
+        const { credentialId } = JSON.parse(draft.content);
+        assert.equal(host.passwords().vault().list(base).length, 0);
         r = await refs();
         await call("click", { ref: r.action("Create Account") });
         assert.match(await hands.readText(), /Your account was created/u);
+        assert.equal(host.passwords().vault().list(base).length, 0);
+        await call("resolve_account_login", {
+          credentialId,
+          outcome: "accepted",
+        });
         const saved = host.passwords().vault().list(base)[0]!;
         assert.ok(saved);
         checks.push(
-          "The real encrypted vault and sandboxed preload generated, saved and filled both new-account fields; the replica accepted the account.",
+          "The real preload filled both new-account fields from a draft. The vault saved it after the replica confirmed acceptance.",
         );
         await page.goto(`${base}/verification-replica/logout/native`);
         await page.goto(`${base}/verification-replica/login/native`);

@@ -13,7 +13,7 @@ export async function mailboxAccountFacts(
   try {
     const accounts = (await hands.readMailboxAccounts?.()) ?? [];
     return accounts.length
-      ? `Mailbox state read from the browser's own account UI: ${JSON.stringify(accounts)}. These email accounts are signed in in this browser. ${MAILBOX_INSTRUCTIONS}`
+      ? `Mailbox state read from the browser's own account UI: ${JSON.stringify(accounts)}. These Google accounts are signed in in this browser. When the site offers Google sign-in/sign-up and the person has enabled it, use their existing Google session if it fits the site. ${MAILBOX_INSTRUCTIONS}`
       : `No signed-in mailbox account was established by the run-start read; this is a fact, not a refusal. You can inspect Gmail yourself in a second tab. ${MAILBOX_INSTRUCTIONS}`;
   } catch {
     return `The run-start mailbox read was unavailable. You can inspect it yourself. ${MAILBOX_INSTRUCTIONS}`;

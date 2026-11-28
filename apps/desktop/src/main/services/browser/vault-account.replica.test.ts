@@ -157,16 +157,21 @@ test("a new-account replica accepts the vault-generated password and later signs
         ...(c.frame ? { frame: c.frame } : {}),
       };
     };
+    let draftId: string | null = null;
     const hands = createApplyPageHands({
       ...mechanics,
       generateAccountCredential: async ({ username, passwordRefs }) => {
         const raw = await mechanics.readPage();
-        return passwords.generateAccountCredential(
+        const draft = await passwords.generateAccountCredential(
           "tab",
           username,
           passwordRefs.map((ref) => target(raw, ref)),
         );
+        draftId = draft.credentialId;
+        return draft;
       },
+      resolveAccountCredential: (input) =>
+        Promise.resolve(passwords.resolveAccountCredential("tab", input)),
       listSavedCredentials: () => Promise.resolve(passwords.list("tab")),
       fillSavedCredential: async (ref, credentialId) =>
         passwords.autofill(
@@ -223,7 +228,7 @@ test("a new-account replica accepts the vault-generated password and later signs
       },
     };
     const transcript: unknown[] = [];
-    const run = async (registration: boolean) => {
+    const run = async (registration: boolean, duplicate = false) => {
       let turn = 0;
       return runApplyAgent(config, {
         chatWithTools: async (messages) => {
@@ -253,6 +258,20 @@ test("a new-account replica accepts the vault-generated password and later signs
           } else if (turn === (registration ? 3 : 4)) {
             name = "click";
             args = { ref: action(registration ? "Create Account" : "Sign in") };
+            if (registration)
+              expect(vault.list()).toHaveLength(duplicate ? 1 : 0);
+          } else if (turn === 4 && registration) {
+            expect(await hands.readText()).toContain(
+              duplicate
+                ? "An account with that email already exists"
+                : "Your account was created",
+            );
+            expect(vault.list()).toHaveLength(duplicate ? 1 : 0);
+            name = "resolve_account_login";
+            args = {
+              credentialId: draftId,
+              outcome: duplicate ? "discarded" : "accepted",
+            };
           } else {
             name = "finish";
             args = {
@@ -284,6 +303,10 @@ test("a new-account replica accepts the vault-generated password and later signs
     expect(vault.list()).toHaveLength(1);
     const secret = vault.read(vault.list()[0]!.id)!.password;
     expect(readFileSync(file).includes(Buffer.from(secret))).toBe(false);
+    await page.goto(`${base}/verification-replica/register/${id}`);
+    await run(true, true);
+    expect(vault.list()).toHaveLength(1);
+    expect(vault.read(vault.list()[0]!.id)?.password).toBe(secret);
     await page.goto(`${base}/verification-replica/logout/${id}`);
     await page.goto(`${base}/verification-replica/login/${id}`);
     await run(false);

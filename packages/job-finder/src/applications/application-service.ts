@@ -743,7 +743,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const applyLink = applyLinkInstruction(job);
     if (applyLink) instructions.push(applyLink);
     if (personSend) instructions.push(PERSON_SEND_INSTRUCTION);
-    let startingUrl: string | undefined;
+    const siteStep = previous?.accessRecheck
+      ? applications.needsYou
+          .accessForApplication(row.id)
+          .find((task) => task.kind === "other")
+      : undefined;
+    let startingUrl = siteStep?.pageUrl ?? undefined;
     // A continue keeps the page, and with it the files already attached.
     let keptPage = false;
     let sourceAttempt: number | null = null;
@@ -865,15 +870,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               "target_site",
               identity.resultId,
             )
-          )?.url ?? undefined;
-      if (transferred && previous?.accessRecheck)
+          )?.url ?? startingUrl;
+      const reenterForAccess = previous?.accessRecheck && !siteStep;
+      if (transferred && reenterForAccess)
         await browser.reloadApplicationPageBinding?.(
           "target_site",
           identity.resultId,
           target,
         );
-      if (transferred && previous?.accessRecheck) startingUrl = target;
-      keptPage = Boolean(transferred) && !previous?.accessRecheck;
+      if (transferred && reenterForAccess) startingUrl = target;
+      keptPage = Boolean(transferred) && !reenterForAccess;
       break;
     }
     const origin = new URL(target).origin;
@@ -1665,6 +1671,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const ownBrowser = steps.find((step) => step.ownBrowser);
     const step = ownBrowser ?? steps[0];
     if (step) {
+      const observedUrl = prepared?.finalUrl ?? result.replay.lastUrl ?? target;
+      const observedPage = URL.parse(observedUrl);
+      // Query strings and fragments can carry OAuth or other one-use secrets.
+      const pageUrl =
+        observedPage && isWebPageUrl(observedUrl)
+          ? observedPage.origin + observedPage.pathname
+          : null;
       jobs.transaction(() => {
         applications.needsYou.request({
           applicationId: row.id,
@@ -1673,9 +1686,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           kind: step.kind,
           key: "site_access",
           scope: {
-            siteOrigin: new URL(
-              prepared?.finalUrl ?? result.replay.lastUrl ?? target,
-            ).origin,
+            siteOrigin: new URL(pageUrl ?? target).origin,
           },
           prompt:
             ownBrowser?.instructions ??
@@ -1683,6 +1694,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           input: "text",
           options: [],
           ...(ownBrowser ? { blockedUrl: target } : {}),
+          ...(step.kind === "other" ? { pageUrl } : {}),
         });
         if (ownBrowser)
           applications.block(row.id, row.attempt, ownBrowser.instructions);
@@ -1975,6 +1987,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   function accessKind(
     blocker: ApplyBlocker | null | undefined,
   ): Exclude<NeedsYouKind, "question"> | null {
+    if (blocker?.code === "person_step_required" && blocker.requiresPerson)
+      return "other";
     return (blocker?.code === "browser_blocked" ||
       blocker?.code === "security_challenge") &&
       blocker.requiresPerson
@@ -2383,11 +2397,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     const job = jobs.getJob(row.jobId);
     const work = applications.getWork(id);
-    const accessPage =
-      (row.state === "needs_you" || row.state === "blocked") &&
-      applications.needsYou.accessForApplication(id).length
-        ? (work?.execution.replay.lastUrl ?? work?.execution.blocker?.url)
-        : null;
+    const access =
+      row.state === "needs_you" || row.state === "blocked"
+        ? applications.needsYou.accessForApplication(id)
+        : [];
+    const accessPage = access.length
+      ? (access.find((task) => task.kind === "other")?.pageUrl ??
+        work?.execution.replay.lastUrl ??
+        work?.execution.blocker?.url)
+      : null;
     const url =
       accessPage ??
       work?.reviewCard?.pageUrl ??

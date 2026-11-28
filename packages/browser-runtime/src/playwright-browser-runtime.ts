@@ -3956,6 +3956,12 @@ export function createBrowserAgentRuntime(
                 targets,
               });
             },
+            ...(agentOptions.resolveAccountCredential
+              ? {
+                  resolveAccountCredential:
+                    agentOptions.resolveAccountCredential,
+                }
+              : {}),
           }),
           page,
           config: agentConfig,

@@ -170,6 +170,7 @@ export const NeedsYouKindSchema = z.enum([
   "sign_in",
   "captcha",
   "mfa",
+  "other",
 ]);
 export type NeedsYouKind = z.infer<typeof NeedsYouKindSchema>;
 
@@ -216,6 +217,8 @@ export const NeedsYouTaskSchema = z.object({
   openedAt: IsoDateTimeSchema,
   source: SourceAccessReferenceSchema.optional(),
   blockedUrl: optionalStoredField(z.string().url().nullable(), null),
+  /** The page for a model handoff in Nestor's browser. */
+  pageUrl: z.string().url().nullish(),
   /** The application waiting on it (the first, when several are) and how many. */
   waitingFor: z
     .object({
@@ -266,6 +269,7 @@ export const NeedsYouCountsSchema = z.object({
   sign_in: z.number().int().nonnegative(),
   captcha: z.number().int().nonnegative(),
   mfa: z.number().int().nonnegative(),
+  other: z.number().int().nonnegative().default(0),
   saved: z.number().int().nonnegative(),
 });
 export type NeedsYouCounts = z.infer<typeof NeedsYouCountsSchema>;

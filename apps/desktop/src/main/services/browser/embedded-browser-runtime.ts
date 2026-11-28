@@ -4,6 +4,7 @@ import type {
 } from "@nestor/browser-runtime";
 import type {
   BrowserGenerateAccountInput,
+  BrowserResolveAccountInput,
   ApplyExecutionResult,
   BrowserSessionState,
   DiscoveryRunResult,
@@ -84,6 +85,14 @@ export function withEmbeddedBrowserActivity(
           username: input.username,
           message: "The owned account tab is unavailable; observe again.",
         };
+  };
+  const resolveOwnedAccount = async (
+    claimedTabs: () => Promise<string[]>,
+    input: BrowserResolveAccountInput,
+  ) => {
+    for (const tabId of await claimedTabs())
+      if (browser.resolveAccountCredential(tabId, input)) return true;
+    return false;
   };
   const prepareOwnedCredentials = async (
     claimedTabs: () => Promise<string[]>,
@@ -558,6 +567,8 @@ export function withEmbeddedBrowserActivity(
                                 "A named password field changed; observe again.",
                             };
                       },
+                      resolveAccountCredential: (input) =>
+                        resolveOwnedAccount(claimedTabs, input),
                       listSavedCredentials: async () => {
                         const raw = await formInput.session.readPage();
                         const owned = new Set(await claimedTabs());
@@ -688,6 +699,8 @@ export function withEmbeddedBrowserActivity(
                     prepareOwnedCredentials(claimedTabs, url),
                   generateAccountCredential: (input) =>
                     generateOwnedAccount(claimedTabs, input),
+                  resolveAccountCredential: (input) =>
+                    resolveOwnedAccount(claimedTabs, input),
                   listSavedCredentials: async (url) => {
                     const owned = new Set(await claimedTabs());
                     const tab = browser

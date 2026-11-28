@@ -50,7 +50,12 @@ export const getWorkspaceSummaryTool = defineTool({
           name: personal.profile.fullName,
         },
         applyMode: personal.settings.applicationAutomationMode,
-        needsYou: needs.question + needs.sign_in + needs.captcha + needs.mfa,
+        needsYou:
+          needs.question +
+          needs.sign_in +
+          needs.captcha +
+          needs.mfa +
+          needs.other,
         ...readAssistantWorkState(ports, personal),
       },
     };
@@ -345,7 +350,7 @@ export const openInAppTool = defineTool({
       "Settings section to show. application-defaults is Resume look; application-authority is Applying.",
     ),
     needsView: json.looseObject(
-      "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",
+      "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa/other or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",
     ),
     view: json.looseObject(
       "Find jobs or Shortlisted filter and selection: stage, text; Find jobs also minFit and sort. selectedIds is up to 50 ids; all=true selects every matching job, with selectedIds as exceptions.",

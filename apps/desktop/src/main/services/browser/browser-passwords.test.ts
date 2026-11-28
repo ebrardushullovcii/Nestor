@@ -141,43 +141,73 @@ it("captures privately, offers metadata only, requires Save, updates and autofil
   expect(vault.read(id)?.password === "synthetic-update").toBe(true);
 });
 
-it("generates and saves a new account privately, fills both model-named fields and reuses it for sign-in", async () => {
-  const { manager, vault, frame } = setup();
+it("keeps rejected signup drafts out of the vault and saves only accepted logins", async () => {
+  const { manager, vault, frame, capture, event } = setup();
   const targets = [
     { controlIndex: 1, id: "password", name: "password" },
     { controlIndex: 2, id: "confirm", name: "confirm" },
   ];
-  const created = await manager.generateAccountCredential(
-    "tab",
-    "synthetic@example.test",
-    targets,
-  );
+  vault.save(capture);
+  const originalId = vault.list()[0]!.id;
+  const draft = () =>
+    manager.generateAccountCredential("tab", capture.username, targets);
+  const created = await draft();
   expect(created.ok).toBe(true);
-  expect(vault.list()).toHaveLength(1);
-  const saved = vault.read(created.credentialId!)!;
-  expect(saved.password.length >= 24).toBe(true);
+  const credentialId = created.credentialId!;
+  const secret = vault.readAccountDraft("tab", credentialId)!.password;
+  expect(secret.length).toBe(24);
   for (const pattern of [/[A-Z]/u, /[a-z]/u, /[0-9]/u, /[!@#$%*_-]/u])
-    expect(pattern.test(saved.password)).toBe(true);
-  expect(JSON.stringify(created).includes(saved.password)).toBe(false);
+    expect(pattern.test(secret)).toBe(true);
+  expect(JSON.stringify(created)).not.toContain(secret);
   expect(frame.send.mock.calls).toHaveLength(2);
+  expect(vault.read(credentialId)).toBeNull();
+  expect(manager.list("tab").credentials.map(({ id }) => id)).toEqual([
+    originalId,
+  ]);
+  expect(vault.read(originalId)?.password).toBe(capture.password);
+  await manager.capture(event, { ...capture, password: secret });
+  expect(manager.prompt("tab")).toBeNull();
+  expect((await draft()).credentialId).toBe(credentialId);
   expect(
-    await manager.autofill("tab", created.credentialId!, true, targets[0]),
-  ).toBe(true);
-  expect(
-    frame.executeJavaScript.mock.calls.some((call) =>
-      JSON.stringify(call).includes(saved.password),
-    ),
+    manager.resolveAccountCredential("wrong-tab", {
+      credentialId,
+      outcome: "accepted",
+    }),
   ).toBe(false);
   expect(
-    (
-      await manager.generateAccountCredential(
-        "tab",
-        "synthetic@example.test",
-        targets,
-      )
-    ).credentialId,
-  ).toBe(created.credentialId);
-  expect(vault.list()).toHaveLength(1);
+    manager.resolveAccountCredential("tab", {
+      credentialId: originalId,
+      outcome: "discarded",
+    }),
+  ).toBe(false);
+  expect(
+    manager.resolveAccountCredential("tab", {
+      credentialId,
+      outcome: "discarded",
+    }),
+  ).toBe(true);
+  expect(vault.readAccountDraft("tab", credentialId)).toBeUndefined();
+  expect(vault.read(originalId)?.password).toBe(capture.password);
+
+  const accepted = (await draft()).credentialId!;
+  expect(accepted).not.toBe(credentialId);
+  const acceptedPassword = vault.readAccountDraft("tab", accepted)!.password;
+  expect(
+    manager.resolveAccountCredential("tab", {
+      credentialId: accepted,
+      outcome: "accepted",
+    }),
+  ).toBe(true);
+  expect(vault.readAccountDraft("tab", accepted)).toBeUndefined();
+  expect(vault.read(originalId)?.password).toBe(acceptedPassword);
+  expect(await manager.autofill("tab", originalId, true, targets[0])).toBe(
+    true,
+  );
+  expect(
+    frame.executeJavaScript.mock.calls.some((call) =>
+      JSON.stringify(call).includes(acceptedPassword),
+    ),
+  ).toBe(false);
 });
 it("dismisses repeat offers, expires transient captures, and clears on close or foreign navigation", async () => {
   const { manager, capture, event } = setup();

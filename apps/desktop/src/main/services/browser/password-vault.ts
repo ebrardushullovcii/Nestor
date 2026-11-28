@@ -15,7 +15,10 @@ export interface PasswordValue {
   password: string;
 }
 export class PasswordVault {
-  private readonly generatedAccounts = new Set<string>();
+  private readonly accountDrafts = new Map<
+    string,
+    Map<string, PasswordValue>
+  >();
   constructor(
     private readonly repository: BrowserPasswordRepository,
     private readonly encryption: PasswordEncryption,
@@ -73,21 +76,22 @@ export class PasswordVault {
       );
     }
   }
-  /** Generate once per origin/account so a retry reuses the saved login. */
-  generateAccount(origin: string, username: string): BrowserPasswordMetadata {
+  /** Keep the pending password in this tab's memory until the model resolves it. */
+  generateAccountDraft(
+    tabId: string,
+    origin: string,
+    username: string,
+  ): string {
+    this.requireEncryption();
     const normalized = passwordOrigin(origin);
-    if (!normalized || !username.trim())
+    if (!normalized || !username.trim() || username.length > 1000)
       throw new Error("The new login needs its site and username.");
-    const existing = this.list(normalized).find(
-      (row) => row.username === username,
+    const drafts =
+      this.accountDrafts.get(tabId) ?? new Map<string, PasswordValue>();
+    const existing = [...drafts].find(
+      ([, draft]) => draft.origin === normalized && draft.username === username,
     );
-    const accountKey = JSON.stringify([normalized, username]);
-    if (
-      existing &&
-      this.generatedAccounts.has(accountKey) &&
-      this.read(existing.id)
-    )
-      return existing;
+    if (existing) return existing[0];
     const groups = [
       "ABCDEFGHJKLMNPQRSTUVWXYZ",
       "abcdefghijkmnopqrstuvwxyz",
@@ -101,14 +105,38 @@ export class PasswordVault {
       const target = randomInt(index + 1);
       [chars[index], chars[target]] = [chars[target]!, chars[index]!];
     }
-    this.save({ origin: normalized, username, password: chars.join("") });
-    this.generatedAccounts.add(accountKey);
-    return this.list(normalized).find((row) => row.username === username)!;
+    const id = randomUUID();
+    drafts.set(id, { origin: normalized, username, password: chars.join("") });
+    this.accountDrafts.set(tabId, drafts);
+    return id;
+  }
+  readAccountDraft(tabId: string, id: string): PasswordValue | undefined {
+    return this.accountDrafts.get(tabId)?.get(id);
+  }
+  hasDraftPassword(tabId: string, origin: string, password: string): boolean {
+    const drafts = this.accountDrafts.get(tabId);
+    return (
+      drafts !== undefined &&
+      [...drafts.values()].some(
+        (draft) => draft.origin === origin && draft.password === password,
+      )
+    );
+  }
+  resolveAccountDraft(tabId: string, id: string, accepted: boolean): boolean {
+    const drafts = this.accountDrafts.get(tabId);
+    if (!drafts) return false;
+    const draft = drafts.get(id);
+    if (!draft) return false;
+    if (accepted) this.save(draft);
+    drafts.delete(id);
+    return true;
+  }
+  forgetAccountDrafts(tabId: string): void {
+    this.accountDrafts.delete(tabId);
   }
   save(value: PasswordValue): "added" | "updated" | "skipped" {
     this.requireEncryption();
     const origin = passwordOrigin(value.origin);
-    this.generatedAccounts.delete(JSON.stringify([origin, value.username]));
     if (
       !origin ||
       value.username.length > 1000 ||
@@ -147,6 +175,7 @@ export class PasswordVault {
     return existing ? "updated" : "added";
   }
   clear(): void {
+    this.accountDrafts.clear();
     for (const record of this.repository.list())
       this.repository.delete(record.id);
   }

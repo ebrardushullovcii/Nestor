@@ -68,16 +68,20 @@ export function createSavedLoginTools(hands: ApplyPageHands): AgentLoopTool[] {
   ];
 }
 
-export function createAccountCredentialTool(
+export function createAccountCredentialTools(
   hands: ApplyPageHands,
-): AgentLoopTool {
+): AgentLoopTool[] {
+  return [createAccountDraftTool(hands), resolveAccountDraftTool(hands)];
+}
+
+function createAccountDraftTool(hands: ApplyPageHands): AgentLoopTool {
   return {
     definition: {
       type: "function",
       function: {
         name: "generate_account_login",
         description:
-          "For a new account, have the vault generate a strong password, save the site's login, and type it into every password/confirm field you name. Supply the account username and observed passwordRefs; never supply or request a password value. The result contains only credentialId and metadata. Then press Create Account yourself. Later use list_saved_logins and fill_saved_login for this saved account. A retry reuses the generated login.",
+          "For a new password account, have the vault draft a strong password and type it into every observed password/confirm field you name. Supply the username and passwordRefs. The result contains the draft credentialId and metadata, never the password. A retry on this tab reuses the draft. Press Create Account, observe what the site says, then call resolve_account_login to save or discard it.",
         parameters: {
           type: "object",
           properties: {
@@ -124,6 +128,58 @@ export function createAccountCredentialTool(
         status: result.ok ? "done" : "failed",
         content: JSON.stringify(result),
         progress: result.ok,
+      };
+    },
+  };
+}
+
+function resolveAccountDraftTool(hands: ApplyPageHands): AgentLoopTool {
+  return {
+    definition: {
+      type: "function",
+      function: {
+        name: "resolve_account_login",
+        description:
+          "Resolve your generated draft by credentialId. Use accepted after you observe that the site accepted this new password login, including required verification. The vault then saves it for later runs. Use discarded when the site rejected signup and you are dropping the draft. Saved or imported logins cannot be discarded with this tool.",
+        parameters: {
+          type: "object",
+          properties: {
+            credentialId: { type: "string" },
+            outcome: { type: "string", enum: ["accepted", "discarded"] },
+          },
+          required: ["credentialId", "outcome"],
+          additionalProperties: false,
+        },
+      },
+    },
+    failureKind: "browser",
+    describeError: () =>
+      "The vault could not resolve the draft login. Retry the vault tool or report the error.",
+    execute: async (raw) => {
+      const parsed = z
+        .object({
+          credentialId: z.string(),
+          outcome: z.enum(["accepted", "discarded"]),
+        })
+        .strict()
+        .safeParse(parseToolArguments(raw));
+      if (!parsed.success)
+        return {
+          kind: "ok",
+          status: "failed",
+          content: `resolve_account_login contract: ${parsed.error.message}`,
+        };
+      const resolved = await hands.resolveAccountCredential?.(parsed.data);
+      return {
+        kind: "ok",
+        status: resolved ? "done" : "failed",
+        content: !hands.resolveAccountCredential
+          ? "This browser has no vault draft resolution implementation."
+          : !resolved
+            ? "That draft is unavailable in this task's tabs. Saved logins were not changed."
+            : parsed.data.outcome === "accepted"
+              ? "The vault saved the accepted login. Use list_saved_logins to find its saved ID."
+              : "The vault discarded the draft login.",
       };
     },
   };

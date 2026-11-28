@@ -216,6 +216,7 @@ export type ApplyBlockerCode =
   | "account_creation_required"
   | "security_challenge"
   | "multi_factor_required"
+  | "person_step_required"
   | "application_closed"
   | "application_page_unreachable"
   /** The form saves each answer to the site as it is typed. */
@@ -332,6 +333,7 @@ export interface ApplyPageHands {
   screenshot?: ApplyRawPageHands["screenshot"];
   pointer?: ApplyRawPageHands["pointer"];
   generateAccountCredential?: ApplyRawPageHands["generateAccountCredential"];
+  resolveAccountCredential?: ApplyRawPageHands["resolveAccountCredential"];
   openTab?: ApplyRawPageHands["openTab"];
   switchTab?: ApplyRawPageHands["switchTab"];
   closeTab?: ApplyRawPageHands["closeTab"];

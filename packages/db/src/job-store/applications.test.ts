@@ -1964,6 +1964,7 @@ describe("applications on the job store", () => {
       sign_in: 0,
       captcha: 0,
       mfa: 0,
+      other: 0,
       saved: 1,
     });
   });
