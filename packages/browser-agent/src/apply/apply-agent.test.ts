@@ -667,18 +667,16 @@ test("the model can ask one question for three controls of a single fact", async
     ]),
   );
   expect(result.outcome).toBe("paused");
-  expect(result.pauses[0]?.questions).toEqual([
-    expect.objectContaining({
-      prompt: "¿Cuál es tu fecha de nacimiento? (DD/MM/AAAA)",
-      answerControlType: "text",
-      answerOptions: [],
-      description: expect.stringContaining("Día"),
-    }),
-  ]);
-  expect(result.pauses[0]?.question?.description).toContain("Mes");
-  expect(result.pauses[0]?.question?.description).toContain("Año");
+  expect(result.pauses[0]?.questions).toHaveLength(1);
+  const question = result.pauses[0].question!;
+  expect(question).toMatchObject({
+    prompt: "¿Cuál es tu fecha de nacimiento? (DD/MM/AAAA)",
+    answerControlType: "text",
+    answerOptions: [],
+  });
+  for (const label of ["Día", "Mes", "Año"])
+    expect(question.description).toContain(label);
 
-  const question = result.pauses[0]!.question!;
   const continuation = config(source);
   continuation.application.continuation = { sourceUrls: [] };
   continuation.sources.reusableAnswers = [
@@ -707,7 +705,7 @@ test("the model can ask one question for three controls of a single fact", async
     done,
   ]);
   await runApplyAgent(continuation, retry);
-  const messages = vi.mocked(retry.chatWithTools).mock.calls[0]![0];
+  const [messages] = vi.mocked(retry.chatWithTools).mock.calls[0];
   const facts = messages.find((message) =>
     String(message.content).startsWith("Facts for this application."),
   );

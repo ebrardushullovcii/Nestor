@@ -1305,7 +1305,7 @@ export function collectApplyDocumentSnapshot(
           field === element ||
           element.contains(field) ||
           (triggerText !== undefined &&
-            ancestor!.contains(field) &&
+            ancestor.contains(field) &&
             !isVisible(field));
         if (
           fieldsIn(ancestor).some((field) => !ownsField(field as HTMLElement))

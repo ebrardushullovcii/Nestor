@@ -1507,13 +1507,13 @@ it("stores one grouped Needs you answer and gives the continuation its field con
     remember: false,
   });
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  expect(preparation.givenAnswers[1]).toContainEqual(
-    expect.objectContaining({
-      question: prompt,
-      answer: "07/10/2024",
-      context: expect.objectContaining({ formContext: description }),
-    }),
+  const recorded = preparation.givenAnswers[1]?.find(
+    (answer) => answer.question === prompt,
   );
+  expect(recorded).toMatchObject({
+    answer: "07/10/2024",
+    context: { formContext: description },
+  });
   f.releases.shift()!(ready());
   await vi.waitFor(() =>
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
