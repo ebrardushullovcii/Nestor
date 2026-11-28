@@ -125,6 +125,25 @@ const APPLY_FILTER_STAGES: ReadonlySet<string> = new Set([
 ]);
 
 /** An outcome names this row's own job, application, run and attempt. */
+/**
+ * A send the app could not confirm waits for proof on its row: as Uncertain,
+ * or as a step the model then handed to the person (Lever refused Nestor's
+ * browser after an unconfirmed press, R13 AiFi). Either way the person's
+ * check on the employer site settles it.
+ */
+function settlesUncertainSend(
+  row: ApplicationRow,
+  receipt: SubmissionOutcomeRecord | null,
+): boolean {
+  return (
+    row.submittedAt === null &&
+    (row.state === "uncertain" ||
+      // A hand-off shows as Needs you, or as Blocked for a site step.
+      ((row.state === "needs_you" || row.state === "blocked") &&
+        receipt?.outcome === "outcome_uncertain"))
+  );
+}
+
 function isOwnSendLineage(
   row: Pick<ApplicationRow, "id" | "jobId" | "attempt">,
   outcome: Pick<
@@ -999,7 +1018,7 @@ export function createApplicationStore(store: JobStore) {
       const current = getApplication(id);
       return (
         !!current &&
-        current.state === "uncertain" &&
+        settlesUncertainSend(current, this.getSubmissionReceipt(id)) &&
         isOwnSendLineage(current, outcome)
       );
     },
@@ -1014,7 +1033,12 @@ export function createApplicationStore(store: JobStore) {
       outcome: SubmissionOutcomeRecord,
     ): boolean {
       outcome = SubmissionOutcomeRecordSchema.parse(outcome);
-      if (getApplication(id)?.state !== "uncertain") return false;
+      const current = getApplication(id);
+      if (
+        !current ||
+        !settlesUncertainSend(current, this.getSubmissionReceipt(id))
+      )
+        return false;
       return this.reportSendByPerson(id, outcome);
     },
 
