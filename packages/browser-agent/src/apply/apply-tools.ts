@@ -353,6 +353,19 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
                   {
                     type: "object",
                     properties: {
+                      refs: {
+                        type: "array",
+                        items: { type: "string", minLength: 1 },
+                        minItems: 2,
+                      },
+                      question: { type: "string", minLength: 1 },
+                    },
+                    required: ["refs", "question"],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: "object",
+                    properties: {
                       onPage: {
                         type: "string",
                         enum: [
@@ -372,7 +385,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
                 ],
               },
               description:
-                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a missing answer you can use once supplied, use the field's observed control ref (for example c3). For a website step, use {onPage: sign_in|captcha|mfa|passkey|other, instructions: why you need the person to act and what they should do}. When you will leave the action to the person even with an answer, represent that action once as an onPage item. Before finish, leave the primary application tab on the exact page where the person can act. If you left that page while exploring another route, return to it and observe it. If the site rejects submission verification in Nestor's browser after a real attempt, use {onPage: own_browser, instructions: what happened and how to finish in their browser}. Needs you opens this posting's apply link for them. Missing passwords, passkeys and MFA belong on the website, never in a text answer. Leave it empty when the form is complete; a form that only wants looking over is complete.",
+                "One item per missing fact or website step, apart from the reason. For a missing answer to one field, use its observed control ref (for example c3). For one fact split across several fields, use {refs: [observed control refs], question: a single question naming the full fact and how to answer it}. The person answers in one text field. On continuation, use their answer to fill all its parts with the current page's controls. For a website step, use {onPage: sign_in|captcha|mfa|passkey|other, instructions: why you need the person to act and what they should do}. When you will leave the action to the person even with an answer, represent that action once as an onPage item. Before finish, leave the primary application tab on the exact page where the person can act. If you left that page while exploring another route, return to it and observe it. If the site rejects submission verification in Nestor's browser after a real attempt, use {onPage: own_browser, instructions: what happened and how to finish in their browser}. Needs you opens this posting's apply link for them. Missing passwords, passkeys and MFA belong on the website, never in a text answer. Leave it empty when the form is complete; a form that only wants looking over is complete.",
             },
           },
           required: ["reason"],

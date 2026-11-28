@@ -1132,6 +1132,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 ),
                 context: {
                   options: question.answerOptions,
+                  ...(question.description
+                    ? { formContext: question.description }
+                    : {}),
                   siteOrigin: origin,
                   company: job.company,
                   givenBy: "person",

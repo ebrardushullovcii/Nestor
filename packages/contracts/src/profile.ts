@@ -253,6 +253,7 @@ export const CandidateReusableAnswerSchema = z.object({
       savedAt: z.number().optional(),
       givenBy: z.string().optional(),
       country: z.string().optional(),
+      formContext: z.string().optional(),
     })
     .optional(),
   id: NonEmptyStringSchema,

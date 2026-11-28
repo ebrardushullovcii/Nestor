@@ -1472,6 +1472,55 @@ it.each(["confirm_before_submit", "autonomous_submit"] as const)(
   },
 );
 
+it("stores one grouped Needs you answer and gives the continuation its field context", async () => {
+  const f = await setup(1);
+  preparation.givenAnswers.length = 0;
+  const prompt =
+    "What is the start date of your current study program? (DD/MM/YYYY)";
+  const description =
+    "Current study program start date — Day\nCurrent study program start date — Month\nCurrent study program start date — Year";
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "group_study_start",
+          prompt,
+          description,
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const task = f.applications.needsYou.list().rows[0]!;
+  expect(task).toMatchObject({ prompt, input: "text" });
+  f.applications.needsYou.answer({
+    id: task.id,
+    answer: "07/10/2024",
+    remember: false,
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  const recorded = preparation.givenAnswers[1]?.find(
+    (answer) => answer.question === prompt,
+  );
+  expect(recorded).toMatchObject({
+    answer: "07/10/2024",
+    context: { formContext: description },
+  });
+  f.releases.shift()!(ready());
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  expect(f.applications.needsYou.list().total).toBe(0);
+});
+
 it("tells a continue on the same page which files the attempt before it attached", async () => {
   const f = await setup(1);
   preparation.earlierFiles.length = 0;

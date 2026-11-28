@@ -17,9 +17,15 @@ export type ApplyFinishSendOutcome = z.infer<
   typeof ApplyFinishSendOutcomeSchema
 >;
 
-/** A field question or an explicit model-selected browser handoff. */
+/** A field question, one question for several fields, or a browser handoff. */
 export const ApplyPersonRequestSchema = z.union([
   z.string(),
+  z
+    .object({
+      refs: z.array(z.string().min(1)).min(2),
+      question: z.string().trim().min(1),
+    })
+    .strict(),
   z
     .object({
       onPage: z.enum([
