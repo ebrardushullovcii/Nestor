@@ -1176,6 +1176,61 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
   expect(mixedRequests).toEqual([[1, 2, 3], [2], [3]]);
   expect(partial.map((fit) => fit.id)).toEqual([1, 2, 3]);
+  const resumeText = "Synthetic candidate evidence. ".repeat(500);
+  const goals = { targetRoles: ["Data Analyst"], locations: ["Berlin"] };
+  let finishLead!: (reply: { content: string }) => void;
+  const leadResponse = new Promise<{ content: string }>((resolve) => {
+    finishLead = resolve;
+  });
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {
+    const data = JSON.parse(messages[1].content) as {
+      listings: { id: number }[];
+    };
+    if (data.listings[0]?.id === 1) return leadResponse;
+    return Promise.resolve({
+      content: JSON.stringify({ fits: [{ ...fit, id: 2 }] }),
+    });
+  });
+  const input = {
+    profile: {
+      ...profile,
+      baseResume: { ...profile.baseResume, textContent: resumeText },
+    },
+    goals,
+    client: { chatWithTools },
+    signal: new AbortController().signal,
+    conversationKey: "fit:synthetic",
+    assessmentDate: now.slice(0, 10),
+  };
+  const wave = Promise.all([
+    fitJobs({ ...input, jobs: [job] }),
+    fitJobs({
+      ...input,
+      jobs: [{ ...job, id: 2, description: secondDescription }],
+    }),
+  ]);
+  await vi.waitFor(() => expect(chatWithTools).toHaveBeenCalledTimes(1));
+  const onStream = chatWithTools.mock.calls[0]?.[2]?.onStreamEvent;
+  onStream?.({ type: "reasoning_delta", text: "Comparing the listings." });
+  await Promise.resolve();
+  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  onStream?.({ type: "text_delta", text: '{"fits":[' });
+  await Promise.resolve();
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  finishLead({ content: JSON.stringify({ fits: [fit] }) });
+  expect((await wave).flat().map(({ id }) => id)).toEqual([1, 2]);
+  const openings = chatWithTools.mock.calls.map(([messages, , options]) => {
+    const prefix = (options?.stableLead ?? "") + (options?.stableLeadEnd ?? "");
+    expect(messages[1].content.startsWith(`${prefix},"assessmentDate"`)).toBe(
+      true,
+    );
+    expect(JSON.parse(prefix + "}")).toMatchObject({
+      person: { resume: resumeText },
+      goals,
+    });
+    return prefix;
+  });
+  expect(openings[0]).toBe(openings[1]);
   const requestSchema =
     client.chatWithTools.mock.calls[0][2]?.jsonSchema?.schema;
   expect(requestSchema).toMatchObject({

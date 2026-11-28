@@ -122,6 +122,9 @@ export const modelConversationKeys = {
   jobFit(job: { source: string; sourceJobId: string }): string {
     return `job-fit:${job.source}:${job.sourceJobId}`;
   },
+  jobPageExtraction(pageType: "search_results" | "job_detail"): string {
+    return `job-page-extraction:${pageType}`;
+  },
   pageExtraction(pageUrl: string): string {
     try {
       return `discovery:${new URL(pageUrl).hostname.toLowerCase()}`;

@@ -245,6 +245,7 @@ async function ask<Output, Input>(
               ...options,
               ...(onStreamEvent ? { onStreamEvent } : {}),
             }),
+          reasoningTask !== "fit_batch",
         );
       } catch (error) {
         model.signal?.throwIfAborted();

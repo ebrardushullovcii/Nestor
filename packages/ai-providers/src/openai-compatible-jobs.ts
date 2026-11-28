@@ -70,19 +70,18 @@ export function buildJobsExtractionPrompt(input: {
   pageHostLabel: string;
   pageType: "search_results" | "job_detail";
   effectiveMaxJobs: number;
-}): string {
+}): { shared: string; page: string } {
   const evidenceInstructions = [
     "Employer identity must come from the named hiring organization in the posting or employer board heading. Keep the employer separate from the job title and job-board/ATS brand; a board URL token or logo abbreviation is not its display name. Never use part of the title as company. If the employer cannot be established, leave company empty rather than invent it.",
     "On a job_detail page, set needsRenderedPage to true when the body is only a loading shell or a card and the listing text still needs the browser to render. Do not describe a partial card as a full listing. Read the full page body, including duties, qualifications, hours, start date and application restrictions. Preserve this vacancy's complete text in description, without summarizing. Page chrome, a login screen, a blog or other jobs on a redirected board are not this vacancy's description. The requested listing in selectionContext is its identity; the landed page is evidence about it, including closure. Keep its real canonicalUrl through a login redirect and never use the login URL as applicationUrl. Extract explicit remote country limits and hybrid/onsite arrangements into location and workMode, including when they appear only in the description. Preserve named pay scales such as MPS/UPS verbatim in salaryText. Include start dates, variable hours and no-CV/application-form-only restrictions in description and relevant qualifications.",
     "Select applicationUrl only when a link or published record is an application destination for this exact vacancy. Match it with this listing's title/employer and link context. Articles, advice, citizenship guides, navigation, other jobs and generic account links are not application routes, even when labelled with the word apply. If the route cannot be proved, return null and keep canonicalUrl as the original listing.",
     "When selectionContext is provided, use the person's request, saved goals, work eligibility and source notes to decide which postings to retain. Explicit exclusions always apply, including in a wide search. Wide includes plausible related roles and requested location variants; it does not mean every occupation on the page. Return clearly unrelated or explicitly excluded listings too, with searchRejection containing category (role, place, preferences, closed, or not_a_listing) and a short plain reason. Set searchRejection to null for plausible matches. Every inspected listing belongs in the jobs array so counts can explain exclusions. Unknown detail is provisional, not proof of a mismatch. Without selectionContext, read the posting without filtering it for fit.",
   ].join(" ");
-  return (
+  const shared =
     evidenceInstructions +
     " " +
     (input.pageType === "search_results"
       ? [
-          `You extract job listings from a careers or job-search page on ${input.pageHostLabel}.`,
           'Return JSON with a "jobs" array.',
           'Jobs may appear in any language. Preserve the original language of titles, companies, locations, and descriptions. In location, write the country\'s name instead of a two-letter code when the page or its site makes the country clear ("Berlin, Germany", not "Berlin, DE"); a code can name both a country and a US state.',
           "When a listing names its own company, use that name, even when the site's header or title shows a different brand. When the page belongs to one employer (a company careers site rather than a job board) and the listings name no company, company is that employer's name for every job; a city, region or team name is never a company. Put places in location; when a listing states no place, write \"Location not stated\".",
@@ -96,10 +95,8 @@ export function buildJobsExtractionPrompt(input: {
           "If you cannot determine a stable canonicalUrl or a reliable job title for a listing, omit that listing from the output.",
           "Do not fabricate posted dates. Use null when exact posting time is unknown and preserve any visible relative string in postedAtText.",
           "Do not invent companies, locations, or URLs.",
-          `Return at most ${input.effectiveMaxJobs} jobs.`,
         ].join(" ")
       : [
-          `You extract one structured job posting from a job-detail page on ${input.pageHostLabel}.`,
           'Return JSON with a "jobs" array containing one job object.',
           'Jobs may appear in any language. Preserve the original language of titles, companies, locations, and descriptions. In location, write the country\'s name instead of a two-letter code when the page or its site makes the country clear ("Berlin, Germany", not "Berlin, DE"); a code can name both a country and a US state.',
           "canonicalUrl is this vacancy's permanent listing URL: use the requestedListing identity in selectionContext and the page's job-specific permanent link, preserving the actual destination through login redirects. The landed URL may be a login page, board or application form rather than the listing. applicationUrl is the actual apply or application-form link when observed, otherwise null. An apply link belongs in applicationUrl, not canonicalUrl. Never use a sign-in or share link as either URL.",
@@ -112,8 +109,14 @@ export function buildJobsExtractionPrompt(input: {
           "Do not fabricate posted dates. Use null when exact posting time is unknown and preserve any visible relative string in postedAtText.",
           'If the page is not clearly a job detail page (a sign-in or account page, a general application or talent pool, or a listing that says it is closed), return { "jobs": [] }.',
           'When selectionContext has a requestedListing, answer whether the vacancy on this page is that requested posting, comparing its saved title, employer and text with this page\'s own: return requestedListingMatch {"same": true or false, "reason": short plain reason}. The same vacancy under a reworded, translated or longer title is the same posting; another vacancy is not.',
-        ].join(" "))
-  );
+        ].join(" ")) +
+    " When excludedCanonicalUrls is supplied, those jobs were already read from this same page. Return only remaining jobs, without repeating those URLs. Return fewer than the limit when no more remain.";
+  // The opening is identical across sites and result counts for a page type.
+  const page =
+    input.pageType === "search_results"
+      ? ` You extract job listings from a careers or job-search page on ${input.pageHostLabel}. Return at most ${input.effectiveMaxJobs} jobs.`
+      : ` You extract one structured job posting from a job-detail page on ${input.pageHostLabel}.`;
+  return { shared, page };
 }
 
 export function normalizeExtractedJobs(input: {

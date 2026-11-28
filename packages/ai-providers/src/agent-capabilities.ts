@@ -324,6 +324,7 @@ function createModelAdapter(
     contentToToolCalls?: (content: string) => ToolCall[] | null;
     preventRuntimeRetries?: boolean;
     reasoningTask?: ModelReasoningTask;
+    stableLead?: string;
   },
 ): AgentTaskModel {
   const status = client.getStatus();
@@ -360,6 +361,7 @@ function createModelAdapter(
               ? { onStreamEvent: input.onStreamEvent }
               : {}),
             ...(conversationKey ? { conversationKey } : {}),
+            ...(options?.stableLead ? { stableLead: options.stableLead } : {}),
             ...(options?.reasoningTask
               ? { reasoningTask: options.reasoningTask }
               : {}),
@@ -859,7 +861,7 @@ export async function runResumeGenerationAgentTask(input: {
   // What is the same for every job comes first: the candidate's evidence,
   // profile, goals and settings. Requests in a batch then share that prefix,
   // which the AI service can reuse instead of reading it again each time.
-  const resumeGenerationContext = {
+  const sharedResumeContext = {
     groundingEvidence: {
       ...groundedEvidence,
       items: groundedEvidence.items.map((item) =>
@@ -877,6 +879,9 @@ export async function runResumeGenerationAgentTask(input: {
       resumeFormat: input.request.settings.resumeFormat,
       fontPreset: input.request.settings.fontPreset,
     },
+  };
+  const resumeGenerationContext = {
+    ...sharedResumeContext,
     resumeHeadline:
       input.request.resumeHeadline ?? input.request.profile.headline,
     ...jobSpecificPayload,
@@ -929,6 +934,7 @@ export async function runResumeGenerationAgentTask(input: {
       {
         preventRuntimeRetries: true,
         reasoningTask: "resume_writer",
+        stableLead: JSON.stringify(jsonSafe(sharedResumeContext)).slice(0, -1),
         contentToToolCalls(content) {
           try {
             const proposal = JSON.parse(content) as unknown;

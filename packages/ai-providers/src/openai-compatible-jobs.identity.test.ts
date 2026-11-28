@@ -8,7 +8,7 @@ describe("posting URL identity", () => {
   test.each(["search_results", "job_detail"] as const)(
     "%s treats observed posting URLs as evidence rather than instructions",
     (pageType) => {
-      const prompt = buildJobsExtractionPrompt({
+      const { shared: prompt } = buildJobsExtractionPrompt({
         pageHostLabel: "careers.example.test",
         pageType,
         effectiveMaxJobs: 2,
@@ -21,7 +21,7 @@ describe("posting URL identity", () => {
   );
 
   test("a listing's own company wins over the site's brand", () => {
-    const prompt = buildJobsExtractionPrompt({
+    const { shared: prompt } = buildJobsExtractionPrompt({
       pageHostLabel: "careers.example.test",
       pageType: "search_results",
       effectiveMaxJobs: 2,
@@ -33,7 +33,7 @@ describe("posting URL identity", () => {
   });
 
   test("a requested listing read records the reader's answer whether this is that posting", () => {
-    const prompt = buildJobsExtractionPrompt({
+    const { shared: prompt } = buildJobsExtractionPrompt({
       pageHostLabel: "careers.example.test",
       pageType: "job_detail",
       effectiveMaxJobs: 1,
@@ -130,7 +130,7 @@ describe("posting URL identity", () => {
   });
 
   test("keeps a posting's apply link apart from its own page", () => {
-    const prompt = buildJobsExtractionPrompt({
+    const { shared: prompt } = buildJobsExtractionPrompt({
       pageHostLabel: "careers.example.test",
       pageType: "job_detail",
       effectiveMaxJobs: 1,
@@ -176,7 +176,7 @@ describe("page extraction instructions", () => {
   test.each(["search_results", "job_detail"] as const)(
     "%s separates employer, facts and application route (R3-013, R3-180, R3-098, R3-104, R3-014)",
     (pageType) => {
-      const prompt = buildJobsExtractionPrompt({
+      const { shared: prompt } = buildJobsExtractionPrompt({
         pageHostLabel: "board.example.test",
         pageType,
         effectiveMaxJobs: 5,
@@ -196,12 +196,12 @@ describe("page extraction instructions", () => {
         pageHostLabel: "board.example.test",
         pageType: "search_results",
         effectiveMaxJobs: 5,
-      }),
+      }).shared,
     ).toContain("Explicit exclusions always apply");
   });
 
   test("results cards request only facts and a selection decision, keeping detail reads complete", () => {
-    const results = buildJobsExtractionPrompt({
+    const { shared: results } = buildJobsExtractionPrompt({
       pageHostLabel: "board.example.test",
       pageType: "search_results",
       effectiveMaxJobs: 12,
@@ -219,7 +219,7 @@ describe("page extraction instructions", () => {
     expect(results).toContain(
       "Unknown detail is provisional, not proof of a mismatch",
     );
-    const detail = buildJobsExtractionPrompt({
+    const { shared: detail } = buildJobsExtractionPrompt({
       pageHostLabel: "board.example.test",
       pageType: "job_detail",
       effectiveMaxJobs: 1,

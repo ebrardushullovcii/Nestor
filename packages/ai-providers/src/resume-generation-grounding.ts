@@ -267,6 +267,10 @@ export function buildGroundedResumeRewriteModelPayload(
 ) {
   return {
     ...(input.resumeText?.trim() ? { baseResumeText: input.resumeText } : {}),
+    groundingEvidence: {
+      version: 1,
+      items: buildResumeGenerationEvidenceCatalog(input),
+    },
     ...("language" in input
       ? {
           targetLanguage:
@@ -290,10 +294,6 @@ export function buildGroundedResumeRewriteModelPayload(
     ...("researchContext" in input && input.researchContext
       ? { researchContext: input.researchContext }
       : {}),
-    groundingEvidence: {
-      version: 1,
-      items: buildResumeGenerationEvidenceCatalog(input),
-    },
   };
 }
 

@@ -12,15 +12,16 @@ const searches = new WeakMap<
 >();
 
 /**
- * The first request gives the provider time to write its prefix. Release
- * the rest on the first streamed answer event, or when the lead settles.
- * After that, callers use their existing parallel lanes.
+ * The first request gives the provider time to write its prefix. Fit waits
+ * for the lead to start returning its answer, or to settle when no answer
+ * streams. Other search turns also release on streamed reasoning.
  */
 export async function withWarmSearchCache(
   client: LLMClient,
   signal: AbortSignal | undefined,
   key: string,
   send: (onStreamEvent?: StreamListener) => ReturnType<Chat>,
+  releaseOnReasoning: boolean,
 ): ReturnType<Chat> {
   if (!signal) return send();
   let runs = searches.get(client);
@@ -50,7 +51,11 @@ export async function withWarmSearchCache(
       return await send();
     }
     return await send((event) => {
-      if (event.type !== "attempt_started" && event.type !== "provider_wait")
+      if (
+        event.type !== "attempt_started" &&
+        event.type !== "provider_wait" &&
+        (releaseOnReasoning || event.type !== "reasoning_delta")
+      )
         release?.();
     });
   } finally {

@@ -24,6 +24,13 @@ import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
 import { createOpenAiCompatibleInterviewScreenshotVisionProvider } from "./live-assistant";
 import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { AgentMessage } from "./shared";
+import { runResumeGenerationAgentTask } from "./agent-capabilities";
+import {
+  createJobPosting,
+  createPreferences,
+  createProfile,
+  createSettings,
+} from "./test-fixtures";
 
 /** A scripted Messages response, streamed as Anthropic's SSE events. */
 type ScriptedBlock =
@@ -245,6 +252,181 @@ function client(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
 }
+
+test.each([
+  {
+    apiMode: "responses",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-6.2-sol",
+  },
+  {
+    apiMode: "chat_completions",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    model: "deepseek-v4.1-flash",
+  },
+  {
+    apiMode: "messages",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-opus-5-5",
+  },
+] as const)(
+  "$apiMode shares fit, extraction and resume prefixes across different jobs",
+  async (route) => {
+    type TextBlock = {
+      text: string;
+      cache_control?: unknown;
+      prompt_cache_breakpoint?: unknown;
+    };
+    type Message = { role: string; content: string | TextBlock[] };
+    function splitRequest(request: Captured) {
+      const system = request.body.system as TextBlock[] | undefined;
+      const messages = (request.body.input ??
+        request.body.messages) as Message[];
+      return [
+        ...(system ?? []),
+        ...messages.flatMap((message) =>
+          typeof message.content === "string"
+            ? [{ text: message.content }]
+            : message.content,
+        ),
+      ];
+    }
+    const reply = (content: object) => () => {
+      const text = JSON.stringify(content);
+      if (route.apiMode === "messages")
+        return sse({
+          content: [{ type: "text", text }],
+          stop_reason: "end_turn",
+        });
+      return Response.json(
+        route.apiMode === "responses"
+          ? { status: "completed", output_text: text }
+          : { choices: [{ message: { content: text } }] },
+      );
+    };
+    const fitReply = reply({ judgments: [] });
+    const extractReply = reply({ jobs: [] });
+    const summary = "Maintained a synthetic migration ledger.";
+    const resumeReply = reply({
+      summary: { text: summary, evidenceRefs: ["baseResume:text"] },
+    });
+    const script = scriptFetch([
+      fitReply,
+      fitReply,
+      extractReply,
+      extractReply,
+      extractReply,
+      extractReply,
+      resumeReply,
+      resumeReply,
+    ]);
+    restoreFetch = script.restore;
+    const model = client(route);
+    const profile = createProfile();
+    const resumeText = `${summary}\n${"Complete synthetic candidate evidence. ".repeat(500).trim()}`;
+    profile.baseResume.textContent = resumeText;
+    profile.summary = "Candidate maintains a synthetic release ledger.";
+    const searchPreferences = createPreferences();
+    for (const job of ["FIRST_JOB", "SECOND_JOB"]) {
+      await model.judgeJobFits!({
+        profile,
+        searchPreferences,
+        assessmentDate: "2026-11-28",
+        jobs: [{ jobId: job, posting: { ...createJobPosting(), title: job } }],
+      });
+    }
+    for (const pageType of ["search_results", "job_detail"] as const) {
+      for (const [i, job] of ["FIRST_JOB", "SECOND_JOB"].entries()) {
+        await model.extractJobsFromPage({
+          pageType,
+          pageUrl: `https://${job.toLowerCase().replace("_", "-")}.example.test`,
+          pageText: job,
+          maxJobs: i + 2,
+          excludedCanonicalUrls: [job],
+          selectionContext: job,
+        });
+      }
+    }
+    for (const job of ["FIRST_JOB", "SECOND_JOB"]) {
+      const result = await runResumeGenerationAgentTask({
+        client: model,
+        substantivePrompt:
+          "Write a resume grounded in the supplied evidence IDs.",
+        request: {
+          profile,
+          searchPreferences,
+          settings: createSettings(),
+          resumeText,
+          resumeHeadline: job,
+          job: { ...createJobPosting(), title: job },
+          languageFields: [{ id: "summary", text: job }],
+        },
+      });
+      expect(result.summary).toBe(summary);
+    }
+    expect(script.captured).toHaveLength(8);
+    const boundaries = [
+      { suffix: ',"assessmentDate"', evidence: profile.summary },
+      {
+        suffix: " You extract job listings",
+        evidence: "Do not fabricate posted dates",
+      },
+      {
+        suffix: " You extract one structured job posting",
+        evidence: "Do not fabricate posted dates",
+      },
+      {
+        suffix: ',"resumeHeadline"',
+        evidence: JSON.stringify(resumeText).slice(1, -1),
+      },
+    ];
+    for (const [i, { suffix, evidence }] of boundaries.entries()) {
+      const first = script.captured[i * 2]!;
+      const next = script.captured[i * 2 + 1]!;
+      const input = splitRequest(first);
+      const later = splitRequest(next);
+      const fullText = input.map(({ text }) => text).join("");
+      const laterText = later.map(({ text }) => text).join("");
+      expect(fullText).toContain("FIRST_JOB");
+      expect(laterText).toContain("SECOND_JOB");
+      const prefix = fullText.split(suffix)[0]!;
+      expect(fullText).toContain(suffix);
+      expect(prefix).toBe(laterText.split(suffix)[0]);
+      expect(prefix).toContain(evidence);
+      expect(prefix).not.toContain("FIRST_JOB");
+      expect(prefix).not.toContain("first-job.example.test");
+      if (route.apiMode === "chat_completions") {
+        const firstSession = first.headers.get("x-opencode-session");
+        expect(firstSession).toMatch(/^ses_[a-z0-9]+$/);
+        expect(next.headers.get("x-opencode-session")).toBe(firstSession);
+        expect(first.body.prompt_cache_key).toBeUndefined();
+        expect(first.body.prompt_cache_options).toBeUndefined();
+        continue;
+      }
+      if (route.apiMode === "responses") {
+        expect(first.body.prompt_cache_key).toMatch(/^ses_[a-z0-9]+$/);
+        expect(next.body.prompt_cache_key).toBe(first.body.prompt_cache_key);
+        expect(first.body.prompt_cache_options).toEqual({
+          mode: i === 3 ? "implicit" : "explicit",
+        });
+      }
+      const breakpoint = input.findLastIndex(
+        (block) => block.cache_control || block.prompt_cache_breakpoint,
+      );
+      expect(breakpoint).toBeGreaterThanOrEqual(0);
+      expect(input.slice(0, breakpoint + 1)).toEqual(
+        later.slice(0, breakpoint + 1),
+      );
+      expect(
+        input
+          .slice(0, breakpoint + 1)
+          .map(({ text }) => text)
+          .join(""),
+      ).toBe(prefix);
+      expect(input[breakpoint + 1]?.text.startsWith(suffix)).toBe(true);
+    }
+  },
+);
 
 const tools: AgentLoopToolDefinition[] = [
   {
