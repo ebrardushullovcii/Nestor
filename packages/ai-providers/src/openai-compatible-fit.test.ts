@@ -116,6 +116,15 @@ test.each([
           content: string;
         }>;
         expect(messages[0]!.content).toContain(buildFitScoringInstructions());
+        expect(messages[0]!.content).toContain(
+          "Attribute material location evidence in your explanation to the employer's text or the job board's label.",
+        );
+        expect(messages[0]!.content).toContain(
+          "An explicit employer hiring or residence rule for this role takes precedence over a conflicting board label.",
+        );
+        expect(messages[0]!.content).toContain(
+          "say that the hiring scope is unverified and weigh that uncertainty in the score",
+        );
       }
       // The rubric guides the model; the app does not replace its verdict.
       expect(batch.map(({ jobId, score }) => ({ jobId, score }))).toEqual(
