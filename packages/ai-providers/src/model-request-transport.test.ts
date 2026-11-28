@@ -9,6 +9,7 @@ import {
   resetModelCredentialRejections,
 } from "./model-request-transport";
 import { withModelProviderProgress } from "./model-request-events";
+import { getAiProviderAccessFailure } from "./ai-provider-access-failure";
 
 beforeEach(() => {
   resetModelCredentialRejections();
@@ -96,6 +97,48 @@ describe("performModelRequest after the key is rejected", () => {
       }),
     ).rejects.toMatchObject({ status: 401 });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  test("an empty balance reported inside a Responses stream is the account's refusal (R14)", async () => {
+    // OpenAI answers 200 and streams the refusal (shape seen live, Nov 28).
+    const refusal = {
+      type: "insufficient_quota",
+      code: "credit_balance_exhausted",
+      param: null,
+      message:
+        "You have no credits remaining. Add credits to continue using the API at https://platform.example.test/billing/.",
+    };
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        sseResponse([
+          JSON.stringify({ type: "response.created", response: {} }),
+          JSON.stringify({ type: "error", error: refusal }),
+          JSON.stringify({
+            type: "response.failed",
+            response: { status: "failed", error: refusal },
+          }),
+        ]),
+      ),
+    );
+    const request = {
+      ...baseInput,
+      url: "https://gateway.example/v1/responses",
+      apiMode: "responses" as const,
+      fetchImpl,
+    };
+    const refused = await performModelRequest(request).catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(ModelRequestHttpError);
+    expect(refused).toMatchObject({ status: 402 });
+    expect(getAiProviderAccessFailure(refused)).toMatchObject({
+      reason: "funding",
+    });
+    // Like a 402, the calls queued behind it do not ask again.
+    await expect(performModelRequest(request)).rejects.toMatchObject({
+      status: 402,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   test("does not pause on a server error", async () => {
