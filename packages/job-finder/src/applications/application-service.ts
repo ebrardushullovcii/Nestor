@@ -642,6 +642,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       resume = resumes.saveDraft(row.jobId, draft, resume.updatedAt);
     }
     let previous = applications.getWork(row.id);
+    // An interrupted run can have a file on the employer's form before it
+    // has saved any execution result. Reuse the recorded file independently.
+    const existingArtifact =
+      previous?.resumeArtifact ?? applications.getResumeArtifact(row.id);
     let artifact: ApplicationResumeArtifact;
     if (resume.draft && !resume.pdfPath) {
       // Written and not approved: rendered now, as approval would render it.
@@ -651,7 +655,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         job: toResumeJob(job),
         settings,
         documentManager: deps.documentManager,
-        existingArtifact: previous?.resumeArtifact ?? null,
+        existingArtifact,
         signal,
       });
     } else {
@@ -693,7 +697,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       job: toResumeJob(job),
       settings,
       documentManager: deps.documentManager,
-      existingArtifact: previous?.resumeArtifact ?? null,
+      existingArtifact,
       signal,
     });
     artifact = renderedResume.artifact;

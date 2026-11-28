@@ -35,7 +35,7 @@ import {
 import { traceEvent } from "@nestor/core/run-trace";
 import type * as RunTrace from "@nestor/core/run-trace";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -2832,6 +2832,47 @@ it("a run that fails after the ledger recorded its send shows the send, and a ro
     expect.objectContaining({
       message: "The run's result could not be saved.",
     }),
+  );
+});
+
+it("reuses the exact resume PDF after interruption before the form result is saved", async () => {
+  const f = await setup(1, undefined, {
+    onDisk: true,
+    draft: { level: "tailored", approve: false },
+  });
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const row = f.applications.listApplications().rows[0]!;
+  const first = f.execute.mock.calls[0]![1].resumeArtifact;
+  const uploadedHash = createHash("sha256")
+    .update(await readFile(first.filePath))
+    .digest("hex");
+  expect(first.sha256).toBe(uploadedHash);
+  expect(f.applications.getResumeArtifact(row.id)).toEqual(first);
+  expect(f.applications.getWork(row.id)).toBeNull();
+
+  f.service.stop();
+  f.jobs.close();
+  const jobs = openJobStore(f.dbPath);
+  const applications = createApplicationStore(jobs);
+  const restarted = createApplicationService({ ...f.deps, jobs, applications });
+  cleanups.unshift(() => {
+    restarted.stop();
+    jobs.close();
+  });
+  await restarted.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(applications.getApplication(row.id)?.attempt).toBe(row.attempt + 1);
+  expect(f.renderResumeArtifact).toHaveBeenCalledOnce();
+  expect(f.execute.mock.calls[1]![1].resumeArtifact).toEqual(first);
+  f.releases.pop()!();
+  await vi.waitFor(() =>
+    expect(applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(applications.getResumeArtifact(row.id)).toEqual(first);
+  expect(applications.getWork(row.id)?.resumeArtifact.sha256).toBe(
+    uploadedHash,
   );
 });
 
