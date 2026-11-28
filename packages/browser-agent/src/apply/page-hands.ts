@@ -587,8 +587,8 @@ export function createApplyPageHands(
     ...(mechanics.closeAuxiliaryTabs
       ? { closeAuxiliaryTabs: mechanics.closeAuxiliaryTabs }
       : {}),
-    ...(mechanics.readMailboxAccounts
-      ? { readMailboxAccounts: mechanics.readMailboxAccounts }
+    ...(mechanics.readMailboxSession
+      ? { readMailboxSession: mechanics.readMailboxSession }
       : {}),
     observe: async () =>
       buildApplyFormObservation(

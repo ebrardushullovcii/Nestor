@@ -340,7 +340,7 @@ export interface ApplyPageHands {
   switchTab?: ApplyRawPageHands["switchTab"];
   closeTab?: ApplyRawPageHands["closeTab"];
   closeAuxiliaryTabs?: ApplyRawPageHands["closeAuxiliaryTabs"];
-  readMailboxAccounts?: ApplyRawPageHands["readMailboxAccounts"];
+  readMailboxSession?: ApplyRawPageHands["readMailboxSession"];
   prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
   listSavedCredentials?: ApplyRawPageHands["listSavedCredentials"];
   fillSavedCredential?: ApplyRawPageHands["fillSavedCredential"];

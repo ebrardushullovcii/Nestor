@@ -448,8 +448,12 @@ export interface ApplyRawPageHands {
   switchTab?: (tabId: string) => Promise<ApplyNavigationResult>;
   closeTab?: (tabId: string) => Promise<ApplyNavigationResult>;
   closeAuxiliaryTabs?: () => Promise<void>;
-  /** Non-secret identity read from the mailbox's own signed-in account UI. */
-  readMailboxAccounts?: () => Promise<{ email: string; url: string }[]>;
+  /** Non-secret facts from opening the mailbox in the task's browser session. */
+  readMailboxSession?: () => Promise<
+    | { status: "signed_in"; accounts: { email: string; url: string }[] }
+    | { status: "google_accounts_redirect" }
+    | { status: "unknown" }
+  >;
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   listSavedCredentials?: () => Promise<BrowserPasswordsList>;

@@ -134,6 +134,8 @@ export const DesktopBrowserImportCountsSchema = z
     lockedToBrowser: ImportCount,
     unsupportedEncryption: ImportCount,
     couldNotDecrypt: ImportCount,
+    /** Left in the source browser to avoid replacing Nestor's Google sign-in. */
+    googleCookies: ImportCount,
     /** Read correctly but refused when written to Nestor's browser. */
     refused: ImportCount,
   })

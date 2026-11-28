@@ -392,6 +392,7 @@ describe("Windows cookie import accounting", () => {
       expired: 1,
       partitioned: 1,
       invalid: 1,
+      googleCookies: 0,
     });
     expect(JSON.stringify(diagnostics)).not.toMatch(/synthetic|example|legacy/);
     const encrypted = encryptWindows(
@@ -440,7 +441,7 @@ describe("Windows cookie import accounting", () => {
       siteCount: 1,
     });
     expect(result.message).toBe(
-      "Copied 1 cookie for 1 site from Microsoft Edge. Sites that use them may keep you signed in. If one asks you to sign in, sign in here once.",
+      "Copied 1 cookie for 1 site from Microsoft Edge. Sites that use them may keep you signed in. If one asks you to sign in, sign in here.",
     );
     // Every cookie found is accounted for once, each reason on its own.
     expect(result.counts).toEqual({
@@ -451,6 +452,7 @@ describe("Windows cookie import accounting", () => {
       lockedToBrowser: 1,
       unsupportedEncryption: 1,
       couldNotDecrypt: 1,
+      googleCookies: 0,
       refused: 1,
     });
     // Running searches and applications are left alone during an import.
@@ -473,15 +475,16 @@ describe("Windows cookie import accounting", () => {
     }
   });
 
-  test("returns Google sign-in guidance separately from the cookie counts", async () => {
+  test("leaves Google cookies behind while importing another site", async () => {
     const { env, file } = await windowsCookieProfile();
     const db = new DatabaseSync(file);
     db.exec(
-      "DELETE FROM cookies WHERE name <> 'plain'; UPDATE cookies SET host_key='accounts.google.com'",
+      "DELETE FROM cookies WHERE name NOT IN ('plain', 'legacy'); UPDATE cookies SET host_key='.google.com' WHERE name='legacy'",
     );
     db.close();
+    const set = vi.fn();
     const host = {
-      getSession: () => ({ cookies: { set: vi.fn(), flushStore: vi.fn() } }),
+      getSession: () => ({ cookies: { set, flushStore: vi.fn() } }),
     } as unknown as EmbeddedBrowser;
     const source = (await listBrowserImportSources(env)).sources[0]!;
     const result = await importSignInsFromBrowser(
@@ -493,11 +496,33 @@ describe("Windows cookie import accounting", () => {
       status: "imported",
       cookieCount: 1,
       siteCount: 1,
+      counts: { found: 2, googleCookies: 1, refused: 0 },
     });
+    expect(set).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "plain" }),
+    );
+    expect(dpapi).not.toHaveBeenCalled();
     expect(result.googleSignInNotice).toBe(
-      "Google keeps your sign-in in Microsoft Edge, so Gmail and “Sign in with Google” ask again here. Sign in once and Nestor keeps it.",
+      "Google cookies stay in Microsoft Edge to protect any Google sign-in you’ve already made in Nestor. If Google asks you to sign in again, do it in Nestor’s browser.",
     );
     expect(result.message).toMatch(/^Copied 1 cookie for 1 site/);
+
+    const googleOnly = new DatabaseSync(file);
+    googleOnly.exec("DELETE FROM cookies WHERE name = 'plain'");
+    googleOnly.close();
+    set.mockClear();
+    const skipped = await importSignInsFromBrowser(
+      host,
+      { sourceId: source.id },
+      env,
+    );
+    expect(skipped).toMatchObject({
+      status: "unsupported",
+      cookieCount: 0,
+      googleSignInNotice: result.googleSignInNotice,
+      counts: { found: 1, googleCookies: 1, refused: 0 },
+    });
+    expect(set).not.toHaveBeenCalled();
   });
 
   test("does not attempt app-bound decryption and explains a protected-only profile", async () => {
@@ -956,19 +981,21 @@ describe("browser profile import", () => {
       "^partitionKey=(https,other.test)",
     );
     insert.run("bad", "bad host", later, "");
+    insert.run("google", ".google.com", later, "");
     db.close();
     expect(readFirefoxCookies(file)).toEqual([
       expect.objectContaining({ name: "sid", value: "abc", sameSite: "lax" }),
     ]);
     // Firefox imports count what they leave out the same way Chromium does.
     expect(readFirefoxCookieStore(file).diagnostics).toEqual({
-      found: 4,
+      found: 5,
       appBound: 0,
       unsupportedEncryption: 0,
       decryptFailed: 0,
       expired: 1,
       partitioned: 1,
       invalid: 1,
+      googleCookies: 1,
     });
   });
 

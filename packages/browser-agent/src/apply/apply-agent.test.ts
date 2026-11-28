@@ -333,13 +333,16 @@ test.each([
     const input = config(page());
     input.authority.mode = mode;
     input.authority.preApprovedAttestationKinds = ["terms_acceptance"];
-    input.hands.readMailboxAccounts = () =>
-      Promise.resolve([
-        {
-          email: "synthetic@example.test",
-          url: "https://mail.google.com/mail/u/0/",
-        },
-      ]);
+    input.hands.readMailboxSession = () =>
+      Promise.resolve({
+        status: "signed_in",
+        accounts: [
+          {
+            email: "synthetic@example.test",
+            url: "https://mail.google.com/mail/u/0/",
+          },
+        ],
+      });
     const client = model([done]);
     await runApplyAgent(input, client);
     const prompt = createApplySystemPrompt(input);
@@ -365,6 +368,24 @@ test.each([
     );
   },
 );
+
+test("the first model turn sees a Gmail redirect without losing its browser tools", async () => {
+  const input = config(page());
+  input.hands.readMailboxSession = () =>
+    Promise.resolve({ status: "google_accounts_redirect" });
+  const client = model([done]);
+  await runApplyAgent(input, client);
+
+  const [messages, tools] = vi.mocked(client.chatWithTools).mock.calls[0];
+  expect(JSON.stringify(messages)).toContain(
+    "At run start Gmail redirected to Google Accounts in this browser.",
+  );
+  expect(JSON.stringify(messages)).toContain(
+    "tell them Google needs them to sign in again in Nestor’s browser",
+  );
+  expect(tools.map((tool) => tool.function.name)).toContain("open_tab");
+});
+
 test.each(["prepare_only", "autonomous_submit"] as const)(
   "%s receives the real instruction and both labelled resume documents",
   async (mode) => {

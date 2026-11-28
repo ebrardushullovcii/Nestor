@@ -555,15 +555,16 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     siteCount: 2,
     message: "Copied 3 cookies for 2 sites from Google Chrome.",
     googleSignInNotice:
-      "Google keeps your sign-in in Google Chrome, so Gmail and “Sign in with Google” ask again here.",
+      "Google cookies stay in Google Chrome to protect any Google sign-in you’ve already made in Nestor. If Google asks you to sign in again, do it in Nestor’s browser.",
     counts: {
-      found: 400,
+      found: 405,
       expired: 380,
       partitioned: 12,
       invalid: 1,
       lockedToBrowser: 0,
       unsupportedEncryption: 0,
       couldNotDecrypt: 4,
+      googleCookies: 5,
       refused: 0,
     },
   });
@@ -604,7 +605,7 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     fireEvent.click(row);
     // Google and its button lead; what came over and the counts follow.
     const notice = await screen.findByRole("heading", {
-      name: "Google needs one sign-in here",
+      name: "Google sign-in in Nestor",
     });
     const signIn = screen.getByRole("button", {
       name: "Sign in to Google here",
@@ -618,7 +619,7 @@ it("names each import row by its browser and profile, and offers Google sign-in 
     );
     // Each reason a cookie stayed behind is its own line, none lumped.
     const status = screen.getByRole("status");
-    expect(status.textContent).toContain("Not copied: 397 of 400");
+    expect(status.textContent).toContain("Not copied: 402 of 405");
     const lines = within(status)
       .getAllByRole("listitem")
       .map((item) => item.textContent);
@@ -627,6 +628,7 @@ it("names each import row by its browser and profile, and offers Google sign-in 
       "12belong to a site shown inside another site, which Nestor leaves out",
       "1has a site address Nestor’s browser can’t use",
       "4couldn’t be unlocked",
+      "5are Google cookies kept in the other browser",
     ]);
     expect(
       screen.getByRole("heading", { name: "Import browser cookies" }),
