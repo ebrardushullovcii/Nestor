@@ -865,7 +865,7 @@ export async function resetJobFinderBrowser(): Promise<void> {
     await import("../assistant/assistant-service");
   await shutdownAssistantHost();
   const browser = getEmbeddedBrowser();
-  await browser.close(true);
+  await browser.close("requested");
   await clearBrowserSession();
   browser.clearSavedPasswords();
   // Restore/reset replaces the old browser state, including its person-close
@@ -894,7 +894,7 @@ export async function resetJobFinderWorkspace(): Promise<void> {
     reason: "Resetting workspace",
   });
   const browser = getEmbeddedBrowser();
-  await browser.close(true);
+  await browser.close("requested");
   await clearBrowserSession();
   browser.clearSavedPasswords();
   // A resume import still reading would otherwise write its file and text
