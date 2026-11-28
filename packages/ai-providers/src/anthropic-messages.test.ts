@@ -1003,6 +1003,40 @@ describe("Messages one-shot caching", () => {
     ]);
   });
 
+  test("a fit profile change can still read its unchanged resume breakpoint", () => {
+    const stableLead = '{"person":{"resume":"Synthetic CV"';
+    const makeRequest = (workCountry: string, id: number) => {
+      const stableLeadEnd = `,"workCountry":"${workCountry}"}}`;
+      const tail = `,"listings":[{"id":${id}}]`;
+      const body = buildModelRequestBody({
+        apiMode: "messages",
+        model: "claude-opus-5-5",
+        messages: [
+          system,
+          { role: "user", content: stableLead + stableLeadEnd + tail },
+        ],
+        tools,
+        oneShot: true,
+        stableLead,
+        stableLeadEnd,
+      });
+      expect(body).not.toHaveProperty("cache_control");
+      return (body.messages as Array<{ content: unknown[] }>)[0]!.content;
+    };
+    const original = makeRequest("DE", 1);
+    const sameProfile = makeRequest("DE", 2);
+    const editedProfile = makeRequest("FR", 3);
+    expect(original.slice(0, 2)).toEqual(sameProfile.slice(0, 2));
+    expect(original[0]).toEqual(editedProfile[0]);
+    expect(original[1]).not.toEqual(editedProfile[1]);
+    expect(original).toMatchObject([
+      { type: "text", text: stableLead, cache_control: { type: "ephemeral" } },
+      { type: "text", cache_control: { type: "ephemeral" } },
+      { type: "text", text: ',"listings":[{"id":1}]' },
+    ]);
+    expect(original[2]).not.toHaveProperty("cache_control");
+  });
+
   test("earlier messages of a one-shot request are its lead", () => {
     const body = buildModelRequestBody({
       apiMode: "messages",
@@ -1054,7 +1088,24 @@ describe("Messages one-shot caching", () => {
       stableLead: JSON.stringify(lead).slice(0, -1),
     });
     expect(body.cache_control).toEqual({ type: "ephemeral" });
-    expect(JSON.stringify(body.messages)).not.toContain('"cache_control"');
+    expect(body.messages).toMatchObject([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(lead).slice(0, -1),
+            cache_control: { type: "ephemeral" },
+          },
+          {
+            type: "text",
+            text: batch(1).slice(JSON.stringify(lead).length - 1),
+          },
+        ],
+      },
+      { role: "assistant" },
+      { role: "user" },
+    ]);
   });
 
   test("the client passes oneShot and stableLead to the route", async () => {

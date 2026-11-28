@@ -380,8 +380,8 @@ test("passes remote location policy into fit and retains the model's changed sco
         goals: { remoteCountsAsAnyLocation?: boolean };
       };
       const off = data.goals.remoteCountsAsAnyLocation === false;
-      expect(messages[0]!.content.includes("remote alone does not match")).toBe(
-        off,
+      expect(messages[0]!.content).toContain(
+        "If goals.remoteCountsAsAnyLocation is false, remote alone does not match",
       );
       return Promise.resolve({
         content: JSON.stringify({
@@ -433,6 +433,10 @@ test("passes remote location policy into fit and retains the model's changed sco
       preferences: { assessment: "conflict" },
     });
     expect(chatWithTools).toHaveBeenCalledTimes(2);
+    const [firstPrompt, secondPrompt] = chatWithTools.mock.calls.map(
+      ([messages]) => messages[0]?.content,
+    );
+    expect(firstPrompt).toBe(secondPrompt);
     store.setFit(modelFit);
     const visible = store.listJobs({ stage: "found", sort: "best_fit" })
       .rows[0];

@@ -234,12 +234,11 @@ test("fit gets where the person lives, may work and would move, and the remote s
     "When preferredRelocationRegions is non-empty, relocation covers only those places",
   );
   expect(prompts[0]).toContain(
-    "it never removes a listing's residency or hiring-region rule",
+    "never removes hiring or residency restrictions",
   );
   expect(prompts[0]).not.toContain("may still be Good or Strong");
-  expect(prompts[1]).toContain(
-    "The person turned off counting remote jobs as any location",
-  );
+  expect(prompts[0]).toContain("If goals.remoteCountsAsAnyLocation is false");
+  expect(prompts[1]).toBe(prompts[0]);
 });
 
 test("fit gets the person's saved eligibility answers as facts and reads preferences as preferences", async () => {
@@ -392,18 +391,115 @@ test("fit batches send the person's facts as the request's stable lead", async (
   );
   await fitJobs({
     client: { chatWithTools },
-    profile,
+    profile: {
+      ...profile,
+      baseResume: { ...profile.baseResume, textContent: "Synthetic CV" },
+    },
     jobs: [job],
     goals: { targetRoles: [], locations: [] },
     assessmentDate: "2026-11-27",
   }).catch(() => undefined); // Only the request matters here.
   const [messages, , options] = chatWithTools.mock.calls[0];
   expect(options).toMatchObject({ oneShot: true });
-  const lead = options?.stableLead ?? "";
+  const resumeLead = options?.stableLead;
+  const lead = (resumeLead ?? "") + (options?.stableLeadEnd ?? "");
   // The lead opens the very text every route reads, and ends before the batch.
   expect(messages[1].content.startsWith(lead)).toBe(true);
-  expect(lead).toContain('"person":');
-  expect(lead).toContain('"assessmentDate":"2026-11-27"');
-  expect(lead).not.toContain('"listings"');
-  expect(messages[1].content.slice(lead.length)).toMatch(/^,"listings":/u);
+  expect(resumeLead).toBe('{"person":{"resume":"Synthetic CV"');
+  expect(lead).toContain('"goals":');
+  expect(messages[1].content.slice(lead.length)).toMatch(
+    /^,"assessmentDate":"2026-11-27","listings":/u,
+  );
 });
+
+test("simultaneous fit calls wait only for the first request's cache write", async () => {
+  const verdict = (id: number) => ({
+    content: JSON.stringify({
+      fits: [
+        {
+          id,
+          s: 90,
+          why: "Matching work",
+          r: ["strong", "Work"],
+          p: ["aligned", "Remote"],
+          c: ["strong", "Evidence"],
+          e: ["compatible", "Worldwide", "broader_remote", ""],
+        },
+      ],
+    }),
+  });
+  let finishFirst: (reply: ReturnType<typeof verdict>) => void = () => {};
+  const first = new Promise<ReturnType<typeof verdict>>((resolve) => {
+    finishFirst = resolve;
+  });
+  const chatWithTools = vi
+    .fn<LLMClient["chatWithTools"]>()
+    .mockReturnValueOnce(first)
+    .mockResolvedValueOnce(verdict(2));
+  const input = {
+    profile,
+    client: { chatWithTools },
+    signal: new AbortController().signal,
+    goals: { targetRoles: [], locations: [] },
+  };
+  const firstFit = fitJobs({ ...input, jobs: [job] });
+  const secondFit = fitJobs({ ...input, jobs: [{ ...job, id: 2 }] });
+  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  const stream = chatWithTools.mock.calls[0][2]?.onStreamEvent;
+  stream?.({ type: "text_delta", text: "{" });
+  await expect(secondFit).resolves.toMatchObject([{ id: 2 }]);
+  finishFirst(verdict(1));
+  await expect(firstFit).resolves.toMatchObject([{ id: 1 }]);
+});
+
+test.each(["advertised window", "provider rejection"])(
+  "fit sends each complete listing once after a batch exceeds the %s",
+  async (limit) => {
+    const descriptions = [
+      "TypeScript duties ".repeat(200),
+      "SQL requirements ".repeat(200),
+    ];
+    const jobs = descriptions.map((description, index) => ({
+      ...job,
+      id: index + 1,
+      description,
+    }));
+    const attempts: number[][] = [];
+    const fits = await fitJobs({
+      profile,
+      jobs,
+      contextWindowTokens: limit === "advertised window" ? 7_200 : 64_000,
+      goals: { targetRoles: [], locations: [] },
+      client: {
+        chatWithTools: (messages) => {
+          const { listings } = JSON.parse(messages[1].content) as {
+            listings: { id: number; description: string }[];
+          };
+          attempts.push(listings.map(({ id }) => id));
+          if (listings.length > 1)
+            return Promise.reject(new Error("maximum context length exceeded"));
+          expect(listings[0].description).toBe(
+            descriptions[listings[0].id - 1],
+          );
+          return Promise.resolve({
+            content: JSON.stringify({
+              fits: listings.map(({ id }) => ({
+                id,
+                s: 80,
+                why: "Matching work",
+                r: ["strong", "Work"],
+                p: ["aligned", "Remote"],
+                c: ["strong", "Evidence"],
+                e: ["compatible", "Worldwide", "broader_remote", ""],
+              })),
+            }),
+          });
+        },
+      },
+    });
+    expect(attempts).toEqual(
+      limit === "advertised window" ? [[1], [2]] : [[1, 2], [1], [2]],
+    );
+    expect(fits.map(({ id }) => id)).toEqual([1, 2]);
+  },
+);

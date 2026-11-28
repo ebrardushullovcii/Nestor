@@ -50,6 +50,7 @@ import { buildListingFitPerson } from "./listing-fit-person";
 import { fitSchema, fitResponseSchema } from "./listing-fit-response";
 import { fitCountryCodes } from "./fit-country-codes";
 import {
+  shareDescriptionEndings,
   sharePageText,
   splitLinksOnEveryPage,
   textCoveredBy,
@@ -59,6 +60,7 @@ import { withWarmSearchCache } from "./warm-search-cache";
 
 export interface ListingEngineModel {
   client: LLMClient;
+  conversationKey?: string;
   contextWindowTokens?: number;
   signal?: AbortSignal;
   onUsage?: (usage: ModelTokenUsage, stage: BrowserAgentReasoningTask) => void;
@@ -173,6 +175,8 @@ async function ask<Output, Input>(
    * The serialized opening of `data` that repeats across requests.
    */
   leadText?: string,
+  leadEnd?: string,
+  splitFitBatch = false,
 ): Promise<Output> {
   const recovery: Array<{ role: "user"; content: string }> = [];
   const parts = createContextParts();
@@ -190,10 +194,6 @@ async function ask<Output, Input>(
     },
     { role: "user", content: serializedData },
   ];
-  const stableLead =
-    leadText && serializedData.startsWith(leadText)
-      ? leadText
-      : undefined;
   try {
     while (true) {
       model.signal?.throwIfAborted();
@@ -201,36 +201,55 @@ async function ask<Output, Input>(
         [...messages, ...recovery],
         requestChars,
       );
+      // Independent listings can stay fully visible in smaller requests.
+      // Keep the exact reader for an individual listing that needs it.
+      if (splitFitBatch && modelMessages[1]?.content !== serializedData)
+        throw new Error("Fit batch input too long for the model window");
       let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
       try {
+        const opening = modelMessages[1]?.content;
+        const cachedLead =
+          leadText && opening?.startsWith(leadText)
+            ? leadText
+            : undefined;
+        const cachedEnd =
+          cachedLead && leadEnd && opening?.startsWith(cachedLead + leadEnd)
+            ? leadEnd
+            : undefined;
         const options = {
           ...(model.signal ? { signal: model.signal } : {}),
+          ...(model.conversationKey
+            ? { conversationKey: model.conversationKey }
+            : {}),
           reasoningTask,
           includeUsage: true,
           // Its answer usually ends the work; see ChatWithToolsOptions.oneShot.
           oneShot: true,
-          ...(stableLead ? { stableLead } : {}),
+          ...(cachedLead ? { stableLead: cachedLead } : {}),
+          ...(cachedEnd ? { stableLeadEnd: cachedEnd } : {}),
           // The selected Chat gateway rejects response_format=json_object.
           // The prompt requests JSON; parsing and per-row schemas still validate it.
           ...(jsonSchema ? { jsonSchema } : {}),
         };
-        if (reasoningTask === "listing_screen" || reasoningTask === "page_read") {
-          reply = await withWarmSearchCache(
-            model.client,
-            model.signal,
-            JSON.stringify([modelMessages[0]?.content, stableLead]),
-            (onStreamEvent) =>
-              model.client.chatWithTools(modelMessages, tools, {
-                ...options,
-                ...(onStreamEvent ? { onStreamEvent } : {}),
-              }),
-          );
-        } else {
-          reply = await model.client.chatWithTools(modelMessages, tools, options);
-        }
+        reply = await withWarmSearchCache(
+          model.client,
+          model.signal,
+          JSON.stringify([
+            model.conversationKey,
+            modelMessages[0]?.content,
+            cachedLead,
+            cachedEnd,
+          ]),
+          (onStreamEvent) =>
+            model.client.chatWithTools(modelMessages, tools, {
+              ...options,
+              ...(onStreamEvent ? { onStreamEvent } : {}),
+            }),
+        );
       } catch (error) {
         model.signal?.throwIfAborted();
         if (isModelInputLimit(error)) {
+          if (splitFitBatch) throw error;
           parts.recover(
             Math.min(requestChars, JSON.stringify(modelMessages).length),
           );
@@ -1462,28 +1481,29 @@ function compactFacts(value: unknown): unknown {
 export async function fitJobs(
   input: ListingEngineModel & SearchFitInput & { assessmentDate?: string },
 ): Promise<JobFitUpdate[]> {
-  const { profile } = input;
-  const person = buildListingFitPerson(profile);
-  // Keep candidate evidence ahead of batch-specific text, including retries.
-  // The date follows the person's facts so a new day keeps their cached prefix.
+  const { resume, workEligibility, ...career } = buildListingFitPerson(
+    input.profile,
+  );
+  // A resume often survives changes to the structured profile. Cache it
+  // separately, then cache the full evidence and goals when they also match.
   const context = {
-    person: compactFacts(person),
+    person: compactFacts({ resume, ...career, workEligibility }),
     goals: input.goals,
     ...(input.countryOptionFallbacks?.length
       ? { countryOptionFallbacks: input.countryOptionFallbacks }
       : {}),
     ...(input.savedAnswers?.length ? { savedAnswers: input.savedAnswers } : {}),
     request: input.request,
-    assessmentDate:
-      input.assessmentDate ?? new Date().toISOString().slice(0, 10),
   };
+  const factPrefix = JSON.stringify(context).slice(0, -1);
+  const lead = resume
+    ? JSON.stringify({ person: { resume } }).slice(0, -2)
+    : factPrefix;
+  const leadEnd = factPrefix.slice(lead.length);
+  const assessmentDate =
+    input.assessmentDate ?? new Date().toISOString().slice(0, 10);
   const output: JobFitUpdate[] = [];
   const repairIssues = new Map<number, string[]>();
-  const payFloor = input.goals.compensation;
-  const payInstruction =
-    payFloor?.minimum != null
-      ? "Read published pay separately for EACH listing before scoring. Return pay:{minimum:number|null,maximum:number|null,currency:ISO-code|null,interval:hour|day|week|month|year|null,basis:base|total_ote|null,quote:verbatim own-listing pay passage}. A fixed amount supplies both bounds. Ordinary wages/salary are base; distinguish OTE. Keep absent bounds/currency/interval/basis null; never infer currency conversion, working hours, or another listing's pay. Copy the whole pay range and its interval in quote; use an empty quote when no pay passage exists. Non-pay mandatory requirements belong in h; pay is checked separately from these published numbers. A range reaching the inclusive floor is not a below-floor offer. Missing or incomparable pay is uncertainty, not a known low offer. "
-      : "";
   await mapConcurrent(
     batches(
       input.jobs.filter((job) => job.fit === null || job.fitStale),
@@ -1494,26 +1514,28 @@ export async function fitJobs(
     6,
     async (batch) => {
       const judge = async (batch: JobDetail[]) => {
-        // Bind the complete body directly to its own listing. Indirect shared
-        // paragraph indices let completed judgments claim that duties were absent.
-        const listings = batch.map((job) => ({
-          id: job.id,
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          workModes: job.workModes,
-          employmentType: job.employmentType,
-          salaryText: job.salaryText,
-          seniority: job.seniority,
-          postedAt: job.postedAt,
-          fullListingRead: job.facts.fullListingRead ?? null,
-          description: withoutRepeatedBlocks(job.description),
-        }));
+        const { descriptionEndings, listings } = shareDescriptionEndings(
+          batch.map((job) => ({
+            id: job.id,
+            title: job.title,
+            company: job.company,
+            location: job.location,
+            workModes: job.workModes,
+            employmentType: job.employmentType,
+            salaryText: job.salaryText,
+            seniority: job.seniority,
+            postedAt: job.postedAt,
+            fullListingRead: job.facts.fullListingRead ?? null,
+            description: withoutRepeatedBlocks(job.description),
+          })),
+        );
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing carries the description we have and, when known, whether the full posting was read. A card, title-only result or stub with no concrete duties cannot establish a strong or worth-applying match, even if an older record labels its read complete. Where the evidence is thin, state exactly what is unverified. A block the page repeated verbatim appears once. Use the assessment date and postedAt to weigh unusually old openings. Weigh the posting's actual working language when the listing names it, and distinguish that from the language the page happens to be written in. Weigh a concrete caveat such as salary below the saved floor, a mandatory language, incompatible hours, or a required move in the score itself. For otherwise comparable roles, prefer one the person can start from their current location and in their preferred work mode over one that requires relocation or regular office attendance. Apply the same reasoning to the same location facts across listings, including region restrictions in the heading and exceptions or contradictions in the body. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : " The person counts remote jobs as any location: a remote role they can work from where they live matches their preferred places. This setting is about their preferences only; it never removes a listing's residency or hiring-region rule."} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
+          `${FIT_WORK_ELIGIBILITY} When goals.compensation.minimum is set, read published pay separately for EACH listing before scoring. Return pay:{minimum:number|null,maximum:number|null,currency:ISO-code|null,interval:hour|day|week|month|year|null,basis:base|total_ote|null,quote:verbatim own-listing pay passage}. A fixed amount supplies both bounds. Ordinary wages/salary are base; distinguish OTE. Keep absent bounds/currency/interval/basis null; never infer currency conversion, working hours, or another listing's pay. Copy the whole pay range and its interval in quote; use an empty quote when no pay passage exists. Non-pay mandatory requirements belong in h; pay is checked separately from these published numbers. A range reaching the inclusive floor is not a below-floor offer. Missing or incomparable pay is uncertainty, not a known low offer. Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them: never describe a missing preferred item or one unmet alternative as a required gap or a missing requirement. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing carries the description we have and, when known, whether the full posting was read. A card, title-only result or stub with no concrete duties cannot establish a strong or worth-applying match, even if an older record labels its read complete. Where the evidence is thin, state exactly what is unverified. A block the page repeated verbatim appears once. Each descriptionEndings entry is the exact ending of the descriptions for its ids. Append its text to each listed id’s description; all other descriptions are complete as given. Use the assessment date and postedAt to weigh unusually old openings. Weigh the posting's actual working language when the listing names it, and distinguish that from the language the page happens to be written in. Weigh a concrete caveat such as salary below the saved floor, a mandatory language, incompatible hours, or a required move in the score itself. For otherwise comparable roles, prefer one the person can start from their current location and in their preferred work mode over one that requires relocation or regular office attendance. Apply the same reasoning to the same location facts across listings, including region restrictions in the heading and exceptions or contradictions in the body. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately. If goals.remoteCountsAsAnyLocation is false, remote alone does not match a preferred place. Assess the listing against their saved places even when remote; a different place is a preferences conflict and lowers an otherwise matching job score. Otherwise a remote role they can work from where they live matches their preferred places. This setting is about preferences only and never removes hiring or residency restrictions. Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in about 5 words and ${FIT_SHORT_MAX} characters, for a narrow list row: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
           {
             ...context,
+            assessmentDate,
+            ...(descriptionEndings.length ? { descriptionEndings } : {}),
             listings,
             ...(batch.some((job) => repairIssues.has(job.id))
               ? {
@@ -1530,7 +1552,9 @@ export async function fitJobs(
           Math.max(32_000, batch.length * 1_000),
           "fit_batch",
           fitResponseSchema(),
-          JSON.stringify(context).slice(0, -1),
+          lead,
+          leadEnd,
+          batch.length > 1,
         ).catch((error: unknown) => {
           input.signal?.throwIfAborted();
           if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError))
@@ -1621,11 +1645,14 @@ export async function fitJobs(
           missing = await judge(group);
         } catch (error) {
           input.signal?.throwIfAborted();
-          if (!isModelOutputLimit(error) || group.length === 1) return [error];
-          for (const job of group)
-            repairIssues.set(job.id, [
-              "The previous batch reply hit the route's output maximum and was discarded. Return a shorter judgment for each requested id.",
-            ]);
+          const outputLimit = isModelOutputLimit(error);
+          if (group.length === 1 || (!outputLimit && !isModelInputLimit(error)))
+            return [error];
+          if (outputLimit)
+            for (const job of group)
+              repairIssues.set(job.id, [
+                "The previous batch reply hit the route's output maximum and was discarded. Return a shorter judgment for each requested id.",
+              ]);
           const failures: unknown[] = [];
           for (const smaller of batches(
             group,

@@ -394,10 +394,16 @@ export function buildMessagesRequestBody(input: {
   const lead = continuesConversation ? undefined : endsOfMessages.at(-2);
   if (lead && lead.type !== "thinking" && lead.type !== "redacted_thinking")
     (lead as BetaTextBlockParam).cache_control = { type: "ephemeral" };
-  const opening = finalUserBlocks[0];
   const stableLead = input.stableLead;
   const first = built[0];
   const firstBlock = first?.role === "user" ? first.content[0] : undefined;
+  // A one-shot request may grow a tool turn. Keep its opening split at the
+  // same boundaries so reading another part can still hit that cache.
+  const opening = continuesConversation
+    ? input.oneShot
+      ? firstBlock
+      : undefined
+    : finalUserBlocks[0];
   if (
     continuesConversation &&
     stableLead &&
@@ -416,7 +422,6 @@ export function buildMessagesRequestBody(input: {
     if (end?.type === "text") end.cache_control = { type: "ephemeral" };
   }
   if (
-    !continuesConversation &&
     stableLead &&
     opening?.type === "text" &&
     opening.text.length > stableLead.length &&
@@ -426,6 +431,18 @@ export function buildMessagesRequestBody(input: {
       (message) =>
         message.role !== "system" && message.content.includes(opening),
     );
+    const rest = opening.text.slice(stableLead.length);
+    const second = input.stableLeadEnd;
+    const split =
+      second && rest.length > second.length && rest.startsWith(second)
+        ? [
+            {
+              type: "text" as const,
+              text: second,
+              cache_control: { type: "ephemeral" as const },
+            },
+          ]
+        : [];
     if (holder && holder.role !== "system")
       holder.content.splice(
         holder.content.indexOf(opening),
@@ -435,7 +452,8 @@ export function buildMessagesRequestBody(input: {
           text: stableLead,
           cache_control: { type: "ephemeral" },
         },
-        { type: "text", text: opening.text.slice(stableLead.length) },
+        ...split,
+        { type: "text", text: rest.slice(split[0]?.text.length ?? 0) },
       );
   }
   // A mid-conversation system message must follow a user turn and be last
