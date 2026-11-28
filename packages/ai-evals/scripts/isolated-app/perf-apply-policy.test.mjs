@@ -29,7 +29,7 @@ const form = {
     "- c0 [text] · Name * · required · empty",
     "- c1 [text] · Email * · required · empty",
     "- c2 [file] · Resume / CV · required · empty",
-    "- c3 [checkbox] · I certify the information is true · required · empty · a declaration: call set_checkbox",
+    "- c3 [checkbox] · I certify the information is true · required · empty",
     "",
     "Buttons:",
     "- a0: Submit",

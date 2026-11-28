@@ -81,6 +81,17 @@ test("leaves a completed review for the product submission boundary", () => {
   );
 });
 
+test("answers the replica terms checkbox from its label", () => {
+  assert.deepEqual(
+    decideReplicaAction([
+      page(
+        "Fields:\n- c1 [checkbox] · Voluntary Disclosures — I consent to the terms and conditions* · required · empty",
+      ),
+    ]),
+    { name: "set_checkbox", args: { ref: "c1", checked: true } },
+  );
+});
+
 test("finishes after the prepare-only boundary confirms the form is ready", () => {
   assert.deepEqual(
     decideReplicaAction([

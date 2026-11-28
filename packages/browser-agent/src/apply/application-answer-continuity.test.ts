@@ -47,7 +47,6 @@ const control = (label: string): ApplyFormControl => ({
   validationMessage: "",
   questionKind: "other",
   answerControlType: "text",
-  attestationKind: null,
   answered: false,
 });
 

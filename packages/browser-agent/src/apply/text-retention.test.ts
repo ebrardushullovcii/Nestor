@@ -21,7 +21,6 @@ function control(overrides: Partial<ApplyFormControl> = {}): ApplyFormControl {
     validationMessage: "",
     questionKind: "other",
     answerControlType: "text",
-    attestationKind: null,
     answered: false,
     ...overrides,
   };

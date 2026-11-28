@@ -145,8 +145,6 @@ export interface ApplyFormControl {
   /** Model reading: this asks for this application's hiring country. */
   asksHiringCountry?: boolean;
   answerControlType: ApplicationQuestionControlType;
-  /** Set when the control asks the person to declare something themselves. */
-  attestationKind: ApplicationAttestationKind | null;
   /** A displayed value whose applicant evidence has not been established. */
   answerUnverified?: boolean;
   /** True when the control already carries an answer. */
@@ -704,11 +702,7 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   /** Route context window, when supplied by the host (64k conservative fallback). */
   modelContextWindowTokens?: number;
   /** Published route output maximum; absent routes let the provider choose. */
-  /**
-   * The model classifies each page's questions (ADR 0041): which ask about
-   * pay and which are declarations. Off in scripted tests, where the keyword
-   * classification on the observation stands.
-   */
+  /** Legacy replay option. The apply model reads the page directly. */
   modelQuestionClassification?: boolean;
   /** Reuse complete, identical model question reads within this AI client. */
   questionReadCacheScope?: object;

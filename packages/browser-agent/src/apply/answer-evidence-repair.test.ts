@@ -69,7 +69,6 @@ const field = (): ApplyFormControl => ({
   validationMessage: "",
   questionKind: "other",
   answerControlType: "text",
-  attestationKind: null,
   answered: false,
 });
 

@@ -23,7 +23,6 @@ export {
 export { matchOption } from "./option-match";
 export {
   inferActionKind,
-  inferAttestationKind,
   inferQuestionKind,
   isControlAnswered,
 } from "./control-classification";

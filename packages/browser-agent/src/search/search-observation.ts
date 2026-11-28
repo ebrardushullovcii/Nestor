@@ -254,7 +254,6 @@ const ENTRY_DEFAULTS = {
     invalid: false,
     validationMessage: "",
     questionKind: "other",
-    attestationKind: null,
     answered: false,
   },
   "controls[].visibility": {

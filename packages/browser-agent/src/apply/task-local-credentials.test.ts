@@ -40,7 +40,6 @@ function observation(blocker: ApplyBlocker | null): ApplyFormObservation {
         validationMessage: "",
         questionKind: "personal_info",
         answerControlType: "text",
-        attestationKind: null,
         answered: false,
       },
       {
@@ -62,7 +61,6 @@ function observation(blocker: ApplyBlocker | null): ApplyFormObservation {
         validationMessage: "",
         questionKind: "other",
         answerControlType: "text",
-        attestationKind: null,
         answered: false,
       },
     ],
