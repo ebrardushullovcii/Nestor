@@ -450,7 +450,7 @@ export class EmbeddedBrowser {
     window.on("closed", () => {
       if (this.window !== window) return;
       this.window = null;
-      void this.close(false);
+      void this.close("window_closed");
       if (this.backstage && !this.backstage.isDestroyed())
         this.backstage.destroy();
       this.backstage = null;
@@ -515,7 +515,10 @@ export class EmbeddedBrowser {
   }
   syncActivityPaused(paused: boolean): void {
     this.activityPaused = paused;
-    if (paused) this.abortOperations();
+    if (paused)
+      this.abortOperations(
+        "Stopped because you paused Job Finder. Resume activity when you are ready.",
+      );
     this.emit();
   }
 
@@ -2080,14 +2083,9 @@ export class EmbeddedBrowser {
     this.bridge = null;
     this.connection = null;
   }
-  private abortOperations(): void {
+  private abortOperations(message: string): void {
     for (const controller of this.operations.keys())
-      controller.abort(
-        new DOMException(
-          "Stopped because you stepped into the browser or closed it. Press Try again when you are ready.",
-          "AbortError",
-        ),
-      );
+      controller.abort(new DOMException(message, "AbortError"));
     this.disconnectAutomation();
   }
 
@@ -2149,7 +2147,11 @@ export class EmbeddedBrowser {
     this.personSendContext.delete(tabId);
   }
 
-  private takeTab(tabId: string, operationIds: readonly string[]): void {
+  private takeTab(
+    tabId: string,
+    operationIds: readonly string[],
+    message = STEPPED_IN_ABORT_MESSAGE,
+  ): void {
     const stopping = [...this.operationClaims.entries()].filter(([, claim]) =>
       operationIds.includes(claim.id),
     );
@@ -2162,9 +2164,7 @@ export class EmbeddedBrowser {
     this.bridge?.releasePage(tabId);
     this.openTabForPerson(tabId);
     for (const [controller] of stopping)
-      controller.abort(
-        new DOMException(STEPPED_IN_ABORT_MESSAGE, "AbortError"),
-      );
+      controller.abort(new DOMException(message, "AbortError"));
     this.emit();
   }
 
@@ -2493,6 +2493,10 @@ export class EmbeddedBrowser {
     ) => Promise<T>,
     options: AutomationRunOptions = {},
   ): Promise<T> {
+    // An idle cleanup that started first owns the session until it finishes
+    // closing its connections. New work can connect as soon as it is done.
+    if (this.closePromise && !this.activityPaused && !this.closedByPerson)
+      await this.closePromise;
     if (this.automationRefused())
       throw new Error(
         this.closedByPerson && !this.activityPaused
@@ -2582,7 +2586,7 @@ export class EmbeddedBrowser {
 
   async command(command: DesktopBrowserCommand): Promise<DesktopBrowserState> {
     if (command.type === "close") {
-      await this.close(true);
+      await this.close("requested");
       return this.getState();
     }
     if (this.closing) return this.getState();
@@ -2625,7 +2629,7 @@ export class EmbeddedBrowser {
         this.personTabs.size === 0
       ) {
         this.layout();
-        await this.close(false);
+        await this.close("idle");
         return this.getState();
       }
     } else if (command.type === "expand")
@@ -2664,7 +2668,10 @@ export class EmbeddedBrowser {
       );
       this.takeTabByPerson(command.tabId, false, true);
       this.closePage(command.tabId);
-      if (!othersOpen) await this.close(false);
+      if (!othersOpen) {
+        this.setPresentation("minimized");
+        await this.close("idle");
+      }
     } else {
       if (this.activeTabId) this.takeTabByPerson(this.activeTabId, false);
       const page = this.activeTabId
@@ -2741,7 +2748,14 @@ export class EmbeddedBrowser {
       bannerOnTab: false,
       handoverPending: false,
     });
-    if (action.type === "take_tab") this.takeTab(tabId, action.operationIds);
+    if (action.type === "take_tab")
+      this.takeTab(
+        tabId,
+        action.operationIds,
+        claimedOnly
+          ? "Stopped because you closed the browser tab. Press Try again when you are ready."
+          : STEPPED_IN_ABORT_MESSAGE,
+      );
     else if (holdEvenIfIdle && !this.parkedTabs.has(tabId))
       this.takeTab(tabId, []);
   }
@@ -2750,7 +2764,9 @@ export class EmbeddedBrowser {
   private async stopEverythingForClose(): Promise<void> {
     if (this.handoverPromise) return this.handoverPromise;
     this.closedByPerson = true;
-    this.abortOperations();
+    this.abortOperations(
+      "Stopped because you closed the Job Finder browser. Press Try again when you are ready.",
+    );
     const handover = Promise.resolve().finally(() => {
       this.handoverPromise = null;
       this.emit();
@@ -2830,20 +2846,26 @@ export class EmbeddedBrowser {
       this.emit();
       return;
     }
-    await this.close(false);
+    await this.close("idle");
   }
 
-  async close(pauseActivity: boolean): Promise<void> {
+  async close(reason: "idle" | "requested" | "window_closed"): Promise<void> {
     if (this.closePromise) {
       const pending = this.closePromise;
-      if (pauseActivity) await this.stopEverythingForClose();
+      if (reason === "requested") await this.stopEverythingForClose();
       return pending;
     }
+    // A run can already be connecting before it has opened or claimed a tab.
+    // Closing the last tab in that gap only hides the panel.
+    if (reason === "idle" && this.operations.size > 0) return;
     this.closing = true;
     this.applicationTabsClosed?.(null);
     this.releasePending = false;
-    if (pauseActivity && this.operations.size > 0) this.closedByPerson = true;
-    this.abortOperations();
+    const handover =
+      reason === "requested" ? this.stopEverythingForClose() : null;
+    if (reason === "window_closed")
+      this.abortOperations("Stopped because the Nestor window closed.");
+    else if (reason === "idle") this.disconnectAutomation();
     this.setPresentation("minimized");
     this.layout();
     this.emit();
@@ -2875,7 +2897,7 @@ export class EmbeddedBrowser {
       this.emit();
     });
     this.closePromise = closing;
-    if (pauseActivity) await this.stopEverythingForClose();
+    if (handover) await handover;
     return closing;
   }
 }

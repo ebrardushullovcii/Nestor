@@ -60,6 +60,14 @@ vi.mock("electron", () => {
   };
 });
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function makeBrowser() {
   const browser = new EmbeddedBrowser();
   const state = browser as unknown as {
@@ -84,6 +92,11 @@ function makeBrowser() {
     closeReleasedOwnedTabs(): void;
     originalUserAgent: string | null;
     passwordManager: unknown;
+    browserSession: {
+      cookies: { flushStore(): Promise<void> };
+      clearStorageData(): Promise<void>;
+      closeAllConnections(): Promise<void>;
+    } | null;
     operations: Map<AbortController, string>;
     operationClaims: Map<
       AbortController,
@@ -375,7 +388,7 @@ describe("embedded browser tab state", () => {
     expect(pages.get("person")!.close).toHaveBeenCalled();
     // The destroyed event has not run: the page is still in the map.
     expect(state.pageMap.has("person")).toBe(true);
-    expect(close).toHaveBeenCalledWith(false);
+    expect(close).toHaveBeenCalledWith("idle");
   });
 
   test("closing one of several tabs keeps the browser open", async () => {
@@ -386,6 +399,97 @@ describe("embedded browser tab state", () => {
     await browser.command({ type: "close_tab", tabId: "person" });
     expect(close).not.toHaveBeenCalled();
   });
+
+  test("closing the startup probe leaves a resumed application connecting", async () => {
+    const { browser, state, pages } = makeBrowser();
+    for (const id of [...state.pageMap.keys()])
+      if (id !== "person") state.pageMap.delete(id);
+    state.activeTabId = "person";
+    await browser.command({ type: "open" });
+
+    const connecting = deferred();
+    const connected = deferred();
+    const application = browser.runAutomation(
+      "Preparing application",
+      undefined,
+      async (signal) => {
+        connecting.resolve();
+        await connected.promise;
+        signal.throwIfAborted();
+      },
+    );
+    await connecting.promise;
+    const browserState = await browser.command({
+      type: "close_tab",
+      tabId: "person",
+    });
+    connected.resolve();
+
+    await expect(application).resolves.toBeUndefined();
+    expect(pages.get("person")!.close).toHaveBeenCalledOnce();
+    expect(browserState.presentation).toBe("minimized");
+    expect(browserState.tabs).toEqual([]);
+    expect(browserState.automationPaused).toBe(false);
+  });
+
+  test("an application starting during idle cleanup waits to connect", async () => {
+    const { browser, state } = makeBrowser();
+    const flushed = deferred();
+    state.browserSession = {
+      cookies: { flushStore: () => flushed.promise },
+      clearStorageData: () => Promise.resolve(),
+      closeAllConnections: () => Promise.resolve(),
+    };
+    const closing = browser.close("idle");
+    const work = vi.fn((signal: AbortSignal) => {
+      signal.throwIfAborted();
+      return Promise.resolve();
+    });
+    const application = browser.runAutomation(
+      "Preparing application",
+      undefined,
+      work,
+    );
+    expect(work).not.toHaveBeenCalled();
+    flushed.resolve();
+
+    await closing;
+    await expect(application).resolves.toBeUndefined();
+    expect(work).toHaveBeenCalledOnce();
+  });
+
+  test.each([
+    [
+      "browser close",
+      (browser: EmbeddedBrowser) => browser.command({ type: "close" }),
+      "Stopped because you closed the Job Finder browser. Press Try again when you are ready.",
+    ],
+    [
+      "activity pause",
+      (browser: EmbeddedBrowser) => browser.syncActivityPaused(true),
+      "Stopped because you paused Job Finder. Resume activity when you are ready.",
+    ],
+  ] as const)(
+    "%s stops connecting work and identifies the action",
+    async (_name, stop, message) => {
+      const browser = new EmbeddedBrowser();
+      const connected = deferred();
+      const application = browser.runAutomation(
+        "Preparing application",
+        undefined,
+        async (signal) => {
+          await connected.promise;
+          signal.throwIfAborted();
+        },
+      );
+      await stop(browser);
+      connected.resolve();
+      await expect(application).rejects.toMatchObject({
+        name: "AbortError",
+        message,
+      });
+    },
+  );
 
   test.each(["about:blank", "file:///private", "javascript:alert(1)"])(
     "opening outside ignores a non-web address (%s)",

@@ -360,7 +360,7 @@ test("browser reset for restore keeps the global pause without latching a person
     paused: true,
     reason: "Browser reset",
   });
-  expect(mockCloseBrowser).toHaveBeenCalledExactlyOnceWith(true);
+  expect(mockCloseBrowser).toHaveBeenCalledExactlyOnceWith("requested");
   expect(mockClearPersonPause).toHaveBeenCalledOnce();
   expect(mockClearBrowserStorage).toHaveBeenCalledOnce();
   expect(mockClearSavedPasswords).toHaveBeenCalledOnce();
@@ -473,7 +473,7 @@ describe("resetJobFinderWorkspace", () => {
       "stop",
       "files",
     ]);
-    expect(mockCloseBrowser).toHaveBeenCalledWith(true);
+    expect(mockCloseBrowser).toHaveBeenCalledWith("requested");
     expect(mockClearSavedPasswords).toHaveBeenCalledOnce();
     expect(mockClearPersonPause).toHaveBeenCalledOnce();
     expect(mockClearPersonPause.mock.invocationCallOrder[0]).toBeGreaterThan(
