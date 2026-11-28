@@ -225,7 +225,14 @@ describe("page extraction instructions", () => {
       effectiveMaxJobs: 1,
     });
     expect(detail).toContain("Read the full page body");
-    expect(detail).toContain("description, summary when confidently available");
+    expect(detail).toContain(
+      '"descriptionLineRange": {"start": 12, "end": 34}',
+    );
+    expect(detail).toContain("both inclusive");
+    expect(detail).toContain("Omit description when returning a range");
+    expect(detail).toContain("return its text in description");
+    expect(detail).toContain("summary when confidently available");
+    expect(results).not.toContain("descriptionLineRange");
     expect(detail).not.toContain("This is a card read");
   });
 
@@ -285,6 +292,62 @@ describe("page extraction instructions", () => {
       summary: null,
       keySkills: [],
       minimumQualifications: [],
+    });
+  });
+});
+
+describe("detail description line ranges", () => {
+  const detail = {
+    pageHostLabel: "jobs.example.test",
+    pageUrl: "https://jobs.example.test/jobs/1",
+    pageType: "job_detail" as const,
+    effectiveMaxJobs: 1,
+    descriptionSourceLines: [
+      "Menu\r",
+      "Design the 🧪 lab.\r",
+      "\r",
+      "Write instructions in français.\r",
+      "Footer",
+    ],
+  };
+  const read = (fields: Record<string, unknown>) =>
+    normalizeExtractedJobs({
+      ...detail,
+      payload: {
+        jobs: [{ title: "Lab Engineer", company: "Northwind", ...fields }],
+      },
+    })[0];
+
+  test("resolves inclusive one-based lines and keeps original interior line breaks", () => {
+    expect(
+      read({ descriptionLineRange: { start: 2, end: 4 } })?.description,
+    ).toBe("Design the 🧪 lab.\r\n\r\nWrite instructions in français.");
+    expect(
+      read({ descriptionLineRange: { start: 1, end: 1 } })?.description,
+    ).toBe("Menu");
+  });
+
+  test.each([
+    undefined,
+    { start: 0, end: 2 },
+    { start: 2.5, end: 3 },
+    { start: 4, end: 2 },
+    { start: 4, end: 6 },
+  ])(
+    "uses literal description if the range is absent or unusable (%j)",
+    (range) => {
+      expect(
+        read({ descriptionLineRange: range, description: "Full text." })
+          ?.description,
+      ).toBe("Full text.");
+    },
+  );
+
+  test("retains the posting identity when its description is inaccessible", () => {
+    expect(read({ description: "", needsRenderedPage: true })).toMatchObject({
+      canonicalUrl: detail.pageUrl,
+      description: "",
+      needsRenderedPage: true,
     });
   });
 });

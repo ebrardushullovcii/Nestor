@@ -43,6 +43,48 @@ function assertCapturedRequestBody(
   assert(isCapturedRequestBody(value), "capturedBody missing");
 }
 
+test("sends complete literal evidence when numbering would exceed the request budget", async () => {
+  const pageText = "Valid text.\n".repeat(800);
+  const pageUrl = "https://jobs.example.test/jobs/1";
+  const description = "The model can still supply a literal description.";
+  const client = createOpenAiCompatibleJobFinderAiClient({
+    apiKey: "scripted-model",
+    baseUrl: "http://127.0.0.1:1/v1",
+    model: "scripted-model",
+    contextWindowTokens: 10_000,
+  });
+  const fetchMock = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((_url, init) => {
+      assert(typeof init?.body === "string", "expected a JSON request body");
+      const body: unknown = JSON.parse(init.body);
+      assertCapturedRequestBody(body);
+      const content = JSON.stringify({
+        jobs: [
+          { title: "Platform Engineer", company: "Northwind", description },
+        ],
+      });
+      expect(body.messages?.map((message) => message.content)).toContain(
+        JSON.stringify({ pageUrl, pageText }),
+      );
+      return Promise.resolve(
+        Response.json({ choices: [{ message: { content } }] }),
+      );
+    });
+  try {
+    const jobs = await client.extractJobsFromPage({
+      pageUrl,
+      pageText,
+      pageType: "job_detail",
+      maxJobs: 1,
+    });
+    expect(jobs[0]?.description).toBe(description);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  } finally {
+    fetchMock.mockRestore();
+  }
+});
+
 describe("normalizeCompositeTitle", () => {
   test("preserves role words when a separate location disproves the inferred suffix", () => {
     expect(

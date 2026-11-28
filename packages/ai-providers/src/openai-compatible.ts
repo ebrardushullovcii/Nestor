@@ -66,6 +66,7 @@ import {
 } from "./model-request-transport";
 import {
   compactOpenAiCompatibleUserPayload,
+  fitsOpenAiCompatibleUserPayload,
   FullFitEvidenceBudgetError,
   type OpenAiCompatibleJsonOperation,
 } from "./openai-compatible-request-compaction";
@@ -762,20 +763,45 @@ export function createOpenAiCompatibleJobFinderAiClient(
         effectiveMaxJobs,
       });
       const timeoutMs = validatedOptions?.requestTimeoutMs;
+      const systemPrompt = prompt.shared + prompt.page;
+      const pageEvidence = {
+        pageUrl: input.pageUrl,
+        pageText: input.pageText,
+        ...(input.excludedCanonicalUrls?.length
+          ? { excludedCanonicalUrls: input.excludedCanonicalUrls }
+          : {}),
+        ...(input.selectionContext
+          ? { selectionContext: input.selectionContext }
+          : {}),
+      };
+      const lines =
+        input.pageType === "job_detail"
+          ? input.pageText.split("\n")
+          : undefined;
+      const numberedEvidence = lines && {
+        ...pageEvidence,
+        pageText: lines
+          .map((line, index) => (line.trim() ? `${index + 1}: ${line}` : line))
+          .join("\n"),
+        pageTextHasLineNumbers: true,
+      };
+      // Line numbers are an optional presentation of the same text. If their
+      // overhead would trigger request compaction, send the original evidence.
+      const useLineReferences =
+        numberedEvidence &&
+        fitsOpenAiCompatibleUserPayload({
+          operation: "extractJobsFromPage",
+          modelContextWindowTokens:
+            validatedOptions?.contextWindowTokens ??
+            DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+          systemPrompt,
+          userPayload: numberedEvidence,
+        });
 
       const payload = await fetchModelJson(
         "extractJobsFromPage",
-        prompt.shared + prompt.page,
-        {
-          pageUrl: input.pageUrl,
-          pageText: input.pageText,
-          ...(input.excludedCanonicalUrls?.length
-            ? { excludedCanonicalUrls: input.excludedCanonicalUrls }
-            : {}),
-          ...(input.selectionContext
-            ? { selectionContext: input.selectionContext }
-            : {}),
-        },
+        systemPrompt,
+        useLineReferences ? numberedEvidence : pageEvidence,
         {
           timeoutMs,
           ...(input.signal ? { signal: input.signal } : {}),
@@ -796,6 +822,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         pageUrl: input.pageUrl,
         pageType: input.pageType,
         effectiveMaxJobs,
+        descriptionSourceLines: useLineReferences ? lines : undefined,
       });
     },
     async chatWithTools(messages, tools, options?: ChatWithToolsOptions) {

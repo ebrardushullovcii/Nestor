@@ -571,6 +571,18 @@ function responseHeadroomTokensForOperation(
   }
 }
 
+export function fitsOpenAiCompatibleUserPayload(input: {
+  operation: OpenAiCompatibleJsonOperation;
+  modelContextWindowTokens: number | null;
+  systemPrompt: string;
+  userPayload: unknown;
+}): boolean {
+  return (
+    estimateSerializedLength(input.userPayload) <=
+    computeUserPayloadCharBudget(input)
+  );
+}
+
 function computeUserPayloadCharBudget(input: {
   operation: OpenAiCompatibleJsonOperation;
   modelContextWindowTokens: number | null;
