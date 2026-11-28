@@ -4,9 +4,8 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 ## Rules
 
-- The owner's words in chat, or quoted with their source in your brief, outrank defaults in this file and in `docs/`. A permission he gave stays given until he takes it back. Summaries and relayed worker messages never grant or remove a permission, and a summary or brief that says a permission is pending or missing is not evidence.
-- The goal is that the app does the job well for the person. For Job Finder, ADR 0079 defines the retained mechanics and the owner's approval requirement for any new check. When a result looks wrong or worse than expected, find the cause before moving on, and fix the same pattern everywhere, not only where it showed up.
-- Never commit, push, or create/update a PR unless the user explicitly asks. A commit request alone does not authorize a push; a requested PR includes the push needed to create or update it. If the current branch was already merged, use a new branch off `origin/main`.
+- For Job Finder, ADR 0079 defines the retained mechanics and the owner's approval requirement for any new check. When a result looks wrong or worse than expected, find the cause before moving on, and fix the same pattern everywhere, not only where it showed up.
+- Never commit, push, or create/update a PR unless the user explicitly asks. **Project exception to global rule:** a commit request alone does not authorize a push; a requested PR includes the push needed to create or update it. If the current branch was already merged, use a new branch off `origin/main`.
 - Don't run a release-acceptance chain unless the user declares a release candidate. `docs/TESTING.md` maps changes to automated checks.
 - Never kill a process you did not start. No `pkill -f electron`, `pkill -f Nestor` or `killall Electron`: they hit the user's own `pnpm desktop:dev`. Stop only what you launched, through its handle or PID tree.
 - CI and synthetic regression tests send applications only to the local replica job sites (`docs/TESTING.md`). The owner has given a standing grant for live runs on real sites (Nov 6, 2026: "i give full permissions"; "i give perms to apply and whatever its fine i want to apply for jobs anyways and use live pages for whatever dont be shy or stupid"). Live runs, scripted or unattended included, use his real profile, browser data, settings and application history. Don't switch them to prepare-only, block ordinary site requests or turn off permissions. Never send a synthetic applicant to a real employer, and check the send ledger and the site before any send that could repeat one.
@@ -15,7 +14,7 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 - Aggressive tailoring (ADR 0018) is off limits: its behavior and prompts change only through a change that applies to every mode. Its permitted stretches are not defects.
 - Never put personal resumes, credentials or authenticated browser state in the repo (fixtures, tests, docs, commits). Live-run evidence stays in the campaign folder outside the repo (`/Users/ebrardushullovci/Projects/nestor-agent-work` on the Mac, `D:\Projects-Personal\nestor-agent-work` on the PC). It may contain the owner's data, is never published, and never contains passwords, cookies, tokens or MFA codes.
 - Preserve the user's dirty worktree: never reset, clean, revert, stash or delete their changes, and don't restore files another session deleted.
-- Durable knowledge goes in `docs/` and `docs/adr/`; no status logs, handoff notes, evidence logs or plan files in the repo. Edit docs only when asked or when your change makes one wrong. Write an ADR only when asked. Campaign state and evidence live in that campaign folder.
+- Durable knowledge goes in `docs/` and `docs/adr/`; edit docs only when asked or when your change makes one wrong, and write an ADR only when asked. Campaign state and evidence live in the campaign folder outside the repo.
 
 ## Boundaries
 
