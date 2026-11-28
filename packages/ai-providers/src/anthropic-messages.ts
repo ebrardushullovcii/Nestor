@@ -333,6 +333,7 @@ export function buildMessagesRequestBody(input: {
   stableLead?: string | undefined;
   /** A later reusable text block in the opening, after the stable lead. */
   stableLeadEnd?: string | undefined;
+  stableLeadBreakpoints?: readonly string[] | undefined;
 }): Record<string, unknown> {
   let leading = 0;
   while (input.messages[leading]?.role === "system") leading += 1;
@@ -394,7 +395,7 @@ export function buildMessagesRequestBody(input: {
   const lead = continuesConversation ? undefined : endsOfMessages.at(-2);
   if (lead && lead.type !== "thinking" && lead.type !== "redacted_thinking")
     (lead as BetaTextBlockParam).cache_control = { type: "ephemeral" };
-  const stableLead = input.stableLead;
+  const stableLead = input.stableLead ?? input.stableLeadBreakpoints?.[0];
   const first = built[0];
   const firstBlock = first?.role === "user" ? first.content[0] : undefined;
   // A one-shot request may grow a tool turn. Keep its opening split at the
@@ -413,11 +414,12 @@ export function buildMessagesRequestBody(input: {
   ) {
     firstBlock.cache_control = { type: "ephemeral" };
     // This uses the remaining slot beside system, stableLead and the automatic turn breakpoint.
+    const stableEnd = input.stableLeadEnd ?? input.stableLeadBreakpoints?.[1];
     const end = first.content.find(
       (block) =>
         block !== firstBlock &&
         block.type === "text" &&
-        block.text === input.stableLeadEnd,
+        block.text === stableEnd,
     );
     if (end?.type === "text") end.cache_control = { type: "ephemeral" };
   }

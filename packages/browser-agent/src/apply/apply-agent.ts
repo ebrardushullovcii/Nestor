@@ -1155,6 +1155,12 @@ async function runApplyAgentPrivate(
       payDisclosed,
       runConfig.application.applicationRecordId,
     );
+    const completeHistoryEnd = facts.completeHistory.at(-1);
+    const stableLeadBreakpoints = [
+      facts.owner,
+      ...(completeHistoryEnd ? [completeHistoryEnd] : []),
+      ...(facts.savedAnswers ? [facts.savedAnswers] : []),
+    ];
     const answerSnapshot = () =>
       applicationSavedAnswers(runConfig.sources.reusableAnswers);
     const initialAnswers = new Map(
@@ -1205,10 +1211,8 @@ async function runApplyAgentPrivate(
             tools,
             {
               ...options,
-              stableLead: facts.owner,
-              ...(facts.historyCacheEnd
-                ? { stableLeadEnd: facts.historyCacheEnd }
-                : {}),
+              conversationKey: `apply:${runConfig.sources.profile.id}`,
+              stableLeadBreakpoints,
             },
           );
           appendOnlyHistory ||= reply.appendOnlyHistory === true;
@@ -1223,9 +1227,15 @@ async function runApplyAgentPrivate(
       messages: [
         { role: "system", content: createApplySystemPrompt(runConfig) },
         { role: "user", content: facts.owner },
-        ...facts.history.map((content) => ({ role: "user" as const, content })),
+        ...facts.completeHistory.map((content) => ({
+          role: "user" as const,
+          content,
+        })),
         ...(facts.savedAnswers
           ? [{ role: "user" as const, content: facts.savedAnswers }]
+          : []),
+        ...(facts.partialHistory
+          ? [{ role: "user" as const, content: facts.partialHistory }]
           : []),
         { role: "user", content: facts.job },
         { role: "user", content: mailbox },

@@ -2256,7 +2256,10 @@ test("the opening has the refreshed saved answers once and changes append only t
   await runApplyAgent(input, {
     chatWithTools(messages, tools, options) {
       turns.push(messages.map(({ content }) => String(content)));
-      expect(options?.stableLead).toBe(messages[1]?.content);
+      expect(options?.stableLeadBreakpoints).toEqual([
+        messages[1]?.content,
+        messages[2]?.content,
+      ]);
       return scripted.chatWithTools(messages, tools, options);
     },
   });
@@ -2272,6 +2275,47 @@ test("the opening has the refreshed saved answers once and changes append only t
   expect(
     turns[2].filter((text) => text.includes("Saved-answer changes")),
   ).toHaveLength(1);
+});
+
+test("different postings and retained attempts share a profile cache prefix", async () => {
+  const first = config(page());
+  const retry = config(page());
+  retry.application.continuation = { sourceUrls: [] };
+  const otherPosting = config(page({ title: "A different page" }));
+  otherPosting.sources.posting = {
+    ...first.sources.posting,
+    title: "Different role",
+  };
+  otherPosting.sources.reusableAnswers = [
+    CandidateReusableAnswerSchema.parse({
+      id: "general_notice",
+      label: "Notice period",
+      question: "What is your notice period?",
+      answer: "Two weeks",
+    }),
+  ];
+  const run = async (input: ApplyAgentConfig) => {
+    const scripted = model([done]);
+    await runApplyAgent(input, scripted);
+    return vi.mocked(scripted.chatWithTools).mock.calls[0];
+  };
+  const [initialMessages, , initialOptions] = await run(first);
+  const [retryMessages, , retryOptions] = await run(retry);
+  const [otherMessages, , otherOptions] = await run(otherPosting);
+  expect(initialOptions?.conversationKey).toBe("apply:candidate_test");
+  expect(retryOptions?.conversationKey).toBe(initialOptions?.conversationKey);
+  expect(otherOptions?.conversationKey).toBe(initialOptions?.conversationKey);
+  expect(retryMessages.slice(0, 2)).toEqual(initialMessages.slice(0, 2));
+  expect(otherMessages.slice(0, 2)).toEqual(initialMessages.slice(0, 2));
+  expect(JSON.stringify(retryMessages.slice(2))).toContain(
+    "The exact live form is already open",
+  );
+  expect(JSON.stringify(otherMessages.slice(2))).toContain("Different role");
+  expect(otherMessages[2]?.content).toContain("Two weeks");
+  expect(otherOptions?.stableLeadBreakpoints).toEqual([
+    otherMessages[1]?.content,
+    otherMessages[2]?.content,
+  ]);
 });
 
 test("elsewhere superseded page views still fold to receipts", async () => {

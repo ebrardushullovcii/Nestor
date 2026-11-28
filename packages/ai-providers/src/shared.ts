@@ -815,6 +815,8 @@ export interface ChatWithToolsOptions {
   stableLead?: string;
   /** An optional second cache breakpoint in the conversation opening. */
   stableLeadEnd?: string;
+  /** Reusable user blocks in opening order, from least to most likely to change. */
+  stableLeadBreakpoints?: readonly string[];
 }
 
 export interface ChatWithToolsResult {

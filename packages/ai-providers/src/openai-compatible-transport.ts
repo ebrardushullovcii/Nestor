@@ -370,8 +370,14 @@ function toResponsesContent(rawContent: unknown): unknown {
   return content;
 }
 
-function toResponsesInput(messages: readonly CompatibleMessage[]): unknown[] {
+function toResponsesInput(
+  messages: readonly CompatibleMessage[],
+  breakpoints: readonly string[],
+): unknown[] {
+  let inOpening = true;
   return messages.flatMap((message) => {
+    if (message.role === "assistant" || message.role === "tool")
+      inOpening = false;
     if (message.role === "tool") {
       return message.tool_call_id
         ? [
@@ -385,7 +391,19 @@ function toResponsesInput(messages: readonly CompatibleMessage[]): unknown[] {
     }
 
     const items: unknown[] = [];
-    const content = toResponsesContent(message.content);
+    const content =
+      inOpening &&
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      breakpoints.includes(message.content)
+        ? [
+            {
+              type: "input_text",
+              text: message.content,
+              prompt_cache_breakpoint: { mode: "explicit" },
+            },
+          ]
+        : toResponsesContent(message.content);
     if (
       (typeof content === "string" && content.length > 0) ||
       (Array.isArray(content) && content.length > 0)
@@ -404,6 +422,13 @@ function toResponsesInput(messages: readonly CompatibleMessage[]): unknown[] {
 
     return items;
   });
+}
+
+/** GPT-5.6 and later support explicit breakpoints on native Responses. */
+function supportsResponsesCacheBreakpoints(model: string): boolean {
+  const version = /^gpt-(\d+)(?:\.(\d+))?(?:-|$)/.exec(model);
+  const major = Number(version?.[1]);
+  return major > 5 || (major === 5 && Number(version?.[2]) >= 6);
 }
 
 export function buildModelRequestBody(input: {
@@ -436,6 +461,10 @@ export function buildModelRequestBody(input: {
   stableLead?: string | undefined;
   /** Messages only: a later reusable text block in the conversation opening. */
   stableLeadEnd?: string | undefined;
+  /** Reusable user blocks in opening order, from least to most likely to change. */
+  stableLeadBreakpoints?: readonly string[] | undefined;
+  /** Native OpenAI Responses only: the opaque key for a shared prompt prefix. */
+  promptCacheKey?: string | undefined;
 }): Record<string, unknown> {
   if (input.apiMode === "messages") return buildMessagesRequestBody(input);
   // Complete every tool reply before attaching its images in a user message.
@@ -494,9 +523,18 @@ export function buildModelRequestBody(input: {
     };
   }
 
+  const breakpoints =
+    input.promptCacheKey && supportsResponsesCacheBreakpoints(input.model)
+      ? (input.stableLeadBreakpoints ?? [])
+      : [];
   return {
     model: input.model,
     store: false,
+    ...(input.promptCacheKey ? { prompt_cache_key: input.promptCacheKey } : {}),
+    // Keep the implicit end-of-turn checkpoint alongside the shared opening.
+    ...(breakpoints.length
+      ? { prompt_cache_options: { mode: "implicit" } }
+      : {}),
     ...(input.temperature !== undefined
       ? { temperature: input.temperature }
       : {}),
@@ -504,7 +542,7 @@ export function buildModelRequestBody(input: {
       effort: input.reasoningEffort ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
       ...(input.reasoningSummary ? { summary: "auto" } : {}),
     },
-    input: toResponsesInput(messages),
+    input: toResponsesInput(messages, breakpoints),
     ...(input.jsonSchema
       ? {
           text: {
