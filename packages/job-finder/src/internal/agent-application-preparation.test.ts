@@ -800,6 +800,12 @@ describe("agent application preparation seam", () => {
       'Answer to "Street address": 1 Example Road',
       'Answer to "Postal code": SW1A 1AA',
     ];
+    facts.resumeArtifact = {
+      ...facts.resumeArtifact,
+      source: "tailored_export",
+      level: "aggressive",
+      textContent: "Selected resume for the retained form.",
+    };
     const seenMessages: string[] = [];
 
     const result = await runAgentApplicationPreparation({
@@ -833,6 +839,14 @@ describe("agent application preparation seam", () => {
     expect(seenMessages.join("\n")).toContain(liveWizardUrl);
     expect(seenMessages.join("\n")).toContain("1 Example Road");
     expect(seenMessages.join("\n")).toContain("SW1A 1AA");
+    const firstTurn = JSON.parse(seenMessages[0]!) as { content: string }[];
+    expect(
+      firstTurn.some(({ content }) =>
+        content.includes(
+          '"source":"tailored_export","level":"aggressive","text":"Selected resume for the retained form."',
+        ),
+      ),
+    ).toBe(true);
     expect(seenMessages.join("\n")).toContain(
       "Do not follow the site header or navigate back to its home page or job listing",
     );

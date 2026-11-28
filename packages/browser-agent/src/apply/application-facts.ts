@@ -195,6 +195,7 @@ export function applicationJobFacts(
   return {
     attachedResume: {
       label: "Selected resume being sent with this application",
+      ...sources.selectedResume,
       text: sources.resumeText,
     },
     payDisclosure: options.payDisclosed,

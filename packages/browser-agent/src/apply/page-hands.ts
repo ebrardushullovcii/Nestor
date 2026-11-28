@@ -588,6 +588,9 @@ export function createApplyPageHands(
     ...(mechanics.readMailboxSession
       ? { readMailboxSession: mechanics.readMailboxSession }
       : {}),
+    ...(mechanics.readProviderSessions
+      ? { readProviderSessions: mechanics.readProviderSessions }
+      : {}),
     observe: async () =>
       buildApplyFormObservation(
         await mechanics.readPage(),

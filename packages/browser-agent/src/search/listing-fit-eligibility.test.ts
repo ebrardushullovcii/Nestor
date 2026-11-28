@@ -336,6 +336,8 @@ test("fit gets saved eligibility facts and is told to weigh location evidence by
       {
         id: job.id,
         location: "Anywhere in the World",
+        listingUrl: job.url,
+        sourceLabel: job.sourceLabel,
         description: job.description,
       },
     ],
@@ -353,6 +355,15 @@ test("fit gets saved eligibility facts and is told to weigh location evidence by
     "say that the hiring scope is unverified and weigh that uncertainty in the score",
   );
   expect(messages[0].content).toContain("Treat unverified scope as review");
+  expect(messages[0].content).toContain(
+    "The employer's list of this role's hiring locations is an offered_list",
+  );
+  expect(messages[0].content).toContain(
+    "If every offered country excludes both where the person can work now and where they would move, set e.status to blocked and score the role in the explicit-blocker band.",
+  );
+  expect(messages[0].content).toContain(
+    "Generic language about worldwide collaboration, international customers or remote work does not expand the offered locations.",
+  );
   expect(messages[0].content).toContain(
     "A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them",
   );
@@ -531,7 +542,7 @@ test.each(["advertised window", "provider rejection"])(
       profile,
       jobs,
       // Leave room for the prompt and either listing, but not both together.
-      contextWindowTokens: limit === "advertised window" ? 7_500 : 64_000,
+      contextWindowTokens: limit === "advertised window" ? 7_800 : 64_000,
       goals: { targetRoles: [], locations: [] },
       client: {
         chatWithTools: (messages) => {
