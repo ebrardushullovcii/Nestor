@@ -23,21 +23,21 @@ const STEP_BY_TEXT_STAGE: Record<ResumeImportTextStage, ProfileSetupStep> = {
  * stage the AI was refused or that stopped is not "Ready to review": the
  * step holds only what the built-in reader found, or nothing.
  *
- * A read the AI refused outright fails before any stage is recorded. While
- * an AI account is refusing calls, that read waits on it for every section
- * the AI reads, so those steps say so too. Without a refusal the failed run
- * says nothing per section, and the steps keep what they said.
+ * A read that failed left the Import step unread, not skipped: the person
+ * chose a file. A read the AI refused outright fails before any stage is
+ * recorded; while an AI account is refusing calls, that read waits on it
+ * for every section the AI reads, so those steps say so too. Without a
+ * refusal the failed run says nothing per section, and the steps keep what
+ * they said.
  */
 export function getUnreadImportSetupSteps(
   run: ResumeImportRun | null | undefined,
   options: { aiAccountRefusing?: boolean } = {},
 ): ProfileSetupStep[] {
-  if (
-    run?.status === "failed" &&
-    run.failureKind === "ai_unavailable" &&
-    options.aiAccountRefusing
-  )
-    return ["essentials", "background"];
+  if (run?.status === "failed")
+    return run.failureKind === "ai_unavailable" && options.aiAccountRefusing
+      ? ["import", "essentials", "background"]
+      : ["import"];
   const stages = run?.timing?.textStages ?? [];
   return [
     ...new Set(

@@ -425,6 +425,8 @@ export function ProfileSetupPathCard(props: {
           const isSkippedImport =
             step.id === "import" &&
             !props.hasImportedResume &&
+            // A read that failed is not a skipped import: a file was chosen.
+            !(props.unreadImportSteps?.includes("import") ?? false) &&
             !isActive &&
             (props.profileSetupState.status === "completed" ||
               profileSetupStepDefinitions.findIndex(

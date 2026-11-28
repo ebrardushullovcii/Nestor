@@ -108,9 +108,31 @@ describe("a section the resume read never reached (W131)", () => {
     });
     expect(
       getUnreadImportSetupSteps(refused, { aiAccountRefusing: true }),
-    ).toEqual(["essentials", "background"]);
-    // With no refusal the failed run says nothing per section.
-    expect(getUnreadImportSetupSteps(refused)).toEqual([]);
+    ).toEqual(["import", "essentials", "background"]);
+    // With no refusal the failed run says nothing per section; the import
+    // itself still was not read.
+    expect(getUnreadImportSetupSteps(refused)).toEqual(["import"]);
+  });
+
+  test("a failed read never shows the Import step as Skipped", () => {
+    // Live (W133): after the refused re-read the stepper said "Import
+    // Skipped" next to "Try priya-raman.pdf again".
+    const props = {
+      ...stepperProps,
+      currentStep: "essentials" as const,
+      hasImportedResume: false,
+    };
+    const { rerender } = render(<ProfileSetupPathCard {...props} />);
+    expect(stepText(/Import/)).toContain("Skipped");
+    rerender(
+      <ProfileSetupPathCard
+        {...props}
+        unreadImportLabel="Waiting on your AI account"
+        unreadImportSteps={["import", "essentials", "background"]}
+      />,
+    );
+    expect(stepText(/Import/)).not.toContain("Skipped");
+    expect(stepText(/Import/)).toContain("Waiting on your AI account");
   });
 
   test("says what the read waits on, in the import notice's terms", () => {
