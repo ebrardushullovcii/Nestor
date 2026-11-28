@@ -76,12 +76,10 @@ describe("ATS resume rendering", () => {
       bullets: [],
     });
     for (const mode of ["preview", "export"] as const) {
-      const html = renderResumeTemplateHtml({
-        renderDocument: localized,
-        settings,
-        templateId: "classic_ats",
-        mode,
-      });
+      const html = renderResumeTemplateHtml(
+        { renderDocument: localized, settings, templateId: "classic_ats" },
+        { mode },
+      );
       expect(html).toContain(`>${dateRange}</span>`);
     }
   });
